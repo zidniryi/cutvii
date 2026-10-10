@@ -1,6 +1,8 @@
 import { create } from "zustand";
 
 export type SidePanel = "library" | "inspector";
+export type InspectorTab = "video" | "audio" | "speed" | "info";
+export type ClipKind = "video" | "audio" | "image";
 
 export interface DialogState {
   title: string;
@@ -25,6 +27,9 @@ interface UiState {
   /** "Canvas set from your first video" banner. Undo is offered while `pastLength` is still the history top. */
   canvasNotice: { message: string; pastLength: number } | null;
   setCanvasNotice: (notice: { message: string; pastLength: number } | null) => void;
+  /** Last inspector tab the user chose, per kind of clip (UI state only). */
+  inspectorTab: Partial<Record<ClipKind, InspectorTab>>;
+  setInspectorTab: (kind: ClipKind, tab: InspectorTab) => void;
   /** A save is being written (drives the status text; also stops a second save from starting). */
   saving: boolean;
   setSaving: (saving: boolean) => void;
@@ -45,6 +50,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   setCanvasDialogOpen: (canvasDialogOpen) => set({ canvasDialogOpen }),
   canvasNotice: null,
   setCanvasNotice: (canvasNotice) => set({ canvasNotice }),
+  inspectorTab: {},
+  setInspectorTab: (kind, tab) => set((s) => ({ inspectorTab: { ...s.inspectorTab, [kind]: tab } })),
   saving: false,
   setSaving: (saving) => set({ saving }),
   dialog: null,

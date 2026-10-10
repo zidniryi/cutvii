@@ -4,13 +4,15 @@ import { useUiStore } from "@/store/ui";
 import { usePlaybackStore } from "@/store/playback";
 import { useProjectStore } from "@/store/project";
 import { clipEnd, EPS, minClipDuration } from "./clips";
-import type { FitMode } from "@/project/model";
+import type { FitBackground, FitMode } from "@/project/model";
 import {
   addClip,
   addTrack,
+  applyFitBackgroundToAll,
   deleteClip,
   moveClip,
   setClipFit,
+  setClipFitBackground,
   setClipKeepPitch,
   setClipReversed,
   setClipSpeed,
@@ -89,6 +91,14 @@ export function changeKeepPitch(clipId: string, keepPitch: boolean): EditResult 
   return run(keepPitch ? "Keep pitch" : "Let pitch follow speed", (p) =>
     setClipKeepPitch(p, clipId, keepPitch),
   );
+}
+
+export function changeFitBackground(clipId: string, background: FitBackground): EditResult {
+  return run("Change background", (p) => setClipFitBackground(p, clipId, background));
+}
+
+export function applyBackgroundToAllClips(background: FitBackground): EditResult {
+  return run("Apply background to all clips", (p) => applyFitBackgroundToAll(p, background));
 }
 
 export function changeReversed(clipId: string, reversed: boolean): EditResult {

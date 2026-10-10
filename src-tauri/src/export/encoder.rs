@@ -8,6 +8,15 @@ pub enum Encoder {
     VideoToolbox,
 }
 
+pub const MP3_ENCODER: &str = "libmp3lame";
+
+/// Whether `ffmpeg -encoders` output lists an encoder by this exact name.
+pub fn has_encoder(listing: &str, name: &str) -> bool {
+    listing
+        .lines()
+        .any(|l| l.split_whitespace().nth(1) == Some(name))
+}
+
 /// Pick an encoder from `ffmpeg -encoders` output. LGPL builds have no libx264, so we fall back
 /// to what is there instead of failing blindly.
 pub fn choose_encoder(listing: &str) -> Option<Encoder> {
@@ -98,6 +107,14 @@ mod tests {
             Some(Encoder::VideoToolbox)
         );
         assert_eq!(choose_encoder(" A....D aac AAC\n"), None);
+        assert!(has_encoder(
+            " A....D libmp3lame           libmp3lame MP3\n",
+            MP3_ENCODER
+        ));
+        assert!(!has_encoder(
+            " A....D aac AAC (not libmp3lame)\n",
+            MP3_ENCODER
+        ));
         // a description that merely mentions libx264 must not count
         assert_eq!(
             choose_encoder(" V....D h264_nvenc   uses libx264 settings\n"),

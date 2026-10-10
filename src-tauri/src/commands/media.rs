@@ -7,7 +7,7 @@ use tauri_plugin_dialog::DialogExt;
 use crate::errors::{AppError, AppResult};
 use crate::media::ffmpeg::FfmpegBackend;
 use crate::media::import::{ImportedMedia, import_one};
-use crate::media::probe::supported_extensions;
+use crate::media::probe::{image_extensions, supported_extensions};
 
 #[derive(Debug, Serialize)]
 pub struct ImportFailure {
@@ -113,4 +113,45 @@ pub async fn relink_media(app: AppHandle) -> AppResult<Option<ImportedMedia>> {
     })
     .await
     .map_err(|e| AppError::InvalidInput(format!("relink task failed: {e}")))?
+}
+
+/// Pick one image with the native dialog and import it (probe, thumbnail, preview access).
+/// Used for "Choose image…" backgrounds. `None` when the user cancels.
+#[tauri::command]
+pub async fn pick_image(app: AppHandle) -> AppResult<Option<ImportedMedia>> {
+    let backend = FfmpegBackend::locate()?;
+    let thumb_dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| AppError::InvalidInput(format!("no cache directory: {e}")))?
+        .join("thumbnails");
+
+    let picked: Option<PathBuf> = {
+        let app = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let exts: Vec<&str> = image_extensions().collect();
+            app.dialog()
+                .file()
+                .add_filter("Images", &exts)
+                .blocking_pick_file()
+                .and_then(|p| p.into_path().ok())
+        })
+        .await
+        .map_err(|e| AppError::InvalidInput(format!("file picker failed: {e}")))?
+    };
+    let Some(path) = picked else { return Ok(None) };
+
+    let scope = app.asset_protocol_scope();
+    tauri::async_runtime::spawn_blocking(move || {
+        let media = import_one(&backend, &path, &thumb_dir)?;
+        if media.info.media_type != crate::media::MediaType::Image {
+            return Err(AppError::InvalidInput("that file is not an image".into()));
+        }
+        scope.allow_file(&path).map_err(|e| {
+            AppError::InvalidInput(format!("could not enable preview for this file: {e}"))
+        })?;
+        Ok(Some(media))
+    })
+    .await
+    .map_err(|e| AppError::InvalidInput(format!("image import failed: {e}")))?
 }

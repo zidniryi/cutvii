@@ -23,6 +23,23 @@ Source of truth: `src-tauri/src/export/` (`plan.rs` builds the plan and FFmpeg f
 - `muted` tracks contribute nothing; `hidden` video tracks still play their sound (as in the preview).
 - The file always has an audio stream (silent if nothing is audible).
 
+## Audio-only formats
+
+- **M4A** (AAC 192 kb/s), **MP3** (192 kb/s, `libmp3lame`) and **WAV** (16-bit PCM) export the same mix as the
+  video export, with no video stream.
+- MP3 needs an FFmpeg built with `libmp3lame` (LGPL, so allowed in an LGPL build). Without it the export stops
+  with a clear message and suggests M4A or WAV; nothing is written.
+
+## Fit background
+
+- `fitBackground` decides what shows where the picture does not cover the canvas (the bars of **fit**, and behind
+  transparent stills): **black** (default), a **colour**, or an **image** from the library scaled to cover the
+  canvas. The preview and the export use the same choice.
+- Its `blur` (0–100, default 30) is the strength of **blur-bg**: radius = amount/1000 of the canvas height; 0 means
+  no blur at all.
+- The export reads the original background image; the preview uses a cached copy at most 1280 px wide.
+- A filled or blurred _video_ is opaque, so its background is not visible and no background input is added.
+
 ## Speed
 
 - A clip plays `(sourceOut - sourceIn) / speed` seconds. Picture: `setpts=(PTS-STARTPTS)/speed`, then resampled to the

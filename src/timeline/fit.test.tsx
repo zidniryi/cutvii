@@ -1,10 +1,10 @@
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import fixtureV2 from "../../fixtures/project-v2.json";
-import fixtureV3 from "../../fixtures/project-v3.json";
+import fixtureV3 from "../../fixtures/project-v4.json";
 import App from "@/App";
 import { createProject } from "@/project/factory";
-import { SCHEMA_VERSION, type Project } from "@/project/model";
+import type { Project } from "@/project/model";
 import { parseProject } from "@/project/parse";
 import { usePlaybackStore } from "@/store/playback";
 import { useProjectStore } from "@/store/project";
@@ -91,9 +91,8 @@ describe("fitLayout: general rules", () => {
 });
 
 describe("fitMode in the project", () => {
-  it("defaults to fill, is schema version 3, and v2 files are not read directly", () => {
+  it("defaults to fill, and v2 files are not read directly", () => {
     expect(DEFAULT_FIT_MODE).toBe("fill");
-    expect(SCHEMA_VERSION).toBe(3);
     expect(parseProject(fixtureV3).ok).toBe(true);
     expect(parseProject(fixtureV2).ok).toBe(false); // upgraded by the Rust migration first (tested there)
     const old = structuredClone(fixtureV3) as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any

@@ -98,6 +98,7 @@ describe("end-to-end editing session", () => {
     expect(halves).toHaveLength(2);
     await userEvent.click(halves[1]);
     await userEvent.click(screen.getByRole("tab", { name: "Inspector" }));
+    await userEvent.click(screen.getByRole("tab", { name: "Audio" }));
     const percent = within(screen.getByRole("region", { name: "Inspector" })).getByLabelText(
       "Volume percent",
     );

@@ -22,6 +22,22 @@ export function removeAsset(project: Project, assetId: string): Project {
   return touch({
     ...project,
     assets: project.assets.filter((a) => a.id !== assetId),
-    tracks: project.tracks.map((t) => ({ ...t, clips: t.clips.filter((c) => c.assetId !== assetId) })),
+    tracks: project.tracks.map((t) => ({
+      ...t,
+      clips: t.clips
+        .filter((c) => c.assetId !== assetId)
+        // a background that used this image falls back to black instead of pointing at nothing
+        .map((c) =>
+          c.fitBackground?.kind === "image" && c.fitBackground.assetId === assetId
+            ? {
+                ...c,
+                fitBackground: {
+                  kind: "black" as const,
+                  ...(c.fitBackground.blur !== undefined ? { blur: c.fitBackground.blur } : {}),
+                },
+              }
+            : c,
+        ),
+    })),
   });
 }

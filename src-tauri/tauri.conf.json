@@ -37,7 +37,8 @@
         "enable": true,
         "scope": [
           "$APPCACHE/thumbnails/**",
-          "$APPCACHE/reverse/**"
+          "$APPCACHE/reverse/**",
+          "$APPCACHE/previews/**"
         ]
       },
       "devCsp": null

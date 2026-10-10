@@ -120,6 +120,33 @@ pub fn validate(project: &Project) -> Result<(), Vec<String>> {
             if !(0.0..=MAX_VOLUME).contains(&clip.volume) {
                 err(format!("{at}.volume: must be between 0 and {MAX_VOLUME}"));
             }
+            if let Some(bg) = &clip.fit_background {
+                if bg
+                    .blur
+                    .is_some_and(|b| !(0.0..=MAX_BLUR_AMOUNT).contains(&b))
+                {
+                    err(format!(
+                        "{at}.fitBackground.blur: must be between 0 and {MAX_BLUR_AMOUNT}"
+                    ));
+                }
+                match bg.kind {
+                    BackgroundKind::Black => {}
+                    BackgroundKind::Color => {
+                        if !bg.color.as_deref().is_some_and(is_hex_color) {
+                            err(format!("{at}.fitBackground.color: must be a #RRGGBB color"));
+                        }
+                    }
+                    BackgroundKind::Image => {
+                        match bg.asset_id.as_deref().and_then(|id| assets.get(id)) {
+                            Some(a) if a.media_type == MediaType::Image => {}
+                            Some(_) => err(format!(
+                                "{at}.fitBackground.assetId: the background must be an image"
+                            )),
+                            None => err(format!("{at}.fitBackground.assetId: unknown image asset")),
+                        }
+                    }
+                }
+            }
             if clip
                 .speed
                 .is_some_and(|v| !(MIN_SPEED..=MAX_SPEED).contains(&v))
@@ -173,7 +200,7 @@ mod tests {
     use super::*;
 
     fn fixture() -> Project {
-        serde_json::from_str(include_str!("../../../fixtures/project-v3.json"))
+        serde_json::from_str(include_str!("../../../fixtures/project-v4.json"))
             .expect("fixture parses")
     }
 
@@ -188,7 +215,7 @@ mod tests {
     #[test]
     fn unknown_fields_are_rejected() {
         let mut v: serde_json::Value =
-            serde_json::from_str(include_str!("../../../fixtures/project-v3.json")).unwrap();
+            serde_json::from_str(include_str!("../../../fixtures/project-v4.json")).unwrap();
         v["extra"] = 1.into();
         assert!(serde_json::from_value::<Project>(v).is_err());
     }
@@ -298,6 +325,43 @@ mod tests {
         p.tracks[1].clips[0].speed = Some(10.0);
         assert!(validate(&p).is_ok());
         assert_eq!(p.tracks[0].clips[0].timeline_duration(), 50.0); // 5 s of source at 0.1x
+    }
+
+    #[test]
+    fn fit_background_must_be_complete_and_point_at_an_image() {
+        let bg = |kind, color: Option<&str>, asset: Option<&str>, blur| FitBackground {
+            kind,
+            color: color.map(String::from),
+            asset_id: asset.map(String::from),
+            blur,
+        };
+        let set =
+            |b: FitBackground| first_error(move |p| p.tracks[0].clips[0].fit_background = Some(b));
+        assert!(set(bg(BackgroundKind::Color, None, None, None)).contains("fitBackground.color"));
+        assert!(set(bg(BackgroundKind::Color, Some("red"), None, None)).contains("#RRGGBB"));
+        assert!(set(bg(BackgroundKind::Image, None, None, None)).contains("unknown image asset"));
+        assert!(
+            set(bg(BackgroundKind::Image, None, Some("asset-video"), None))
+                .contains("must be an image")
+        );
+        assert!(
+            set(bg(BackgroundKind::Black, None, None, Some(150.0))).contains("fitBackground.blur")
+        );
+
+        let mut p = fixture();
+        p.tracks[0].clips[0].fit_background = Some(bg(
+            BackgroundKind::Image,
+            None,
+            Some("asset-image"),
+            Some(0.0),
+        ));
+        p.tracks[0].clips[1].fit_background = Some(bg(
+            BackgroundKind::Color,
+            Some("#1A2b3C"),
+            None,
+            Some(100.0),
+        ));
+        assert!(validate(&p).is_ok());
     }
 
     #[test]

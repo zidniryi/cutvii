@@ -2,7 +2,7 @@ import type { Project } from "@/project/model";
 
 export type Quality = "draft" | "standard" | "high";
 
-export type ExportFormat = "mp4" | "m4a" | "wav";
+export type ExportFormat = "mp4" | "m4a" | "mp3" | "wav";
 
 export interface ExportOptions {
   width: number;
@@ -15,6 +15,7 @@ export interface ExportOptions {
 export const FORMATS: { id: ExportFormat; label: string; detail: string; audioOnly: boolean }[] = [
   { id: "mp4", label: "Video", detail: "MP4 · H.264 + AAC", audioOnly: false },
   { id: "m4a", label: "Audio", detail: "M4A · AAC 192 kb/s", audioOnly: true },
+  { id: "mp3", label: "Audio (MP3)", detail: "MP3 · 192 kb/s", audioOnly: true },
   { id: "wav", label: "Audio (lossless)", detail: "WAV · 16-bit PCM", audioOnly: true },
 ];
 

@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import fixtureV3 from "../../fixtures/project-v3.json";
+import fixtureV3 from "../../fixtures/project-v4.json";
 import { Inspector } from "@/components/layout/Inspector";
 import { AppDialog } from "@/components/AppDialog";
 import type { Project } from "@/project/model";
@@ -116,8 +116,8 @@ describe("preview mapping", () => {
 });
 
 describe("project format", () => {
-  it("is schema version 3, with speed validated in project files", () => {
-    expect(SCHEMA_VERSION).toBe(3);
+  it("is schema version 4, with speed validated in project files", () => {
+    expect(SCHEMA_VERSION).toBe(4);
     expect(parseProject(fixtureV3).ok).toBe(true);
     const bad = structuredClone(fixtureV3) as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
     bad.tracks[0].clips[0].speed = 20;
@@ -132,7 +132,12 @@ describe("Speed panel", () => {
   function setup(build: () => void) {
     useProjectStore.setState({ project: makeProject(), past: [], future: [] });
     useSelectionStore.setState({ selectedClipIds: [] });
-    useUiStore.setState({ notice: null, dialog: null, sidePanel: "inspector" });
+    useUiStore.setState({
+      notice: null,
+      dialog: null,
+      sidePanel: "inspector",
+      inspectorTab: { video: "speed", audio: "speed" },
+    });
     act(build);
     return render(
       <>

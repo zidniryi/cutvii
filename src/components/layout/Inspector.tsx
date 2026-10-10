@@ -1,17 +1,27 @@
-import { useState } from "react";
-import { AlertTriangle, SlidersHorizontal } from "lucide-react";
-import { EmptyState, Panel } from "@/components/Panel";
+import { useId, useState } from "react";
+import { AlertTriangle } from "lucide-react";
+import { Panel } from "@/components/Panel";
 import { fileName } from "@/lib/media";
 import { formatTimecode } from "@/lib/timecode";
 import { cn } from "@/lib/utils";
 import { useProjectStore } from "@/store/project";
 import { useSelectionStore } from "@/store/selection";
-import { useUiStore } from "@/store/ui";
+import { useUiStore, type ClipKind, type InspectorTab } from "@/store/ui";
+import { canvasLabel, canvasOf, formatFps } from "@/project/canvas";
+import type { FitBackground, MediaAsset, Project, TimelineClip, TimelineTrack } from "@/project/model";
+import { projectDuration } from "@/timeline/clips";
+import { formatDuration } from "@/lib/timecode";
+import { Button } from "@/components/ui/button";
 import { clipDuration, clipSpeed, findClip, sourceDuration } from "@/timeline/clips";
 import { MAX_SPEED, MAX_VOLUME, MIN_SPEED } from "@/timeline/edit";
-import { DEFAULT_FIT_MODE } from "@/timeline/fit";
+import { backgroundOf, DEFAULT_FIT_MODE, showsBackground } from "@/timeline/fit";
+import { chooseBackgroundImage, relinkFlow } from "@/project/fileActions";
+import { thumbnailUrl } from "@/lib/media";
+import { ImagePlus } from "lucide-react";
 import {
+  applyBackgroundToAllClips,
   changeFit,
+  changeFitBackground,
   changeKeepPitch,
   changeReversed,
   changeSpeed,
@@ -325,53 +335,524 @@ function SpeedPanel({
   );
 }
 
+/** Tabs that have working controls for each kind of clip, in display order. The first one is the default. */
+export const TABS_FOR: Record<ClipKind, InspectorTab[]> = {
+  video: ["video", "audio", "speed", "info"],
+  audio: ["audio", "speed", "info"],
+  image: ["video", "info"], // stills have no sound and no speed
+};
+const TAB_LABEL: Record<InspectorTab, string> = {
+  video: "Video",
+  audio: "Audio",
+  speed: "Speed",
+  info: "Info",
+};
+
+function FitChips({ clip }: { clip: TimelineClip }) {
+  return (
+    <div role="radiogroup" aria-label="Fit to canvas">
+      <p className="mb-1 text-xs text-text-muted">Fit to canvas</p>
+      <div className="grid grid-cols-3 gap-1">
+        {FIT_CHIPS.map((chip) => {
+          const selected = (clip.fitMode ?? DEFAULT_FIT_MODE) === chip.id;
+          return (
+            <button
+              key={chip.id}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              title={chip.hint}
+              onClick={() => report(changeFit(clip.id, chip.id))}
+              className={cn(
+                "h-9 rounded-md border text-xs pointer-coarse:h-11",
+                selected
+                  ? "border-accent bg-accent-soft text-text"
+                  : "border-border bg-surface-2 text-text-muted hover:text-text",
+              )}
+            >
+              {chip.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const BACKGROUND_KINDS: { id: FitBackground["kind"]; label: string }[] = [
+  { id: "black", label: "Black" },
+  { id: "color", label: "Color" },
+  { id: "image", label: "Image" },
+];
+
+/** What shows behind a fitted (or transparent) picture. Every change is one undo step. */
+function BackgroundRow({
+  clip,
+  blurMode,
+  opaque,
+}: {
+  clip: TimelineClip;
+  blurMode: boolean;
+  /** The picture has no transparency (video): in Blur mode nothing behind the blurred copy can show. */
+  opaque: boolean;
+}) {
+  const images = useProjectStore((s) => s.project.assets).filter((a) => a.type === "image");
+  const missingPaths = useProjectStore((s) => s.missingPaths);
+  const current = backgroundOf(clip);
+  const [colorDraft, setColorDraft] = useState<string | null>(null);
+  const [blurDraft, setBlurDraft] = useState<number | null>(null);
+  // keep the blur amount when the kind changes; never store the default explicitly
+  const withBlur = (bg: FitBackground): FitBackground =>
+    clip.fitBackground?.blur !== undefined ? { ...bg, blur: clip.fitBackground.blur } : bg;
+  const set = (bg: FitBackground) => report(changeFitBackground(clip.id, withBlur(bg)));
+  const stored: FitBackground = clip.fitBackground ?? { kind: "black" };
+
+  function choose(kind: FitBackground["kind"]) {
+    if (kind === "black") set({ kind: "black" });
+    else if (kind === "color") set({ kind: "color", color: current.color ?? "#202020" });
+    else if (images.length > 0) set({ kind: "image", assetId: current.assetId ?? images[0].id });
+    else void chooseBackgroundImage(clip.id); // nothing in the library yet: go straight to the file picker
+  }
+  function commitColor() {
+    if (colorDraft === null) return;
+    const value = colorDraft;
+    setColorDraft(null);
+    if (/^#[0-9a-fA-F]{6}$/.test(value)) set({ kind: "color", color: value });
+  }
+  function commitBlur() {
+    if (blurDraft === null) return;
+    const value = blurDraft;
+    setBlurDraft(null);
+    report(changeFitBackground(clip.id, { ...stored, blur: value }));
+  }
+  const image = current.kind === "image" ? images.find((a) => a.id === current.assetId) : undefined;
+  const imageMissing = image ? missingPaths.includes(image.path) : false;
+  const blurShown = blurDraft ?? current.blur;
+  const showKinds = !(blurMode && opaque);
+
+  return (
+    <div className="space-y-2">
+      {showKinds && (
+        <div role="radiogroup" aria-label="Background">
+          <p className="mb-1 text-xs text-text-muted">Background</p>
+          <div className="grid grid-cols-3 gap-1">
+            {BACKGROUND_KINDS.map((k) => {
+              const selected = current.kind === k.id;
+              return (
+                <button
+                  key={k.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => choose(k.id)}
+                  className={cn(
+                    "h-9 rounded-md border text-xs pointer-coarse:h-11",
+                    selected
+                      ? "border-accent bg-accent-soft text-text"
+                      : "border-border bg-surface-2 text-text-muted hover:text-text",
+                  )}
+                >
+                  {k.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {showKinds && current.kind === "color" && (
+        <div className="flex items-center gap-2">
+          <input
+            type="color"
+            aria-label="Background colour"
+            className="h-9 w-12 cursor-pointer rounded-md border bg-surface-2 pointer-coarse:h-11"
+            value={colorDraft ?? current.color ?? "#000000"}
+            onChange={(e) => setColorDraft(e.target.value)}
+            onBlur={commitColor}
+          />
+          <input
+            aria-label="Background colour (hex)"
+            className={cn(fieldClass, "w-28 font-mono")}
+            value={colorDraft ?? current.color ?? ""}
+            onChange={(e) => setColorDraft(e.target.value)}
+            onBlur={commitColor}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitColor();
+              if (e.key === "Escape") setColorDraft(null);
+            }}
+          />
+        </div>
+      )}
+
+      {showKinds && current.kind === "image" && (
+        <div className="space-y-2">
+          {images.length > 0 && (
+            <div role="radiogroup" aria-label="Background image" className="grid grid-cols-3 gap-1.5">
+              {images.map((a) => {
+                const selected = a.id === current.assetId;
+                return (
+                  <button
+                    key={a.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    aria-label={fileName(a.path)}
+                    title={fileName(a.path)}
+                    onClick={() => set({ kind: "image", assetId: a.id })}
+                    className={cn(
+                      "flex h-14 items-center justify-center overflow-hidden rounded-md border bg-black",
+                      selected ? "border-accent ring-1 ring-accent" : "border-border hover:border-text-muted",
+                    )}
+                  >
+                    {a.thumbnailPath ? (
+                      <img
+                        src={thumbnailUrl(a.thumbnailPath)}
+                        alt=""
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <span className="truncate px-1 text-[10px] text-text-muted">{fileName(a.path)}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <Button
+            variant="secondary"
+            size="sm"
+            className="pointer-coarse:h-11"
+            onClick={() => void chooseBackgroundImage(clip.id)}
+          >
+            <ImagePlus /> Choose image…
+          </Button>
+          <p className="text-xs text-text-muted">
+            {image ? `${fileName(image.path)} · scaled` : "The image is scaled"} to cover the canvas behind
+            the clip.
+          </p>
+          {imageMissing && image && (
+            <p role="alert" className="flex flex-wrap items-center gap-2 text-xs text-danger">
+              The background image file is missing.
+              <button type="button" className="underline" onClick={() => void relinkFlow(image.id)}>
+                Relink
+              </button>
+            </p>
+          )}
+        </div>
+      )}
+
+      {blurMode && (
+        <div>
+          <label htmlFor="inspector-blur" className="mb-1 block text-xs text-text-muted">
+            Blur amount
+          </label>
+          <div className="flex items-center gap-2">
+            <input
+              id="inspector-blur"
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              value={blurShown}
+              className="min-w-0 flex-1 accent-[var(--accent)] pointer-coarse:h-11"
+              onChange={(e) => setBlurDraft(Number(e.target.value))}
+              onPointerUp={commitBlur}
+              onKeyUp={commitBlur}
+              onBlur={commitBlur}
+            />
+            <span className="w-8 text-right text-xs text-text-muted tabular-nums">{blurShown}</span>
+          </div>
+          {showKinds && (
+            <p className="mt-1 text-xs text-text-muted">
+              The colour or image above only shows through transparent parts of the picture.
+            </p>
+          )}
+        </div>
+      )}
+
+      <Button
+        variant="secondary"
+        size="sm"
+        className="pointer-coarse:h-11"
+        onClick={() => report(applyBackgroundToAllClips(stored))}
+      >
+        Apply to all clips
+      </Button>
+    </div>
+  );
+}
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <dt className="text-text-muted">{label}</dt>
+      <dd className="break-words tabular-nums">{children}</dd>
+    </div>
+  );
+}
+
+function InfoTab({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset; fps: number }) {
+  return (
+    <dl className="grid grid-cols-2 gap-3 text-xs">
+      <Row label="Source in">
+        <span className="font-mono">{formatTimecode(clip.sourceIn, fps)}</span>
+      </Row>
+      <Row label="Source out">
+        <span className="font-mono">{formatTimecode(clip.sourceOut, fps)}</span>
+      </Row>
+      {asset.width && asset.height && (
+        <Row label="Resolution">
+          {asset.width}×{asset.height}
+        </Row>
+      )}
+      {asset.fpsNum && asset.fpsDen && (
+        <Row label="Frame rate">{formatFps(asset.fpsNum / asset.fpsDen)} fps</Row>
+      )}
+      {asset.duration !== undefined && <Row label="File length">{formatDuration(asset.duration)}</Row>}
+      <div className="col-span-2">
+        <Row label="File">{asset.path}</Row>
+      </div>
+    </dl>
+  );
+}
+
+/** Tabs for one clip. The chosen tab is remembered per kind of clip. */
+function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset; fps: number }) {
+  const kind: ClipKind = asset.type;
+  const tabs = TABS_FOR[kind];
+  const remembered = useUiStore((s) => s.inspectorTab[kind]);
+  const setTab = useUiStore((s) => s.setInspectorTab);
+  const active = remembered && tabs.includes(remembered) ? remembered : tabs[0];
+  const uid = useId();
+
+  function onKeyDown(e: React.KeyboardEvent) {
+    const i = tabs.indexOf(active);
+    const next =
+      e.key === "ArrowRight"
+        ? tabs[(i + 1) % tabs.length]
+        : e.key === "ArrowLeft"
+          ? tabs[(i - 1 + tabs.length) % tabs.length]
+          : e.key === "Home"
+            ? tabs[0]
+            : e.key === "End"
+              ? tabs[tabs.length - 1]
+              : null;
+    if (!next) return;
+    e.preventDefault();
+    e.stopPropagation(); // arrows here change tab, they do not move the playhead
+    setTab(kind, next);
+    document.getElementById(`${uid}-tab-${next}`)?.focus();
+  }
+
+  return (
+    <>
+      <div
+        role="tablist"
+        aria-label="Clip properties"
+        onKeyDown={onKeyDown}
+        className="flex shrink-0 border-b px-1"
+      >
+        {tabs.map((t) => (
+          <button
+            key={t}
+            id={`${uid}-tab-${t}`}
+            role="tab"
+            type="button"
+            aria-selected={active === t}
+            aria-controls={`${uid}-panel`}
+            tabIndex={active === t ? 0 : -1}
+            onClick={() => setTab(kind, t)}
+            className={cn(
+              "h-11 flex-1 border-b-2 text-xs",
+              active === t ? "border-accent text-text" : "border-transparent text-text-muted hover:text-text",
+            )}
+          >
+            {TAB_LABEL[t]}
+          </button>
+        ))}
+      </div>
+      <div
+        id={`${uid}-panel`}
+        role="tabpanel"
+        aria-labelledby={`${uid}-tab-${active}`}
+        tabIndex={0}
+        className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3"
+      >
+        {active === "video" && <FitChips clip={clip} />}
+        {active === "video" && showsBackground(clip.fitMode ?? DEFAULT_FIT_MODE) && (
+          <BackgroundRow
+            key={`${clip.id}-bg`}
+            clip={clip}
+            blurMode={clip.fitMode === "blur-bg"}
+            opaque={asset.type === "video"}
+          />
+        )}
+        {active === "audio" && (
+          <VolumeField
+            key={`${clip.id}-vol`}
+            volume={clip.volume}
+            onCommit={(v) => report(changeVolume(clip.id, v))}
+          />
+        )}
+        {active === "speed" && (
+          <SpeedPanel
+            key={`${clip.id}-speed`}
+            clipId={clip.id}
+            speed={clipSpeed(clip)}
+            keepPitch={clip.keepPitch ?? true}
+            source={sourceDuration(clip)}
+            reversed={clip.reversed ?? false}
+            reverseId={reverseKey(asset.path, clip.sourceIn, clip.sourceOut)}
+            isVideo={asset.type === "video"}
+          />
+        )}
+        {active === "info" && <InfoTab clip={clip} asset={asset} fps={fps} />}
+      </div>
+    </>
+  );
+}
+
+/** Nothing selected: the project itself. */
+function ProjectSummary({ project }: { project: Project }) {
+  const openCanvas = useUiStore((s) => s.setCanvasDialogOpen);
+  const clips = project.tracks.reduce((n, t) => n + t.clips.length, 0);
+  return (
+    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3">
+      <div>
+        <p className="truncate text-sm font-medium">{project.name}</p>
+        <p className="text-xs text-text-muted">Nothing selected</p>
+      </div>
+      <dl className="grid grid-cols-2 gap-3 text-xs" aria-label="Project settings">
+        <Row label="Canvas">
+          {project.settings.canvasPending
+            ? "Original (set by the first video)"
+            : canvasLabel(canvasOf(project))}
+        </Row>
+        <Row label="Background">
+          <span className="inline-flex items-center gap-1.5">
+            <span
+              className="inline-block size-3 rounded-sm border"
+              style={{ backgroundColor: project.settings.backgroundColor }}
+            />
+            {project.settings.backgroundColor.toUpperCase()}
+          </span>
+        </Row>
+        <Row label="Length">{formatDuration(projectDuration(project))}</Row>
+        <Row label="Tracks / clips">
+          {project.tracks.length} / {clips}
+        </Row>
+        <Row label="Media files">{project.assets.length}</Row>
+      </dl>
+      <Button variant="secondary" className="pointer-coarse:h-11" onClick={() => openCanvas(true)}>
+        Change canvas…
+      </Button>
+      <p className="text-xs text-text-muted">Select a clip on the timeline to see its properties.</p>
+    </div>
+  );
+}
+
+/** One value when every clip agrees, otherwise "Mixed". */
+export function commonValue<T>(values: T[], format: (v: T) => string): string {
+  if (values.length === 0) return "—";
+  return values.every((v) => v === values[0]) ? format(values[0]) : "Mixed";
+}
+
+function MultiSummary({ items }: { items: { clip: TimelineClip; asset: MediaAsset }[] }) {
+  const clips = items.map((i) => i.clip);
+  const withSound = items.filter((i) => i.asset.type !== "image").map((i) => i.clip);
+  const withPicture = items.filter((i) => i.asset.type !== "audio").map((i) => i.clip);
+  const round = (v: number) => Math.round(v * 1000) / 1000;
+  return (
+    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3">
+      <div>
+        <p className="text-sm font-medium">{items.length} clips selected</p>
+        <p className="text-xs text-text-muted">
+          {commonValue(
+            items.map((i) => i.asset.type),
+            (t) => `All ${t}`,
+          )}
+        </p>
+      </div>
+      <dl className="grid grid-cols-2 gap-3 text-xs" aria-label="Shared properties">
+        <Row label="Start">
+          {commonValue(
+            clips.map((c) => round(c.timelineStart)),
+            (v) => `${v.toFixed(3)} s`,
+          )}
+        </Row>
+        <Row label="Duration">
+          {commonValue(
+            clips.map((c) => round(clipDuration(c))),
+            (v) => `${v.toFixed(3)} s`,
+          )}
+        </Row>
+        {withSound.length > 0 && (
+          <Row label="Volume">
+            {commonValue(
+              withSound.map((c) => Math.round(c.volume * 100)),
+              (v) => `${v} %`,
+            )}
+          </Row>
+        )}
+        {withSound.length > 0 && (
+          <Row label="Speed">
+            {commonValue(
+              withSound.map((c) => clipSpeed(c)),
+              (v) => `${v}×`,
+            )}
+          </Row>
+        )}
+        {withPicture.length > 0 && (
+          <Row label="Fit to canvas">
+            {commonValue(
+              withPicture.map((c) => c.fitMode ?? DEFAULT_FIT_MODE),
+              (m) => FIT_CHIPS.find((f) => f.id === m)!.label,
+            )}
+          </Row>
+        )}
+      </dl>
+      <p className="text-xs text-text-muted">
+        Select a single clip to edit its properties. Press Delete to remove the selection.
+      </p>
+    </div>
+  );
+}
+
 export function Inspector() {
   const active = useUiStore((s) => s.sidePanel === "inspector");
   const project = useProjectStore((s) => s.project);
   const missingPaths = useProjectStore((s) => s.missingPaths);
   const selectedIds = useSelectionStore((s) => s.selectedClipIds);
   const fps = project.settings.fps;
-
   const panelClass = cn(active ? "flex" : "hidden", "min-h-0 border-l lg:col-start-3 lg:row-start-1 lg:flex");
 
-  if (selectedIds.length === 0) {
+  const items = selectedIds.flatMap((id) => {
+    const found = findClip(project, id);
+    const asset = found && project.assets.find((a) => a.id === found.clip.assetId);
+    return found && asset ? [{ clip: found.clip, track: found.track as TimelineTrack, asset }] : [];
+  });
+
+  if (items.length === 0) {
     return (
       <Panel title="Inspector" className={panelClass}>
-        <EmptyState
-          icon={<SlidersHorizontal />}
-          title="Nothing selected"
-          hint="Select a clip on the timeline to see its properties."
-        />
+        <ProjectSummary project={project} />
       </Panel>
     );
   }
-  if (selectedIds.length > 1) {
+  if (items.length > 1) {
     return (
       <Panel title="Inspector" className={panelClass}>
-        <EmptyState
-          icon={<SlidersHorizontal />}
-          title={`${selectedIds.length} clips selected`}
-          hint="Select a single clip to edit its properties. Press Delete to remove the selection."
-        />
+        <MultiSummary items={items} />
       </Panel>
     );
   }
 
-  const found = findClip(project, selectedIds[0]);
-  const asset = found && project.assets.find((a) => a.id === found.clip.assetId);
-  if (!found || !asset) {
-    return (
-      <Panel title="Inspector" className={panelClass}>
-        <EmptyState icon={<SlidersHorizontal />} title="Nothing selected" />
-      </Panel>
-    );
-  }
-  const { clip, track } = found;
+  const { clip, track, asset } = items[0];
   const missing = missingPaths.includes(asset.path);
-
   return (
     <Panel title="Inspector" className={panelClass}>
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3">
+      {/* always visible: what is selected and where it sits */}
+      <div className="shrink-0 space-y-2 border-b p-3" data-testid="inspector-header">
         <div>
           <p className="truncate text-sm font-medium" title={asset.path}>
             {fileName(asset.path)}
@@ -386,7 +867,6 @@ export function Inspector() {
             </p>
           )}
         </div>
-
         {/* keyed by clip so a different selection never inherits half-typed text */}
         <div key={clip.id} className="grid grid-cols-2 gap-3">
           <SecondsField
@@ -400,68 +880,8 @@ export function Inspector() {
             onCommit={(v) => report(trimClipEdge(clip.id, "end", clip.timelineStart + v))}
           />
         </div>
-
-        <dl className="grid grid-cols-2 gap-3 text-xs">
-          <div>
-            <dt className="text-text-muted">Source in</dt>
-            <dd className="font-mono tabular-nums">{formatTimecode(clip.sourceIn, fps)}</dd>
-          </div>
-          <div>
-            <dt className="text-text-muted">Source out</dt>
-            <dd className="font-mono tabular-nums">{formatTimecode(clip.sourceOut, fps)}</dd>
-          </div>
-        </dl>
-
-        {asset.type !== "audio" && (
-          <div role="radiogroup" aria-label="Fit to canvas">
-            <p className="mb-1 text-xs text-text-muted">Fit to canvas</p>
-            <div className="grid grid-cols-3 gap-1">
-              {FIT_CHIPS.map((chip) => {
-                const selected = (clip.fitMode ?? DEFAULT_FIT_MODE) === chip.id;
-                return (
-                  <button
-                    key={chip.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    title={chip.hint}
-                    onClick={() => report(changeFit(clip.id, chip.id))}
-                    className={cn(
-                      "h-9 rounded-md border text-xs pointer-coarse:h-11",
-                      selected
-                        ? "border-accent bg-accent-soft text-text"
-                        : "border-border bg-surface-2 text-text-muted hover:text-text",
-                    )}
-                  >
-                    {chip.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {asset.type !== "image" && (
-          <SpeedPanel
-            key={`${clip.id}-speed`}
-            clipId={clip.id}
-            speed={clipSpeed(clip)}
-            keepPitch={clip.keepPitch ?? true}
-            source={sourceDuration(clip)}
-            reversed={clip.reversed ?? false}
-            reverseId={reverseKey(asset.path, clip.sourceIn, clip.sourceOut)}
-            isVideo={asset.type === "video"}
-          />
-        )}
-
-        {asset.type !== "image" && (
-          <VolumeField
-            key={`${clip.id}-vol`}
-            volume={clip.volume}
-            onCommit={(v) => report(changeVolume(clip.id, v))}
-          />
-        )}
       </div>
+      <ClipTabs clip={clip} asset={asset} fps={fps} />
     </Panel>
   );
 }

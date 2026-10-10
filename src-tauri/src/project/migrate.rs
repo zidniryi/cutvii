@@ -11,7 +11,7 @@ use crate::errors::{AppError, AppResult};
 
 pub type Migration = fn(Value) -> Result<Value, String>;
 
-const MIGRATIONS: &[Migration] = &[no_version_zero, v1_to_v2, v2_to_v3];
+const MIGRATIONS: &[Migration] = &[no_version_zero, v1_to_v2, v2_to_v3, v3_to_v4];
 
 fn no_version_zero(_: Value) -> Result<Value, String> {
     Err("schema version 0 never existed".into())
@@ -97,6 +97,40 @@ fn v2_to_v3(mut doc: Value) -> Result<Value, String> {
     Ok(doc)
 }
 
+/// v4 adds `fitBackground` to clips on video tracks. Until now the bars of a fitted picture used the project
+/// background colour, so that is what existing clips keep: black for a black project, the colour otherwise.
+fn v3_to_v4(mut doc: Value) -> Result<Value, String> {
+    let project_bg = doc
+        .get("settings")
+        .and_then(|s| s.get("backgroundColor"))
+        .and_then(Value::as_str)
+        .unwrap_or("#000000")
+        .to_string();
+    let background = if project_bg.eq_ignore_ascii_case("#000000") {
+        serde_json::json!({ "kind": "black" })
+    } else {
+        serde_json::json!({ "kind": "color", "color": project_bg })
+    };
+    let tracks = doc
+        .get_mut("tracks")
+        .and_then(Value::as_array_mut)
+        .ok_or("tracks missing")?;
+    for track in tracks {
+        if track.get("type").and_then(Value::as_str) != Some("video") {
+            continue;
+        }
+        let clips = track
+            .get_mut("clips")
+            .and_then(Value::as_array_mut)
+            .ok_or("clips missing")?;
+        for clip in clips {
+            let clip = clip.as_object_mut().ok_or("clip is not an object")?;
+            clip.entry("fitBackground").or_insert(background.clone());
+        }
+    }
+    Ok(doc)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,9 +158,9 @@ mod tests {
         let v1: Value =
             serde_json::from_str(include_str!("../../../fixtures/project-v1.json")).unwrap();
         let current: Value =
-            serde_json::from_str(include_str!("../../../fixtures/project-v3.json")).unwrap();
+            serde_json::from_str(include_str!("../../../fixtures/project-v4.json")).unwrap();
         let migrated = migrate_to_current(v1).unwrap();
-        assert_eq!(migrated["schemaVersion"], 3);
+        assert_eq!(migrated["schemaVersion"], 4);
         assert_eq!(migrated["tracks"][0]["clips"][0]["speed"], 1);
         assert_eq!(migrated["tracks"][0]["clips"][0]["keepPitch"], true);
         assert_eq!(migrated["tracks"][0]["clips"][0]["fitMode"], "fit");
@@ -153,9 +187,9 @@ mod tests {
     fn v2_projects_keep_their_look_when_fit_becomes_fit_mode() {
         let v2: Value =
             serde_json::from_str(include_str!("../../../fixtures/project-v2.json")).unwrap();
-        let v3: Value =
-            serde_json::from_str(include_str!("../../../fixtures/project-v3.json")).unwrap();
-        assert_eq!(migrate_to_current(v2.clone()).unwrap(), v3);
+        let current: Value =
+            serde_json::from_str(include_str!("../../../fixtures/project-v4.json")).unwrap();
+        assert_eq!(migrate_to_current(v2.clone()).unwrap(), current);
 
         // explicit choices are carried over, `blur` is renamed, and the old key is gone
         let mut doc = v2;
@@ -173,8 +207,39 @@ mod tests {
     }
 
     #[test]
+    fn v3_projects_get_a_background_that_keeps_their_bars_the_same_colour() {
+        let v3: Value =
+            serde_json::from_str(include_str!("../../../fixtures/project-v3.json")).unwrap();
+        let v4: Value =
+            serde_json::from_str(include_str!("../../../fixtures/project-v4.json")).unwrap();
+        assert_eq!(migrate_to_current(v3.clone()).unwrap(), v4);
+
+        // black project -> black; video-track clips only
+        let out = migrate_to_current(v3.clone()).unwrap();
+        assert_eq!(
+            out["tracks"][0]["clips"][0]["fitBackground"],
+            json!({"kind": "black"})
+        );
+        assert!(
+            out["tracks"][1]["clips"][0].get("fitBackground").is_none(),
+            "audio clips have no picture"
+        );
+
+        // a coloured project keeps that colour behind its clips
+        let mut coloured = v3;
+        coloured["settings"]["backgroundColor"] = json!("#204060");
+        let out = migrate_to_current(coloured).unwrap();
+        assert_eq!(
+            out["tracks"][0]["clips"][1]["fitBackground"],
+            json!({"kind": "color", "color": "#204060"})
+        );
+        let project: crate::project::Project = serde_json::from_value(out).unwrap();
+        assert!(crate::project::validate(&project).is_ok());
+    }
+
+    #[test]
     fn current_version_passes_through_untouched() {
-        let doc = json!({"schemaVersion": 3, "name": "x"});
+        let doc = json!({"schemaVersion": 4, "name": "x"});
         assert_eq!(migrate_to_current(doc.clone()).unwrap(), doc);
     }
 

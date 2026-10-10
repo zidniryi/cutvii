@@ -23,7 +23,7 @@ function place(assetId: string, start?: number) {
 beforeEach(() => {
   useProjectStore.setState({ project: makeProject(), past: [], future: [], missingPaths: [] });
   useSelectionStore.setState({ selectedClipIds: [] });
-  useUiStore.setState({ notice: null, sidePanel: "inspector" });
+  useUiStore.setState({ notice: null, sidePanel: "inspector", inspectorTab: {} });
 });
 
 describe("Inspector", () => {
@@ -40,6 +40,7 @@ describe("Inspector", () => {
 
   it("shows the selected clip's real properties", () => {
     place(IDS.vid, 2);
+    useUiStore.setState({ inspectorTab: { video: "info" } });
     render(<Inspector />);
     expect(screen.getByText("vid.mp4")).toBeInTheDocument();
     expect(screen.getByText("Video · Video 1")).toBeInTheDocument();
@@ -87,6 +88,7 @@ describe("Inspector", () => {
 
   it("volume: dragging previews, release commits one undo step; values clamp to 0-200 %", async () => {
     const a = place(IDS.vid, 0);
+    useUiStore.setState({ inspectorTab: { video: "audio" } });
     render(<Inspector />);
     const slider = screen.getByRole("slider", { name: "Volume" });
     const before = state().past.length;

@@ -157,6 +157,7 @@ describe("reverse: preview", () => {
     render(<App />);
     act(() => void addAssetToTimeline(IDS.aud)); // 20 s audio, selected
     await userEvent.click(screen.getByRole("tab", { name: "Inspector" }));
+    await userEvent.click(screen.getByRole("tab", { name: "Speed" }));
     const panel = screen.getByRole("region", { name: "Speed" });
     const before = state().past.length;
 

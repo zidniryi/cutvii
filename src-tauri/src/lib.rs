@@ -30,8 +30,10 @@ pub fn run() {
             commands::drop::import_dropped_file,
             commands::clip_tools::prepare_reverse_preview,
             commands::clip_tools::extract_freeze_frame,
+            commands::clip_tools::prepare_image_preview,
             commands::media::import_media,
             commands::media::relink_media,
+            commands::media::pick_image,
             commands::project::open_project,
             commands::project::save_project,
             commands::project::forget_project_path

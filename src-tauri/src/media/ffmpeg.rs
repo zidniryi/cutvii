@@ -10,8 +10,9 @@ use super::reverse::{ReverseProfile, SourceShape, extract_frame, reverse_range};
 use super::tools::{FFMPEG_ENV, FFPROBE_ENV, command, locate_tool};
 use super::{MediaBackend, MediaInfo, RenderRequest};
 use crate::errors::{AppError, AppResult};
+use crate::export::ExportFormat;
 use crate::export::ExportReport;
-use crate::export::encoder::choose_encoder;
+use crate::export::encoder::{MP3_ENCODER, choose_encoder, has_encoder};
 use crate::export::plan::ExportPlan;
 use crate::export::render::{self, RenderJob};
 use std::sync::atomic::AtomicBool;
@@ -117,6 +118,32 @@ impl FfmpegBackend {
             progress,
             cancel,
         )
+    }
+
+    /// A copy of an image at most `max_width` wide (JPEG), for cheap full-canvas previews. Never upscales.
+    pub fn scaled_image(&self, src: &Path, max_width: u32, out: &Path) -> AppResult<()> {
+        require_file(src)?;
+        if let Some(parent) = out.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let tmp = out.with_extension("tmp");
+        let result = command(&self.ffmpeg)
+            .args(["-y", "-v", "error", "-nostdin", "-i"])
+            .arg(src)
+            .args(["-frames:v", "1", "-vf"])
+            .arg(format!("scale='min({max_width},iw)':-2"))
+            .args(["-q:v", "3", "-f", "image2", "-c:v", "mjpeg"])
+            .arg(&tmp)
+            .output()?;
+        if !result.status.success() || !tmp.is_file() {
+            fs::remove_file(&tmp).ok();
+            return Err(AppError::InvalidInput(format!(
+                "image preview failed: {}",
+                first_line(&result.stderr)
+            )));
+        }
+        fs::rename(&tmp, out)?;
+        Ok(())
     }
 
     /// The exact frame at `time`, at the file's full resolution, as a PNG.
@@ -297,13 +324,26 @@ impl MediaBackend for FfmpegBackend {
         progress: &mut dyn FnMut(f64),
         cancel: &AtomicBool,
     ) -> AppResult<ExportReport> {
+        let listing = if request.plan.format == ExportFormat::Mp3 || !request.plan.format.is_audio()
+        {
+            command(&self.ffmpeg)
+                .args(["-hide_banner", "-v", "error", "-encoders"])
+                .output()?
+                .stdout
+        } else {
+            Vec::new()
+        };
+        if request.plan.format == ExportFormat::Mp3
+            && !has_encoder(&String::from_utf8_lossy(&listing), MP3_ENCODER)
+        {
+            return Err(AppError::ToolMissing(
+                "this FFmpeg cannot write MP3 (it was built without libmp3lame); choose M4A or WAV instead".into(),
+            ));
+        }
         let encoder = if request.plan.format.is_audio() {
             None
         } else {
-            let listing = command(&self.ffmpeg)
-                .args(["-hide_banner", "-v", "error", "-encoders"])
-                .output()?;
-            Some(choose_encoder(&String::from_utf8_lossy(&listing.stdout)).ok_or_else(|| {
+            Some(choose_encoder(&String::from_utf8_lossy(&listing)).ok_or_else(|| {
                 AppError::ToolMissing("this FFmpeg has no H.264 encoder (need libx264, libopenh264 or VideoToolbox)".into())
             })?)
         };

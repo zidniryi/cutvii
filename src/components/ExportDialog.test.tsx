@@ -187,6 +187,32 @@ describe("Export dialog", () => {
     expect(screen.getByText(/Audio · 0:10 · 3\.0 MB · aac/)).toBeInTheDocument();
   });
 
+  it("exports MP3: the format is sent and a missing MP3 encoder is reported", async () => {
+    backend({
+      export_project: () => ({
+        ...report,
+        path: "/out/Test.mp3",
+        width: 0,
+        height: 0,
+        encoder: "libmp3lame",
+      }),
+    });
+    render(<App />);
+    act(() => void addAssetToTimeline(IDS.vid));
+    const dialog = await openDialog();
+
+    await userEvent.click(within(dialog).getByRole("radio", { name: /MP3/ }));
+    expect(within(dialog).queryByRole("radiogroup", { name: "Resolution" })).not.toBeInTheDocument();
+    expect(within(dialog).getByTestId("export-summary")).toHaveTextContent("MP3 · 192 kb/s");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Export…" }));
+    expect(invokeMock).toHaveBeenCalledWith(
+      "export_project",
+      expect.objectContaining({ options: expect.objectContaining({ format: "mp3" }) }),
+    );
+    expect(await screen.findByText("Export complete and verified.")).toBeInTheDocument();
+    expect(screen.getByText(/Audio · 0:10 · 3\.0 MB · libmp3lame/)).toBeInTheDocument();
+  });
+
   it("offers WAV and returns to video settings when switching back", async () => {
     render(<App />);
     act(() => void addAssetToTimeline(IDS.vid));

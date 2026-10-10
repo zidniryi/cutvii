@@ -139,6 +139,34 @@ pub async fn extract_freeze_frame(
     .map_err(|e| AppError::InvalidInput(format!("freeze-frame task failed: {e}")))?
 }
 
+pub const IMAGE_PREVIEW_WIDTH: u32 = 1280;
+
+/// Build (or reuse) a downscaled copy of an imported image, for use as a full-canvas background in the
+/// preview. Export always reads the original.
+#[tauri::command]
+pub async fn prepare_image_preview(app: AppHandle, path: String) -> AppResult<String> {
+    let src = allowed_source(&app, &path)?;
+    let dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| AppError::InvalidInput(format!("no cache directory: {e}")))?
+        .join("previews");
+    let out = dir.join(format!(
+        "{}.jpg",
+        derived_key(&src, &format!("w{IMAGE_PREVIEW_WIDTH}"))?
+    ));
+    if out.is_file() {
+        return Ok(out.to_string_lossy().into_owned());
+    }
+    let result = out.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        FfmpegBackend::locate()?.scaled_image(&src, IMAGE_PREVIEW_WIDTH, &out)
+    })
+    .await
+    .map_err(|e| AppError::InvalidInput(format!("image preview task failed: {e}")))??;
+    Ok(result.to_string_lossy().into_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

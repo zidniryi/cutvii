@@ -40,6 +40,8 @@ pub enum ExportFormat {
     Mp4,
     /// Audio only, AAC in an MPEG-4 container.
     M4a,
+    /// Audio only, MP3 (needs an FFmpeg built with libmp3lame).
+    Mp3,
     /// Audio only, uncompressed 16-bit PCM.
     Wav,
 }
@@ -52,6 +54,7 @@ impl ExportFormat {
         match self {
             ExportFormat::Mp4 => "mp4",
             ExportFormat::M4a => "m4a",
+            ExportFormat::Mp3 => "mp3",
             ExportFormat::Wav => "wav",
         }
     }
@@ -59,6 +62,7 @@ impl ExportFormat {
         match self {
             ExportFormat::Mp4 => "MP4 video",
             ExportFormat::M4a => "M4A audio",
+            ExportFormat::Mp3 => "MP3 audio",
             ExportFormat::Wav => "WAV audio",
         }
     }
@@ -126,10 +130,14 @@ pub fn prepare_plan(
     let facts = gather_facts(project, backend);
     let plan =
         build_plan(project, options, &facts).map_err(|e| AppError::InvalidInput(e.join("; ")))?;
-    if let Some(c) = plan.clips.iter().find(|c| !allowed(&c.path)) {
+    let sources = plan
+        .clips
+        .iter()
+        .flat_map(|c| std::iter::once(&c.path).chain(c.bg_image.iter()));
+    if let Some(path) = sources.into_iter().find(|p| !allowed(p)) {
         return Err(AppError::InvalidInput(format!(
             "{} was not imported or opened in this session; import it again before exporting",
-            c.path.display()
+            path.display()
         )));
     }
     Ok(plan)

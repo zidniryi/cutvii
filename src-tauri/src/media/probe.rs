@@ -11,6 +11,10 @@ const VIDEO_EXT: &[&str] = &["mp4", "mov", "m4v", "mkv", "webm", "avi"];
 const AUDIO_EXT: &[&str] = &["mp3", "wav", "flac", "m4a", "aac", "ogg", "opus"];
 const IMAGE_EXT: &[&str] = &["png", "jpg", "jpeg", "webp", "bmp"];
 
+pub fn image_extensions() -> impl Iterator<Item = &'static str> {
+    IMAGE_EXT.iter().copied()
+}
+
 pub fn supported_extensions() -> impl Iterator<Item = &'static str> {
     VIDEO_EXT.iter().chain(AUDIO_EXT).chain(IMAGE_EXT).copied()
 }

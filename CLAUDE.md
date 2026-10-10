@@ -157,3 +157,51 @@ Files changed · Features done · Commands run · Test results · Known limits �
 ## 11. Definition of Done (MVP)
 Desktop MVP (Phases 1–7, Windows/macOS/Linux): user can launch CutVii, import local media, edit clips on multiple tracks, preview, save and reopen, and export a playable MP4. Core flow is tested. A screenshot or static mockup does not count.
 Android is done only after Phase 8 is verified on a real device or emulator.
+
+## 12. Status (updated 2026-10-11) — read this before starting work
+This file is the original spec plus sections 6j and 12. The user pasted newer spec sections (6c–6n) in chat only;
+they are **not** in this file. If a section is missing here, ask the user to paste it again rather than guessing.
+
+**Last green run (macOS):** Vitest 343 passed (39 files), Cargo 74 passed, typecheck/lint/prettier/clippy/rustfmt
+clean. Project schema is **v4** (`fixtures/project-v1..v4.json`, Rust migration chain in `project/migrate.rs`).
+
+### Done
+- Phases 0–7a: foundation, project + media import, timeline editing, preview, save/open, export, polish.
+- Phase 7b partly: app icon, packaged `.app` builds.
+- New project canvas (templates, Original, Custom, top-bar canvas menu).
+- Images on the timeline, OS drag-and-drop import, drag from library to timeline.
+- Timeline zoom (buttons, ctrl-wheel/pinch), shortcuts, cut/copy/paste/delete, context menu.
+- Clip speed (presets, custom, keep pitch), reverse (cached lossless intermediate), freeze frame.
+- Fit modes fill / fit / blur-bg, and `fitBackground` (black / colour / image, blur amount, "Choose image…",
+  "Apply to all clips"). Preview and export both apply them.
+- Preview transport bar (seek, volume, loop, preview speed); media-master clock with audio leading.
+- Inspector tabs (Video / Audio / Speed / Info).
+- Export: MP4, plus audio-only M4A / MP3 / WAV; "Show in folder"; File menu (New/Open/Save), About tagline.
+
+### Not done (queue, in the user's approved order unless they say otherwise)
+1. Timeline waveforms (6m): multi-level peaks in Rust via FFmpeg, cache by (path, size, mtime), background queue
+   (limit 2) for visible clips, canvas drawing, respects trim/speed/reverse/volume/mute, flat placeholder.
+2. Text & titles: spike 6e-1 first and **wait for approval**, then 6e-2, 6e-3. No large buffers over IPC.
+3. Crop & reframe 6f-1, 6f-2.
+4. Inspector roadmap (section 6j): transform, audio fades/detach, codec info, colour, etc.
+5. Upscale 6c-1..3: **needs the user's go-ahead first**. PyTorch CPU-only in a virtual environment outside the
+   project; check free disk space first. Never bundle models; download only after explicit consent.
+6. Auto subtitles 6g (Whisper): after text. Model download only with consent; never bundle; never download
+   models in automated tests.
+7. Audio clean-up & ducking 6i-1..3.
+8. Phase 7b leftovers: launch the packaged `.app`, check CSP and icon at runtime. Phase 8 Android.
+
+### Never verified live (tests pass, nobody has looked at it in the running app)
+- Finder drag-and-drop after the `on_window_event` fix; music stutter after the audio-leads fix (user was asked,
+  no answer yet).
+- Pinch / ctrl-wheel zoom, ⌘X/C/V, speed / reverse / freeze UI, fit modes and backgrounds on screen, transport
+  bar, inspector tabs, MP3 export from the dialog.
+- Packaged `.app` never launched. Windows and Linux never built or run.
+
+### Working notes
+- Dev FFmpeg is Homebrew's GPL build (dev only). MP3 needs `libmp3lame`; the export says so if it is missing.
+- Not a git repository. If it becomes one: no Co-Authored-By / Claude attribution in commits.
+- The user works on this machine while sessions run: never `pkill` by name (kill only CutVii PIDs), never take
+  full-screen screenshots (capture CutVii's window by id), never inject keystrokes.
+- Scripted multi-file edits break when prettier/`cargo fmt` reflowed an anchor; check the real text first.
+

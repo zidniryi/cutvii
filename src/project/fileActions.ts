@@ -1,5 +1,9 @@
 /** File menu flows: new / open / save / relink. UI-agnostic; dialogs go through `lib/dialog`. */
+import { invoke } from "@tauri-apps/api/core";
 import { confirmDialog, messageDialog } from "@/lib/dialog";
+import { commitImportedMedia } from "@/lib/importFlow";
+import type { ImportedMedia } from "@/lib/media";
+import { setClipFitBackground } from "@/timeline/edit";
 import { fileName } from "@/lib/media";
 import { forgetProjectPath, openProjectFile, pickReplacementMedia, saveProjectFile } from "@/lib/projectFile";
 import { parseProject } from "@/project/parse";
@@ -131,5 +135,39 @@ export async function relinkFlow(assetId: string): Promise<void> {
       .execute({ label: "Relink media", apply: () => ({ ok: true, project: result.project }) });
   } catch (e) {
     await messageDialog("Could not relink the media", [errorText(e)]);
+  }
+}
+
+/**
+ * "Choose image…" for a clip background: pick a file, add it to the library (or reuse it if it is already
+ * there) and use it as the background. Returns true when the background was set.
+ */
+export async function chooseBackgroundImage(clipId: string): Promise<boolean> {
+  try {
+    const media = await invoke<ImportedMedia | null>("pick_image");
+    if (!media) return false;
+    const added = commitImportedMedia(media);
+    if (added.status === "invalid") {
+      await messageDialog("Can't use that image", ["The file could not be read as an image."]);
+      return false;
+    }
+    const asset = added.status === "added" ? added.asset : added.existing;
+    const project = useProjectStore.getState().project;
+    const clip = project.tracks.flatMap((t) => t.clips).find((c) => c.id === clipId);
+    const blur = clip?.fitBackground?.blur;
+    const result = useProjectStore.getState().execute({
+      label: "Change background",
+      apply: (p) =>
+        setClipFitBackground(p, clipId, {
+          kind: "image",
+          assetId: asset.id,
+          ...(blur !== undefined ? { blur } : {}),
+        }),
+    });
+    if (!result.ok) await messageDialog("Can't use that image", [result.error.message]);
+    return result.ok;
+  } catch (e) {
+    await messageDialog("Could not open the image", [errorText(e)]);
+    return false;
   }
 }

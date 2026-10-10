@@ -14,6 +14,7 @@ Local-first and offline: no account, no analytics, your media is never modified 
 - Preview with play/pause/scrub that follows the timeline across clips.
 - Save and reopen projects (`.cutvii`, versioned JSON with migrations), missing-media detection and relink.
 - Export H.264/AAC MP4 (resolution, frame rate, quality), with progress, cancel and ffprobe verification.
+- Audio-only export: M4A, MP3 or WAV.
 
 ## Install and run (development)
 

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-/** Bump when the on-disk shape changes, and add a migration in `src-tauri/src/project/migrate.rs`. v2: clip speed. v3: fitMode. */
-export const SCHEMA_VERSION = 3;
+/** Bump when the on-disk shape changes, and add a migration in `src-tauri/src/project/migrate.rs`. v2: clip speed. v3: fitMode. v4: fitBackground. */
+export const SCHEMA_VERSION = 4;
 
 /** Tolerance (seconds) when comparing a clip's sourceOut with the asset duration. */
 const DURATION_EPSILON = 1e-3;
@@ -92,6 +92,29 @@ export const MediaAssetSchema = z
     path: ["fpsNum"],
   });
 
+/** What shows behind a picture where it does not cover the canvas, plus the blur strength of "blur-bg". */
+export const FitBackgroundSchema = z
+  .object({
+    kind: z.enum(["black", "color", "image"]),
+    color: z
+      .string()
+      .regex(/^#[0-9a-fA-F]{6}$/, "must be a #RRGGBB color")
+      .optional(),
+    /** An image asset of the project (it is scaled to cover the canvas). */
+    assetId: z.string().min(1).optional(),
+    /** Blur amount 0-100 for "blur-bg"; absent means 30 (a radius of 3 % of the canvas height). */
+    blur: z.number().min(0).max(100).optional(),
+  })
+  .strict()
+  .refine((b) => b.kind !== "color" || b.color !== undefined, {
+    message: "a colour background needs a colour",
+    path: ["color"],
+  })
+  .refine((b) => b.kind !== "image" || b.assetId !== undefined, {
+    message: "an image background needs an image",
+    path: ["assetId"],
+  });
+
 export const TimelineClipSchema = z
   .object({
     id: Id,
@@ -107,6 +130,8 @@ export const TimelineClipSchema = z
     opacity: z.number().min(0).max(1),
     /** How a video or image is scaled to the canvas; absent means "fill". Never shown at native pixel size. */
     fitMode: z.enum(["fill", "fit", "blur-bg"]).optional(),
+    /** Background behind the picture; absent means black. */
+    fitBackground: FitBackgroundSchema.optional(),
     /** Playback speed, 0.1 to 10; absent means 1. Timeline length = (sourceOut - sourceIn) / speed. */
     speed: z
       .number()
@@ -171,6 +196,12 @@ export const ProjectSchema = z
         if (clip.trackId !== track.id)
           fail([...at, "trackId"], `clip.trackId "${clip.trackId}" does not match its track`);
 
+        if (clip.fitBackground?.kind === "image") {
+          const image = assets.get(clip.fitBackground.assetId ?? "");
+          if (!image) fail([...at, "fitBackground", "assetId"], "unknown image asset");
+          else if (image.type !== "image")
+            fail([...at, "fitBackground", "assetId"], "the background must be an image");
+        }
         const asset = assets.get(clip.assetId);
         if (!asset) return fail([...at, "assetId"], `unknown asset "${clip.assetId}"`);
         if (track.type === "audio" && asset.type !== "audio") {
@@ -186,6 +217,7 @@ export const ProjectSchema = z
     });
   });
 
+export type FitBackground = z.infer<typeof FitBackgroundSchema>;
 export type FitMode = NonNullable<z.infer<typeof TimelineClipSchema>["fitMode"]>;
 export type MediaType = z.infer<typeof MediaTypeSchema>;
 export type ProjectSettings = z.infer<typeof ProjectSettingsSchema>;

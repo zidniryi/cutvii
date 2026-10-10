@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::media::MediaType;
 
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -86,10 +86,41 @@ pub struct TimelineClip {
     /// Keep the original pitch when the speed changes. Absent means true.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keep_pitch: Option<bool>,
+    /// What shows behind the picture where it does not cover the canvas. Absent means black.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fit_background: Option<FitBackground>,
     /// Play the used source range backwards. Absent means false.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reversed: Option<bool>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum BackgroundKind {
+    #[default]
+    Black,
+    Color,
+    Image,
+}
+
+/// Background behind a fitted (or transparent) picture, plus the blur strength used by `blur-bg`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FitBackground {
+    pub kind: BackgroundKind,
+    /// `#RRGGBB`, required for `color`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// An image asset of the project, required for `image`. It is scaled to cover the canvas.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_id: Option<String>,
+    /// Blur amount 0..=100 for `blur-bg` (30 = a blur radius of 3 % of the canvas height). Absent means 30.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blur: Option<f64>,
+}
+
+pub const DEFAULT_BLUR_AMOUNT: f64 = 30.0;
+pub const MAX_BLUR_AMOUNT: f64 = 100.0;
 
 pub const MIN_SPEED: f64 = 0.1;
 pub const MAX_SPEED: f64 = 10.0;

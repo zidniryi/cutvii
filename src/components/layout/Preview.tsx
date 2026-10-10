@@ -22,7 +22,16 @@ import { usePlaybackStore } from "@/store/playback";
 import { reverseKey, useReverseStore, type ReversePreview } from "@/store/reverse";
 import { useProjectStore } from "@/store/project";
 import { clipSpeed, projectDuration } from "@/timeline/clips";
-import { BLUR_FRACTION, DEFAULT_FIT_MODE, fitLayout, rectStyle, type Rect } from "@/timeline/fit";
+import {
+  backgroundColor as fitBackgroundColor,
+  backgroundOf,
+  blurFraction,
+  DEFAULT_FIT_MODE,
+  fitLayout,
+  rectStyle,
+  type Rect,
+} from "@/timeline/fit";
+import { useImagePreviewStore } from "@/store/imagePreviews";
 
 type MediaEl = HTMLVideoElement | HTMLAudioElement;
 
@@ -123,6 +132,25 @@ export function Preview() {
     .map((r) => r ?? { status: "preparing" as const, progress: 0 });
   const reverseFailed = activeReversed.filter((r): r is ReversePreview => r?.status === "failed");
 
+  // Image backgrounds use a downscaled cached copy (the thumbnail until that is ready).
+  const imagePreviews = useImagePreviewStore((s) => s.previews);
+  const backgroundImageOf = (layer: Layer): string | undefined => {
+    const bg = layer.clip.fitBackground;
+    if (bg?.kind !== "image") return undefined;
+    const image = project.assets.find((a) => a.id === bg.assetId);
+    if (!image) return undefined;
+    return imagePreviews[image.path] ?? image.thumbnailPath;
+  };
+  useEffect(() => {
+    for (const track of project.tracks) {
+      for (const clip of track.clips) {
+        const id = clip.fitBackground?.kind === "image" ? clip.fitBackground.assetId : undefined;
+        const image = id && project.assets.find((a) => a.id === id);
+        if (image) useImagePreviewStore.getState().ensure(image.path);
+      }
+    }
+  }, [project]);
+
   const { width, height, backgroundColor } = project.settings;
   const ratio = width / height;
   const activeErrors = layers
@@ -155,6 +183,7 @@ export function Preview() {
                 layer={layer}
                 reverse={reverseOf(layer)}
                 canvas={{ width, height }}
+                backgroundImage={backgroundImageOf(layer)}
                 register={(el) => {
                   if (el) elements.current.set(layer.clip.id, el);
                   else elements.current.delete(layer.clip.id);
@@ -213,11 +242,14 @@ function LayerView({
   register,
   reverse,
   canvas,
+  backgroundImage,
 }: {
   layer: Layer;
   register: (el: MediaEl | null) => void;
   reverse?: ReversePreview;
   canvas: { width: number; height: number };
+  /** File to show behind the picture when the clip's background is an image (already a preview copy). */
+  backgroundImage?: string;
 }) {
   const { asset, track, visible } = layer;
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -239,7 +271,19 @@ function LayerView({
   const mode = layer.clip.fitMode ?? DEFAULT_FIT_MODE;
   // Same geometry as the export: computed from the real picture size, never the native pixel size.
   const layout = fitLayout(asset.width ?? 0, asset.height ?? 0, canvas.width, canvas.height, mode);
-  const blur = { filter: `blur(${BLUR_FRACTION * 100}cqh)` };
+  // Behind the picture: the clip's background colour or image (same choice the export uses).
+  const background = backgroundOf(layer.clip);
+  const fraction = blurFraction(background.blur);
+  const blur = fraction > 0 ? { filter: `blur(${fraction * 100}cqh)` } : {};
+  const backdropImage = backgroundImage && (
+    <img
+      src={mediaUrl(backgroundImage)}
+      alt=""
+      aria-hidden
+      data-role="background"
+      className="absolute inset-0 h-full w-full object-cover"
+    />
+  );
 
   if (asset.type === "image") {
     // Images need no sync; only the visible one is shown.
@@ -249,8 +293,9 @@ function LayerView({
         data-testid="image-layer"
         data-fit={mode}
         className="absolute inset-0 overflow-hidden"
-        style={{ zIndex: track.order }}
+        style={{ zIndex: track.order, backgroundColor: fitBackgroundColor(background) }}
       >
+        {backdropImage}
         {layout.backdrop && (
           <img
             src={src}
@@ -278,8 +323,13 @@ function LayerView({
       data-testid="video-layer"
       data-fit={mode}
       className="pointer-events-none absolute inset-0 overflow-hidden"
-      style={{ opacity: visible ? 1 : 0, zIndex: track.order }}
+      style={{
+        opacity: visible ? 1 : 0,
+        zIndex: track.order,
+        backgroundColor: fitBackgroundColor(background),
+      }}
     >
+      {visible && backdropImage}
       {layout.backdrop && visible && <VideoBackdrop source={videoRef} rect={layout.backdrop} style={blur} />}
       <video
         ref={(el) => {

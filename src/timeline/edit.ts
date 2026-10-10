@@ -8,7 +8,7 @@
  * - Timeline length == (sourceOut - sourceIn) / speed. Speed is per clip (default 1); stills have none.
  * - add/move/split reject invalid requests; trim clamps to the nearest valid edge (drag-friendly).
  */
-import type { FitMode, Project, TimelineClip, TimelineTrack } from "@/project/model";
+import type { FitBackground, FitMode, Project, TimelineClip, TimelineTrack } from "@/project/model";
 import { clipDuration, clipEnd, clipSpeed, EPS, findClip, minClipDuration } from "./clips";
 import { DEFAULT_FIT_MODE } from "./fit";
 
@@ -488,4 +488,60 @@ export function insertFreezeFrame(
       split.project.tracks.map((t) => (t.id === track.id ? { ...t, clips } : t)),
     ),
   );
+}
+
+function checkBackground(project: Project, bg: FitBackground): EditError | null {
+  if (bg.kind === "color" && !/^#[0-9a-fA-F]{6}$/.test(bg.color ?? "")) {
+    return { code: "out-of-range", message: "Choose a colour for the background" };
+  }
+  if (bg.kind === "image" && !project.assets.some((a) => a.id === bg.assetId && a.type === "image")) {
+    return { code: "unknown-asset", message: "Choose an image from the media library for the background" };
+  }
+  if (bg.blur !== undefined && !(bg.blur >= 0 && bg.blur <= 100)) {
+    return { code: "out-of-range", message: "Blur must be between 0 and 100" };
+  }
+  return null;
+}
+
+const sameBackground = (a: FitBackground | undefined, b: FitBackground) =>
+  JSON.stringify(a ?? { kind: "black" }) === JSON.stringify(b);
+
+/** Set what shows behind one clip's picture (colour, image, blur amount). */
+export function setClipFitBackground(
+  project: Project,
+  clipId: string,
+  background: FitBackground,
+): EditResult {
+  const found = findClip(project, clipId);
+  if (!found) return fail("unknown-clip", `Unknown clip ${clipId}`);
+  const problem = checkBackground(project, background);
+  if (problem) return { ok: false, error: problem };
+  if (sameBackground(found.clip.fitBackground, background)) return ok(project);
+  return ok(
+    withTracks(
+      project,
+      project.tracks.map((t) =>
+        t.id === found.track.id
+          ? { ...t, clips: t.clips.map((c) => (c.id === clipId ? { ...c, fitBackground: background } : c)) }
+          : t,
+      ),
+    ),
+  );
+}
+
+/** Give every clip on a video track the same background (one undo step). */
+export function applyFitBackgroundToAll(project: Project, background: FitBackground): EditResult {
+  const problem = checkBackground(project, background);
+  if (problem) return { ok: false, error: problem };
+  let changed = false;
+  const tracks = project.tracks.map((t) => {
+    if (t.type !== "video") return t;
+    const clips = t.clips.map((c) => {
+      if (sameBackground(c.fitBackground, background)) return c;
+      changed = true;
+      return { ...c, fitBackground: background };
+    });
+    return { ...t, clips };
+  });
+  return ok(changed ? withTracks(project, tracks) : project);
 }

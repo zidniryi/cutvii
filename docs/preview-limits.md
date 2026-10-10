@@ -11,6 +11,14 @@ The preview is a _monitor_, not the render. Export (Phase 6) uses FFmpeg and is 
   Audio from every active clip (including video clips underneath) plays; muted tracks are silent.
 - Gaps show the project background; the clock keeps running through them.
 
+## Transport bar
+
+- The seek bar, the timeline playhead and the timecode read and write one playhead. Dragging the seek bar asks
+  for at most one seek per animation frame; the picture keeps its last frame until the new one is decoded.
+- Monitor volume, mute, loop and preview speed (0.5× / 1× / 1.5× / 2×) are preview-only UI state. They are not
+  saved in the project and never affect the export. Preview speed multiplies each clip's own speed and is still
+  limited to what the webview can play (0.25×–4×).
+
 ## Accuracy limits
 
 - **Seek precision:** `HTMLMediaElement.currentTime` lands on the decoder's nearest frame, which depends on the

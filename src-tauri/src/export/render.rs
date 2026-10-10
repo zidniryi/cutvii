@@ -76,6 +76,26 @@ pub fn build_args(plan: &ExportPlan, encoder: Option<Encoder>, tmp: &Path) -> Ve
             );
             a.extend(["-t", &duration, "-f", "wav"].map(String::from));
         }
+        (ExportFormat::Mp3, ..) => {
+            a.extend(
+                [
+                    "-map",
+                    g.audio_label,
+                    "-vn",
+                    "-c:a",
+                    "libmp3lame",
+                    "-b:a",
+                    "192k",
+                    "-ar",
+                    &rate,
+                    "-ac",
+                    "2",
+                ]
+                .map(String::from),
+            );
+            // no Xing/ID3 extras needed for correctness; keep the default header so players can seek
+            a.extend(["-t", &duration, "-f", "mp3"].map(String::from));
+        }
         // M4A (and, defensively, anything without a video encoder): AAC audio only
         _ => {
             a.extend(
@@ -311,6 +331,7 @@ fn verify(job: &RenderJob, file: &Path) -> AppResult<ExportReport> {
         warnings: plan.warnings.clone(),
         encoder: match (plan.format, job.encoder) {
             (ExportFormat::Wav, _) => "pcm_s16le".to_string(),
+            (ExportFormat::Mp3, _) => "libmp3lame".to_string(),
             (ExportFormat::M4a, _) | (_, None) => "aac".to_string(),
             (_, Some(e)) => e.name().to_string(),
         },
@@ -626,7 +647,8 @@ mod tests {
         volume: f64,
     ) -> Value {
         json!({"id": id, "assetId": asset, "trackId": track, "timelineStart": start, "sourceIn": sin,
-               "sourceOut": sout, "volume": volume, "x": 0, "y": 0, "scale": 1, "opacity": 1})
+               "sourceOut": sout, "volume": volume, "x": 0, "y": 0, "scale": 1, "opacity": 1,
+               "fitBackground": {"kind": "color", "color": "#202020"}})
     }
     fn track(
         id: &str,
@@ -640,7 +662,7 @@ mod tests {
     }
     fn project(assets: Vec<Value>, tracks: Vec<Value>) -> Project {
         serde_json::from_value(json!({
-            "id": "p", "name": "t", "schemaVersion": 3,
+            "id": "p", "name": "t", "schemaVersion": 4,
             "createdAt": "2026-01-01T00:00:00.000Z", "modifiedAt": "2026-01-01T00:00:00.000Z",
             "settings": {"width": 640, "height": 360, "fps": 30, "backgroundColor": "#202020"},
             "assets": assets, "tracks": tracks
@@ -1090,6 +1112,7 @@ mod tests {
 
         for (format, name, encoder) in [
             (ExportFormat::M4a, "mix.m4a", "aac"),
+            (ExportFormat::Mp3, "mix.mp3", "libmp3lame"),
             (ExportFormat::Wav, "mix.wav", "pcm_s16le"),
         ] {
             let out = e.dir.join(name);
@@ -1161,6 +1184,7 @@ mod tests {
             clips: vec![],
             warnings: vec![],
         };
+        let plan_mp3 = plan.clone();
         let wav = build_args(&plan, None, Path::new("/o/.x.cutvii-part.wav")).join(" ");
         assert!(wav.contains("-map [aout] -vn -c:a pcm_s16le") && wav.contains("-f wav"));
         assert!(!wav.contains("[vout]") && !wav.contains("libx264"), "{wav}");
@@ -1177,6 +1201,24 @@ mod tests {
             m4a.contains("-c:a aac -b:a 192k")
                 && m4a.contains("-f ipod")
                 && !m4a.contains("[vout]")
+        );
+        let mp3 = build_args(
+            &ExportPlan {
+                format: ExportFormat::Mp3,
+                ..plan_mp3
+            },
+            None,
+            Path::new("/o/x.mp3"),
+        )
+        .join(" ");
+        assert!(
+            mp3.contains("-map [aout] -vn -c:a libmp3lame -b:a 192k") && mp3.contains("-f mp3"),
+            "{mp3}"
+        );
+        assert!(!mp3.contains("[vout]") && !mp3.contains("ipod"));
+        assert_eq!(
+            temp_path(Path::new("/o/song.mp3"), ExportFormat::Mp3),
+            PathBuf::from("/o/.song.cutvii-part.mp3")
         );
         assert_eq!(
             temp_path(Path::new("/o/song.m4a"), ExportFormat::M4a),
@@ -1671,6 +1713,124 @@ mod tests {
             is_red(left_edge),
             "9:16 into 16:9 with fill: no side bars: {left_edge:?}"
         );
+    }
+
+    #[test]
+    fn fit_background_renders_black_colour_or_an_image_behind_the_picture() {
+        let Some(e) = env("fitbg") else { return };
+        let red = e.red(); // 16:9 video
+        let blue_png = e.make(
+            "blue.png",
+            &[
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=blue:s=300x300",
+                "-frames:v",
+                "1",
+            ],
+        );
+        let portrait = ExportOptions {
+            width: 360,
+            height: 640,
+            fps: 30.0,
+            quality: Quality::Draft,
+            format: ExportFormat::Mp4,
+        };
+        let render = |name: &str, background: Value| {
+            let mut c = clip("c", "red", "v1", 0.0, 0.0, 2.0, 1.0);
+            c["fitMode"] = json!("fit");
+            match background {
+                Value::Null => {
+                    c.as_object_mut().unwrap().remove("fitBackground");
+                }
+                other => c["fitBackground"] = other,
+            }
+            let p = project(
+                vec![
+                    asset("red", &red, "video", Some(4.0)),
+                    asset("bg", &blue_png, "image", None),
+                ],
+                vec![track("v1", "video", 0, false, false, vec![c])],
+            );
+            let out = e.dir.join(name);
+            e.export(&p, &portrait, &out)
+                .0
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            out
+        };
+        let bar = "200:80:80:40"; // above the fitted 16:9 picture
+        let picture = "200:80:80:280";
+
+        let black = render("black.mp4", Value::Null); // default
+        assert!(
+            near(e.region(&black, 1.0, bar), (0, 0, 0), 12),
+            "default bars are black: {:?}",
+            e.region(&black, 1.0, bar)
+        );
+        assert!(is_red(e.region(&black, 1.0, picture)));
+
+        let green = render("colour.mp4", json!({"kind": "color", "color": "#00AA00"}));
+        let c = e.region(&green, 1.0, bar);
+        assert!(
+            c.1 > 120 && c.0 < 60 && c.2 < 60,
+            "chosen colour in the bars: {c:?}"
+        );
+
+        let image = render("image.mp4", json!({"kind": "image", "assetId": "bg"}));
+        assert!(
+            is_blue(e.region(&image, 1.0, bar)),
+            "the image covers the canvas behind the clip: {:?}",
+            e.region(&image, 1.0, bar)
+        );
+        assert!(
+            is_blue(e.region(&image, 1.0, "200:80:80:520")),
+            "below the picture too"
+        );
+        assert!(
+            is_red(e.region(&image, 1.0, picture)),
+            "the clip itself is still on top"
+        );
+        assert!(e.decodes_cleanly(&image));
+
+        // the cached preview copy is downscaled, never upscaled, and keeps the picture
+        let big = e.make(
+            "big.png",
+            &[
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=blue:s=2600x1300",
+                "-frames:v",
+                "1",
+            ],
+        );
+        let small = e.dir.join("preview.jpg");
+        e.backend
+            .scaled_image(Path::new(&big), 1280, &small)
+            .unwrap();
+        let info = e.backend.probe(&small).unwrap();
+        assert_eq!((info.width, info.height), (Some(1280), Some(640)));
+        // (checked through a PNG copy: the frame helper seeks, which a single JPEG does not support)
+        let as_png = e.dir.join("preview-check.png");
+        assert!(
+            command(&e.ffmpeg)
+                .args(["-y", "-v", "error", "-i"])
+                .arg(&small)
+                .arg(&as_png)
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(
+            is_blue(e.region(&as_png, 0.0, "200:200:100:100")),
+            "the preview copy keeps the picture"
+        );
+        let tiny = e.dir.join("tiny.jpg");
+        e.backend
+            .scaled_image(Path::new(&blue_png), 1280, &tiny)
+            .unwrap();
+        assert_eq!(e.backend.probe(&tiny).unwrap().width, Some(300));
     }
 
     #[test]

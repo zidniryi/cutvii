@@ -2,7 +2,7 @@
  * How a picture is scaled to the canvas. One set of rules, used by the preview and mirrored by the export
  * filter graph (`src-tauri/src/export/plan.rs`): the picture is never shown at its native pixel size.
  */
-import type { FitMode } from "@/project/model";
+import type { FitBackground, FitMode, TimelineClip } from "@/project/model";
 
 export const DEFAULT_FIT_MODE: FitMode = "fill";
 /** Blur strength for "blur-bg", as a fraction of the canvas height (export uses the same 3 %). */
@@ -57,3 +57,22 @@ export const rectStyle = (r: Rect) => ({
   width: `${r.width * 100}%`,
   height: `${r.height * 100}%`,
 });
+
+export const DEFAULT_BLUR_AMOUNT = 30;
+export const DEFAULT_FIT_BACKGROUND: FitBackground = { kind: "black" };
+
+/** The clip's background with defaults filled in. */
+export function backgroundOf(clip: Pick<TimelineClip, "fitBackground">): FitBackground & { blur: number } {
+  const bg = clip.fitBackground ?? DEFAULT_FIT_BACKGROUND;
+  return { ...bg, blur: bg.blur ?? DEFAULT_BLUR_AMOUNT };
+}
+
+/** The colour to paint behind the picture ("image" falls back to black until the image is drawn over it). */
+export const backgroundColor = (bg: FitBackground) =>
+  bg.kind === "color" && bg.color ? bg.color : "#000000";
+
+/** Blur radius as a fraction of the canvas height: amount 30 -> 3 % (the export uses the same number). */
+export const blurFraction = (amount: number) => Math.min(100, Math.max(0, amount)) / 1000;
+
+/** The background choice matters when the picture can leave canvas uncovered. */
+export const showsBackground = (mode: FitMode) => mode !== "fill";

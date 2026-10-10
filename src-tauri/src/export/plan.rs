@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use super::{ExportFormat, ExportOptions, Quality};
 use crate::media::MediaType;
-use crate::project::{FitMode, Project, TrackType, validate};
+use crate::project::{BackgroundKind, DEFAULT_BLUR_AMOUNT, FitMode, Project, TrackType, validate};
 
 /// What we need to know about a source file that the project itself does not record.
 #[derive(Debug, Clone, Copy)]
@@ -33,6 +33,12 @@ pub struct PlannedClip {
     pub volume: f64,
     /// How the picture is scaled to the canvas (video and stills).
     pub fit: FitMode,
+    /// Colour behind the picture where it does not cover the canvas (`#RRGGBB`).
+    pub bg_color: String,
+    /// Image behind the picture instead of the colour, scaled to cover the canvas.
+    pub bg_image: Option<PathBuf>,
+    /// Blur amount 0..=100 for `blur-bg` (30 = a radius of 3 % of the canvas height).
+    pub blur_amount: f64,
     /// Contributes picture (on a visible video track, not an audio asset).
     pub video: bool,
     /// Contributes sound (track not muted, asset has audio).
@@ -151,6 +157,31 @@ pub fn build_plan(
                 errors.push(format!("media file is missing: {}", asset.path));
                 continue;
             }
+            // what shows behind a fitted or transparent picture
+            let black = || "#000000".to_string();
+            let (bg_color, bg_image) = match c.fit_background.as_ref() {
+                Some(b) if b.kind == BackgroundKind::Color => {
+                    (b.color.clone().unwrap_or_else(black), None)
+                }
+                Some(b) if b.kind == BackgroundKind::Image && video => {
+                    match b
+                        .asset_id
+                        .as_deref()
+                        .and_then(|id| assets.get(id))
+                        .map(|a| a.path.clone())
+                    {
+                        Some(path) if facts.get(&path).is_some_and(|f| f.exists) => {
+                            (black(), Some(PathBuf::from(path)))
+                        }
+                        Some(path) => {
+                            errors.push(format!("background image is missing: {path}"));
+                            (black(), None)
+                        }
+                        None => (black(), None),
+                    }
+                }
+                _ => (black(), None),
+            };
             clips.push(PlannedClip {
                 path: PathBuf::from(&asset.path),
                 media_type: asset.media_type,
@@ -163,6 +194,13 @@ pub fn build_plan(
                 start: c.timeline_start,
                 volume: c.volume,
                 fit: c.fit_mode.unwrap_or_default(),
+                bg_color,
+                bg_image,
+                blur_amount: c
+                    .fit_background
+                    .as_ref()
+                    .and_then(|b| b.blur)
+                    .unwrap_or(DEFAULT_BLUR_AMOUNT),
                 video,
                 audio,
             });
@@ -276,6 +314,32 @@ pub fn build_filter_graph(plan: &ExportPlan) -> FilterGraph {
         }
     }
 
+    // Background images are extra looped inputs after the per-clip ones. Only clips whose picture can leave
+    // part of the canvas uncovered need one (fitted video, and every still).
+    let mut bg_inputs: Vec<Option<usize>> = vec![None; plan.clips.len()];
+    if !plan.format.is_audio() {
+        let mut next = plan.clips.len();
+        for (i, clip) in plan.clips.iter().enumerate().filter(|(_, c)| c.video) {
+            let needs_base = clip.media_type == MediaType::Image || clip.fit == FitMode::Fit;
+            if let (true, Some(image)) = (needs_base, &clip.bg_image) {
+                input_args.extend(
+                    ["-loop", "1", "-framerate"]
+                        .map(String::from)
+                        .into_iter()
+                        .chain([
+                            fps.clone(),
+                            "-t".into(),
+                            secs(clip.duration),
+                            "-i".into(),
+                            image.to_string_lossy().into_owned(),
+                        ]),
+                );
+                bg_inputs[i] = Some(next);
+                next += 1;
+            }
+        }
+    }
+
     if !plan.format.is_audio() {
         // ---- video: opaque background, then each visible clip over it in track order
         parts.push(format!(
@@ -285,68 +349,67 @@ pub fn build_filter_graph(plan: &ExportPlan) -> FilterGraph {
         let mut current = 0usize;
         for (i, clip) in plan.clips.iter().enumerate().filter(|(_, c)| c.video) {
             let shift = format!("setpts=PTS-STARTPTS+{}/TB", secs(clip.start));
-            if clip.media_type == MediaType::Image {
-                // Every still is flattened onto an opaque background canvas so transparency matches the preview.
-                let dur = secs(clip.duration);
-                match clip.fit {
-                    FitMode::Fit => parts.push(format!(
-                        "[{i}:v]format=rgba,scale={w}:{h}:force_original_aspect_ratio=decrease[s{i}]"
-                    )),
-                    FitMode::Fill => parts.push(format!(
-                        "[{i}:v]format=rgba,scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}[s{i}]"
-                    )),
-                    FitMode::BlurBg => {
-                        // sigma is 3% of the canvas height, mirrored by the preview's CSS blur
-                        let sigma = (h as f64 * 0.03).max(2.0);
-                        parts.push(format!("[{i}:v]format=rgba,split=2[a{i}][b{i}]"));
-                        parts.push(format!(
-                            "[a{i}]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},gblur=sigma={sigma:.1}[bl{i}]"
-                        ));
-                        parts.push(format!("[b{i}]scale={w}:{h}:force_original_aspect_ratio=decrease[s{i}]"));
-                    }
-                }
-                parts.push(format!("color=c={bg}:s={w}x{h}:r={fps}:d={dur}[g{i}]"));
-                let base = if clip.fit == FitMode::BlurBg {
-                    parts.push(format!(
-                        "[g{i}][bl{i}]overlay=x=0:y=0:format=auto:shortest=1[m{i}]"
-                    ));
-                    format!("m{i}")
-                } else {
-                    format!("g{i}")
-                };
-                parts.push(format!(
-                    "[{base}][s{i}]overlay=x=(W-w)/2:y=(H-h)/2:format=auto:shortest=1,format=yuv420p,setsar=1,{shift}[c{i}]"
-                ));
+            let still = clip.media_type == MediaType::Image;
+            let clip_bg = color(&clip.bg_color);
+            // blur radius: amount/1000 of the canvas height (30 -> 3 %), mirrored by the preview's CSS blur
+            let sigma = h as f64 * clip.blur_amount / 1000.0;
+            let blur = if sigma >= 0.5 {
+                format!(",gblur=sigma={sigma:.1}")
             } else {
+                String::new()
+            };
+            // stills carry transparency and are flattened onto the base; video is opaque
+            let source = if still {
+                format!("[{i}:v]format=rgba")
+            } else if (clip.speed - 1.0).abs() > 1e-9 {
                 // speed: retime first, then resample to the output rate (frames are dropped or repeated)
-                let retime = if (clip.speed - 1.0).abs() > 1e-9 {
-                    format!("setpts=(PTS-STARTPTS)/{:.6},", clip.speed)
-                } else {
-                    String::new()
-                };
-                match clip.fit {
-                    // whole picture, bars in the background colour
-                    FitMode::Fit => parts.push(format!(
-                        "[{i}:v]{retime}fps={fps},scale={w}:{h}:force_original_aspect_ratio=decrease,\
-                         pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color={bg},setsar=1,format=yuv420p,{shift}[c{i}]"
-                    )),
-                    // cover the canvas, crop the overflow equally on both sides
-                    FitMode::Fill => parts.push(format!(
-                        "[{i}:v]{retime}fps={fps},scale={w}:{h}:force_original_aspect_ratio=increase,\
-                         crop={w}:{h},setsar=1,format=yuv420p,{shift}[c{i}]"
-                    )),
-                    // whole picture over a blurred, covering copy of itself
-                    FitMode::BlurBg => {
-                        let sigma = (h as f64 * 0.03).max(2.0);
-                        parts.push(format!("[{i}:v]{retime}fps={fps},split=2[a{i}][b{i}]"));
-                        parts.push(format!(
-                            "[a{i}]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},gblur=sigma={sigma:.1}[bl{i}]"
-                        ));
-                        parts.push(format!("[b{i}]scale={w}:{h}:force_original_aspect_ratio=decrease[s{i}]"));
-                        parts.push(format!(
-                            "[bl{i}][s{i}]overlay=x=(W-w)/2:y=(H-h)/2,setsar=1,format=yuv420p,{shift}[c{i}]"
-                        ));
-                    }
+                format!("[{i}:v]setpts=(PTS-STARTPTS)/{:.6},fps={fps}", clip.speed)
+            } else {
+                format!("[{i}:v]fps={fps}")
+            };
+            let cover = format!("scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}");
+            let contain = format!("scale={w}:{h}:force_original_aspect_ratio=decrease");
+            // The base under the picture: the chosen image (covering the canvas) or the chosen colour.
+            let base = match bg_inputs[i] {
+                Some(k) => format!("[{k}:v]{cover},setsar=1[g{i}]"),
+                None => format!(
+                    "color=c={clip_bg}:s={w}x{h}:r={fps}:d={}[g{i}]",
+                    secs(clip.duration)
+                ),
+            };
+            let finish = format!("format=yuv420p,setsar=1,{shift}[c{i}]");
+
+            match (still, clip.fit) {
+                // video, whole picture, plain colour bars: a pad is enough
+                (false, FitMode::Fit) if bg_inputs[i].is_none() => parts.push(format!(
+                    "{source},{contain},pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color={clip_bg},setsar=1,format=yuv420p,{shift}[c{i}]"
+                )),
+                // video covering the canvas: nothing shows behind it
+                (false, FitMode::Fill) => {
+                    parts.push(format!("{source},{cover},setsar=1,format=yuv420p,{shift}[c{i}]"))
+                }
+                // video over a blurred, covering copy of itself (opaque, so no base is needed)
+                (false, FitMode::BlurBg) => {
+                    parts.push(format!("{source},split=2[a{i}][b{i}]"));
+                    parts.push(format!("[a{i}]{cover}{blur}[bl{i}]"));
+                    parts.push(format!("[b{i}]{contain}[s{i}]"));
+                    parts.push(format!("[bl{i}][s{i}]overlay=x=(W-w)/2:y=(H-h)/2,{finish}"));
+                }
+                // a still over its own blurred copy, on the base (which shows through transparency)
+                (true, FitMode::BlurBg) => {
+                    parts.push(format!("{source},split=2[a{i}][b{i}]"));
+                    parts.push(format!("[a{i}]{cover}{blur}[bl{i}]"));
+                    parts.push(format!("[b{i}]{contain}[s{i}]"));
+                    parts.push(base);
+                    parts.push(format!("[g{i}][bl{i}]overlay=x=0:y=0:format=auto:shortest=1[m{i}]"));
+                    parts.push(format!("[m{i}][s{i}]overlay=x=(W-w)/2:y=(H-h)/2:format=auto:shortest=1,{finish}"));
+                }
+                // fitted video over an image, and every other still: the picture sits on the base
+                (_, fit) => {
+                    let scale = if fit == FitMode::Fill { &cover } else { &contain };
+                    parts.push(format!("{source},{scale}[s{i}]"));
+                    parts.push(base);
+                    parts.push(format!("[g{i}][s{i}]overlay=x=(W-w)/2:y=(H-h)/2:format=auto:shortest=1,{finish}"));
                 }
             }
             parts.push(format!(
@@ -413,7 +476,7 @@ mod tests {
 
     pub fn project(assets: serde_json::Value, tracks: serde_json::Value) -> Project {
         serde_json::from_value(json!({
-            "id": "p", "name": "t", "schemaVersion": 3,
+            "id": "p", "name": "t", "schemaVersion": 4,
             "createdAt": "2026-01-01T00:00:00.000Z", "modifiedAt": "2026-01-01T00:00:00.000Z",
             "settings": {"width": 1280, "height": 720, "fps": 30, "backgroundColor": "#102030"},
             "assets": assets, "tracks": tracks
@@ -430,7 +493,7 @@ mod tests {
         sout: f64,
     ) -> serde_json::Value {
         json!({"id": id, "assetId": asset, "trackId": track, "timelineStart": start, "sourceIn": sin,
-               "sourceOut": sout, "volume": 1, "x": 0, "y": 0, "scale": 1, "opacity": 1, "fitMode": "fit"})
+               "sourceOut": sout, "volume": 1, "x": 0, "y": 0, "scale": 1, "opacity": 1, "fitMode": "fit", "fitBackground": {"kind": "color", "color": "#102030"}})
     }
     fn track(
         id: &str,
@@ -677,7 +740,7 @@ mod tests {
             g.contains("[0:v]fps=30,split=2[a0][b0]") && g.contains("gblur=sigma=10.8[bl0]"),
             "{g}"
         );
-        assert!(g.contains("[bl0][s0]overlay=x=(W-w)/2:y=(H-h)/2,setsar=1"));
+        assert!(g.contains("[bl0][s0]overlay=x=(W-w)/2:y=(H-h)/2,format=yuv420p,setsar=1"));
 
         // a clip without the field uses the default: fill
         p.tracks[0].clips[0].fit_mode = None;
@@ -771,6 +834,100 @@ mod tests {
         p.tracks[0].clips[0].speed = Some(4.0); // exactly 4x still has sound
         let ok = build_plan(&p, &opts(), &sample_facts()).unwrap();
         assert!(ok.clips[0].audio && ok.warnings.is_empty());
+    }
+
+    #[test]
+    fn fit_background_sets_the_bar_colour_an_image_input_and_the_blur_amount() {
+        use crate::project::FitBackground;
+        let bg = |kind, color: Option<&str>, asset: Option<&str>, blur| {
+            Some(FitBackground {
+                kind,
+                color: color.map(String::from),
+                asset_id: asset.map(String::from),
+                blur,
+            })
+        };
+        let graph =
+            |p: &Project| build_filter_graph(&build_plan(p, &opts(), &sample_facts()).unwrap());
+
+        // absent = black, whatever the project background is
+        let mut p = sample();
+        p.tracks[0].clips[0].fit_background = None;
+        let plan = build_plan(&p, &opts(), &sample_facts()).unwrap();
+        assert_eq!(
+            (plan.clips[0].bg_color.as_str(), plan.clips[0].blur_amount),
+            ("#000000", 30.0)
+        );
+        assert!(
+            graph(&p)
+                .graph
+                .contains("pad=640:360:(ow-iw)/2:(oh-ih)/2:color=0x000000")
+        );
+
+        p.tracks[0].clips[0].fit_background =
+            bg(BackgroundKind::Color, Some("#AA5500"), None, None);
+        assert!(
+            graph(&p)
+                .graph
+                .contains("pad=640:360:(ow-iw)/2:(oh-ih)/2:color=0xAA5500")
+        );
+
+        // an image background becomes one extra looped input after the three clip inputs, covering the canvas
+        p.tracks[0].clips[0].fit_background = bg(BackgroundKind::Image, None, Some("i"), None);
+        let g = graph(&p);
+        let args = g.input_args.join(" ");
+        assert_eq!(args.matches("-i /m/i.png").count(), 2, "{args}"); // the still clip itself + the background
+        assert!(
+            args.ends_with("-loop 1 -framerate 30 -t 4.000000 -i /m/i.png"),
+            "{args}"
+        );
+        assert!(
+            g.graph.contains(
+                "[3:v]scale=640:360:force_original_aspect_ratio=increase,crop=640:360,setsar=1[g0]"
+            ),
+            "{}",
+            g.graph
+        );
+        assert!(
+            g.graph
+                .contains("[g0][s0]overlay=x=(W-w)/2:y=(H-h)/2:format=auto:shortest=1")
+        );
+        assert!(
+            !g.graph
+                .contains("[0:v]fps=30,scale=640:360:force_original_aspect_ratio=decrease,pad=")
+        );
+
+        // a filled video needs no background input at all
+        p.tracks[0].clips[0].fit_mode = Some(FitMode::Fill);
+        assert_eq!(
+            graph(&p)
+                .input_args
+                .join(" ")
+                .matches("-i /m/i.png")
+                .count(),
+            1
+        );
+
+        // blur amount: 0 = no blur filter, 100 = 10 % of the canvas height
+        p.tracks[0].clips[0].fit_mode = Some(FitMode::BlurBg);
+        p.tracks[0].clips[0].fit_background = bg(BackgroundKind::Black, None, None, Some(0.0));
+        assert!(!graph(&p).graph.contains("gblur"));
+        p.tracks[0].clips[0].fit_background = bg(BackgroundKind::Black, None, None, Some(100.0));
+        assert!(graph(&p).graph.contains("gblur=sigma=36.0[bl0]"));
+
+        // a missing background image stops the export with a clear reason
+        p.tracks[0].clips[0].fit_mode = Some(FitMode::Fit);
+        p.tracks[0].clips[0].fit_background = bg(BackgroundKind::Image, None, Some("i"), None);
+        let mut facts = sample_facts();
+        facts.insert(
+            "/m/i.png".into(),
+            AssetFacts {
+                exists: false,
+                has_audio: false,
+            },
+        );
+        let e = build_plan(&p, &opts(), &facts).unwrap_err().join("; ");
+        assert!(e.contains("background image is missing: /m/i.png"), "{e}");
     }
 
     #[test]
