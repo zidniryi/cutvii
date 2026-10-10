@@ -1,0 +1,53 @@
+import { useEffect } from "react";
+import { Scissors, Trash2 } from "lucide-react";
+
+export interface MenuState {
+  x: number;
+  y: number;
+  clipId: string;
+}
+
+interface Props {
+  menu: MenuState;
+  onSplit: () => void;
+  onDelete: () => void;
+  onClose: () => void;
+}
+
+export function ContextMenu({ menu, onSplit, onDelete, onClose }: Props) {
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      if (!(e.target as HTMLElement | null)?.closest("[data-context-menu]")) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("pointerdown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  const item =
+    "flex h-9 w-full items-center gap-2 rounded-sm px-2 text-left text-sm hover:bg-accent-soft pointer-coarse:h-11";
+  return (
+    <div
+      role="menu"
+      data-context-menu
+      aria-label="Clip actions"
+      className="fixed z-50 min-w-44 rounded-md border bg-popover p-1 shadow-lg"
+      style={{ left: menu.x, top: menu.y }}
+    >
+      <button role="menuitem" className={item} onClick={onSplit}>
+        <Scissors className="size-4" /> Split at playhead
+        <kbd className="ml-auto text-xs text-text-muted">S</kbd>
+      </button>
+      <button role="menuitem" className={item} onClick={onDelete}>
+        <Trash2 className="size-4" /> Delete
+        <kbd className="ml-auto text-xs text-text-muted">Del</kbd>
+      </button>
+    </div>
+  );
+}

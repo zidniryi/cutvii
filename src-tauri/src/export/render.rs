@@ -1,0 +1,1439 @@
+//! Running FFmpeg for an [`ExportPlan`]: progress, cancel, ffprobe verification, atomic output.
+
+use std::fs;
+use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use super::encoder::Encoder;
+use super::plan::{AUDIO_RATE, ExportPlan, build_filter_graph, rate_expr};
+use super::{ExportFormat, ExportReport};
+use crate::errors::{AppError, AppResult};
+use crate::media::probe::parse_stream_summary;
+use crate::media::tools::command;
+
+pub struct RenderJob<'a> {
+    pub ffmpeg: &'a Path,
+    pub ffprobe: &'a Path,
+    pub plan: &'a ExportPlan,
+    /// The H.264 encoder; `None` for audio-only exports.
+    pub encoder: Option<Encoder>,
+    pub output: &'a Path,
+}
+
+/// Full FFmpeg argument list (everything after the program name) for rendering to `tmp`.
+pub fn build_args(plan: &ExportPlan, encoder: Option<Encoder>, tmp: &Path) -> Vec<String> {
+    let g = build_filter_graph(plan);
+    let s = |v: &str| v.to_string();
+
+    let mut a: Vec<String> = [
+        "-y",
+        "-v",
+        "error",
+        "-nostdin",
+        "-progress",
+        "pipe:1",
+        "-nostats",
+    ]
+    .map(String::from)
+    .to_vec();
+    a.extend(g.input_args);
+    a.extend([s("-filter_complex"), g.graph]);
+
+    let duration = format!("{:.6}", plan.duration);
+    let rate = AUDIO_RATE.to_string();
+    match (plan.format, g.video_label, encoder) {
+        (ExportFormat::Mp4, Some(video), Some(encoder)) => {
+            a.extend([s("-map"), s(video), s("-map"), s(g.audio_label)]);
+            a.extend(encoder.video_args(plan.quality, plan.width, plan.height, plan.fps));
+            a.extend([s("-r"), rate_expr(plan.fps)]);
+            a.extend(
+                [
+                    "-c:a", "aac", "-b:a", "192k", "-ar", &rate, "-ac", "2", "-t", &duration,
+                ]
+                .map(String::from),
+            );
+            a.extend(["-movflags", "+faststart", "-f", "mp4"].map(String::from));
+        }
+        (ExportFormat::Wav, ..) => {
+            a.extend(
+                [
+                    "-map",
+                    g.audio_label,
+                    "-vn",
+                    "-c:a",
+                    "pcm_s16le",
+                    "-ar",
+                    &rate,
+                    "-ac",
+                    "2",
+                ]
+                .map(String::from),
+            );
+            a.extend(["-t", &duration, "-f", "wav"].map(String::from));
+        }
+        // M4A (and, defensively, anything without a video encoder): AAC audio only
+        _ => {
+            a.extend(
+                [
+                    "-map",
+                    g.audio_label,
+                    "-vn",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "192k",
+                    "-ar",
+                    &rate,
+                    "-ac",
+                    "2",
+                ]
+                .map(String::from),
+            );
+            a.extend(["-t", &duration, "-movflags", "+faststart", "-f", "ipod"].map(String::from));
+        }
+    }
+    a.push(tmp.to_string_lossy().into_owned());
+    a
+}
+
+fn temp_path(output: &Path, format: ExportFormat) -> PathBuf {
+    let stem = output
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("export");
+    output.with_file_name(format!(".{stem}.cutvii-part.{}", format.extension()))
+}
+
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (fs::canonicalize(a), fs::canonicalize(b)) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => a == b,
+    }
+}
+
+/// `out_time_us=1234567` -> seconds
+fn parse_progress_line(line: &str) -> Option<f64> {
+    let v = line.strip_prefix("out_time_us=")?;
+    v.trim().parse::<f64>().ok().map(|us| us / 1_000_000.0)
+}
+
+pub fn run(
+    job: &RenderJob,
+    on_progress: &mut dyn FnMut(f64),
+    cancel: &AtomicBool,
+) -> AppResult<ExportReport> {
+    let plan = job.plan;
+
+    // never write over a source file, and never into a missing folder
+    if plan.clips.iter().any(|c| same_file(&c.path, job.output)) {
+        return Err(AppError::InvalidInput(
+            "the export file would overwrite a source media file".into(),
+        ));
+    }
+    if job
+        .output
+        .parent()
+        .is_some_and(|p| !p.as_os_str().is_empty() && !p.is_dir())
+    {
+        return Err(AppError::InvalidInput(
+            "the export folder does not exist".into(),
+        ));
+    }
+
+    let tmp = temp_path(job.output, plan.format);
+    fs::remove_file(&tmp).ok();
+    let cleanup = || {
+        fs::remove_file(&tmp).ok();
+    };
+
+    let mut child = command(job.ffmpeg)
+        .args(build_args(plan, job.encoder, &tmp))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    // stdout: progress lines. stderr: keep the tail for error messages.
+    let (tx, rx) = mpsc::channel::<String>();
+    let stdout = child.stdout.take().expect("piped stdout");
+    let reader = std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let tail: Arc<Mutex<Vec<String>>> = Arc::default();
+    let stderr = child.stderr.take().expect("piped stderr");
+    let tail_writer = Arc::clone(&tail);
+    let err_reader = std::thread::spawn(move || {
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            let mut t = tail_writer.lock().unwrap();
+            t.push(line);
+            if t.len() > 12 {
+                t.remove(0);
+            }
+        }
+    });
+
+    let mut last = 0.0_f64;
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            child.kill().ok();
+            child.wait().ok();
+            cleanup();
+            return Err(AppError::Cancelled);
+        }
+        match rx.recv_timeout(Duration::from_millis(50)) {
+            Ok(line) => {
+                if let Some(t) = parse_progress_line(&line) {
+                    // 0.99 until verified, so "100%" always means finished and checked
+                    let f = (t / plan.duration).clamp(0.0, 0.99);
+                    if f > last {
+                        last = f;
+                        on_progress(f);
+                    }
+                }
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+
+    let status = child.wait()?;
+    reader.join().ok();
+    err_reader.join().ok();
+
+    if cancel.load(Ordering::Relaxed) {
+        cleanup();
+        return Err(AppError::Cancelled);
+    }
+    if !status.success() {
+        cleanup();
+        let msg = tail
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .take(3)
+            .rev()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" | ");
+        return Err(AppError::InvalidInput(format!(
+            "FFmpeg failed: {}",
+            if msg.is_empty() {
+                "unknown error".to_string()
+            } else {
+                msg
+            }
+        )));
+    }
+
+    let report = match verify(job, &tmp) {
+        Ok(r) => r,
+        Err(e) => {
+            cleanup();
+            return Err(e);
+        }
+    };
+
+    // only now does the finished file replace anything at the destination
+    if let Err(e) = fs::rename(&tmp, job.output) {
+        cleanup();
+        return Err(e.into());
+    }
+    on_progress(1.0);
+    Ok(ExportReport {
+        path: job.output.to_string_lossy().into_owned(),
+        ..report
+    })
+}
+
+/// ffprobe the rendered file and compare it with what the plan promised.
+fn verify(job: &RenderJob, file: &Path) -> AppResult<ExportReport> {
+    let out = command(job.ffprobe)
+        .args([
+            "-v",
+            "error",
+            "-print_format",
+            "json",
+            "-show_format",
+            "-show_streams",
+            "-i",
+        ])
+        .arg(file)
+        .output()?;
+    let fail = |m: String| AppError::InvalidInput(format!("export verification failed: {m}"));
+    if !out.status.success() {
+        return Err(fail("the output file could not be read".into()));
+    }
+    let s = parse_stream_summary(&String::from_utf8_lossy(&out.stdout))?;
+    let plan = job.plan;
+
+    let audio_only = plan.format.is_audio();
+    if audio_only && s.has_video {
+        return Err(fail("an audio export must not contain video".into()));
+    }
+    if !audio_only && !s.has_video {
+        return Err(fail("no video stream".into()));
+    }
+    if !s.has_audio {
+        return Err(fail("no audio stream".into()));
+    }
+    let (w, h) = (s.width.unwrap_or(0), s.height.unwrap_or(0));
+    if !audio_only && (w, h) != (plan.width, plan.height) {
+        return Err(fail(format!(
+            "size is {w}x{h}, expected {}x{}",
+            plan.width, plan.height
+        )));
+    }
+    let duration = s.duration.unwrap_or(0.0);
+    let tolerance = 3.0 / plan.fps + 0.1;
+    if (duration - plan.duration).abs() > tolerance {
+        return Err(fail(format!(
+            "duration is {duration:.2}s, expected {:.2}s",
+            plan.duration
+        )));
+    }
+
+    Ok(ExportReport {
+        path: file.to_string_lossy().into_owned(),
+        duration,
+        width: w,
+        height: h,
+        has_audio: true,
+        size_bytes: fs::metadata(file)?.len(),
+        encoder: match (plan.format, job.encoder) {
+            (ExportFormat::Wav, _) => "pcm_s16le".to_string(),
+            (ExportFormat::M4a, _) | (_, None) => "aac".to_string(),
+            (_, Some(e)) => e.name().to_string(),
+        },
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::export::plan::{AssetFacts, build_plan};
+    use crate::export::{ExportOptions, Quality, gather_facts};
+    use crate::media::ffmpeg::FfmpegBackend;
+    use crate::media::tools::{FFMPEG_ENV, locate_tool};
+    use crate::media::{MediaBackend, RenderRequest};
+    use crate::project::Project;
+    use serde_json::{Value, json};
+    use std::collections::HashMap;
+
+    #[test]
+    fn parses_progress_lines() {
+        assert_eq!(parse_progress_line("out_time_us=1500000"), Some(1.5));
+        assert_eq!(parse_progress_line("out_time_us=N/A"), None);
+        assert_eq!(parse_progress_line("frame=12"), None);
+    }
+
+    #[test]
+    fn args_map_both_outputs_and_write_only_to_the_temp_file() {
+        let plan = ExportPlan {
+            width: 640,
+            height: 360,
+            fps: 30.0,
+            quality: Quality::Standard,
+            format: ExportFormat::Mp4,
+            duration: 2.0,
+            background: "#000000".into(),
+            clips: vec![],
+        };
+        let tmp = PathBuf::from("/out/.x.cutvii-part.mp4");
+        let a = build_args(&plan, Some(Encoder::Libx264), &tmp);
+        let joined = a.join(" ");
+        assert!(joined.contains("-map [vout] -map [aout]"));
+        assert!(joined.contains("-c:v libx264 -preset medium -crf 23"));
+        assert!(joined.contains("-movflags +faststart -f mp4"));
+        assert_eq!(a.last().unwrap(), "/out/.x.cutvii-part.mp4");
+        assert_eq!(
+            temp_path(Path::new("/out/final.mp4"), ExportFormat::Mp4),
+            PathBuf::from("/out/.final.cutvii-part.mp4")
+        );
+    }
+
+    // ---------- real FFmpeg end-to-end tests (skipped loudly when FFmpeg is not installed) ----------
+
+    struct Env {
+        backend: FfmpegBackend,
+        ffmpeg: PathBuf,
+        dir: PathBuf,
+    }
+
+    impl Drop for Env {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.dir).ok();
+        }
+    }
+
+    fn env(tag: &str) -> Option<Env> {
+        let Ok(backend) = FfmpegBackend::locate() else {
+            eprintln!("SKIPPED ({tag}): ffmpeg/ffprobe not found");
+            return None;
+        };
+        let ffmpeg = locate_tool("ffmpeg", FFMPEG_ENV).unwrap();
+        let dir = std::env::temp_dir().join(format!("cutvii-export-{tag}-{}", std::process::id()));
+        fs::remove_dir_all(&dir).ok();
+        fs::create_dir_all(&dir).unwrap();
+        Some(Env {
+            backend,
+            ffmpeg,
+            dir,
+        })
+    }
+
+    impl Env {
+        fn make(&self, name: &str, args: &[&str]) -> String {
+            let out = self.dir.join(name);
+            let st = command(&self.ffmpeg)
+                .args(["-y", "-v", "error"])
+                .args(args)
+                .arg(&out)
+                .status()
+                .unwrap();
+            assert!(st.success(), "could not generate {name}");
+            out.to_string_lossy().into_owned()
+        }
+
+        /// 4s red video with a 1 kHz tone.
+        fn red(&self) -> String {
+            self.make(
+                "red.mp4",
+                &[
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=red:s=320x180:r=30:d=4",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=frequency=1000:duration=4",
+                    "-shortest",
+                    "-pix_fmt",
+                    "yuv420p",
+                ],
+            )
+        }
+        /// 4s blue video, no audio stream.
+        fn blue(&self) -> String {
+            self.make(
+                "blue.mp4",
+                &[
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=blue:s=320x180:r=30:d=4",
+                    "-pix_fmt",
+                    "yuv420p",
+                ],
+            )
+        }
+        fn green_png(&self) -> String {
+            self.make(
+                "green.png",
+                &[
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=green:s=200x100",
+                    "-frames:v",
+                    "1",
+                ],
+            )
+        }
+        fn clear_png(&self) -> String {
+            self.make(
+                "clear.png",
+                &[
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=red@0.0:s=64x64,format=rgba",
+                    "-frames:v",
+                    "1",
+                ],
+            )
+        }
+        fn tone(&self) -> String {
+            self.make(
+                "tone.wav",
+                &["-f", "lavfi", "-i", "sine=frequency=440:duration=3"],
+            )
+        }
+
+        /// Plan + render exactly like the app does (facts via the backend), returning the progress seen.
+        fn export(
+            &self,
+            project: &Project,
+            opts: &ExportOptions,
+            out: &Path,
+        ) -> (AppResult<ExportReport>, Vec<f64>) {
+            let facts = gather_facts(project, &self.backend);
+            let plan = match build_plan(project, opts, &facts) {
+                Ok(p) => p,
+                Err(e) => return (Err(AppError::InvalidInput(e.join("; "))), vec![]),
+            };
+            let mut seen = Vec::new();
+            let r = self.backend.render(
+                &RenderRequest {
+                    plan,
+                    output: out.to_path_buf(),
+                },
+                &mut |f| seen.push(f),
+                &AtomicBool::new(false),
+            );
+            (r, seen)
+        }
+
+        /// Decode every frame and sample of the file; any decoder complaint fails the check.
+        fn decodes_cleanly(&self, video: &Path) -> bool {
+            let out = command(&self.ffmpeg)
+                .args(["-v", "error", "-xerror", "-i"])
+                .arg(video)
+                .args(["-f", "null", "-"])
+                .output()
+                .unwrap();
+            out.status.success() && out.stderr.is_empty()
+        }
+
+        /// 200x100 still: left half red, right half blue.
+        fn two_tone_jpg(&self, name: &str) -> String {
+            self.make(
+                name,
+                &[
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=red:s=100x100",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=blue:s=100x100",
+                    "-filter_complex",
+                    "hstack",
+                    "-frames:v",
+                    "1",
+                    "-q:v",
+                    "2",
+                ],
+            )
+        }
+
+        /// Same picture with an EXIF Orientation tag of 6 ("rotate 90 degrees clockwise to display").
+        fn exif_rotated_jpg(&self) -> String {
+            let plain = fs::read(self.two_tone_jpg("plain_src.jpg")).unwrap();
+            assert_eq!(&plain[..2], &[0xFF, 0xD8], "JPEG SOI");
+            let mut exif: Vec<u8> = vec![0xFF, 0xE1, 0x00, 0x22];
+            exif.extend_from_slice(b"Exif\0\0");
+            exif.extend_from_slice(&[b'I', b'I', 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00]); // TIFF header, IFD at 8
+            exif.extend_from_slice(&[0x01, 0x00]); // one entry
+            exif.extend_from_slice(&[
+                0x12, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00,
+            ]); // Orientation = 6
+            exif.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // no next IFD
+            let mut out = plain[..2].to_vec();
+            out.extend_from_slice(&exif);
+            out.extend_from_slice(&plain[2..]);
+            let path = self.dir.join("rot6.jpg");
+            fs::write(&path, out).unwrap();
+            path.to_string_lossy().into_owned()
+        }
+
+        /// Average RGB of a `crop=w:h:x:y` region of the frame at `t`.
+        fn region(&self, video: &Path, t: f64, crop: &str) -> (u8, u8, u8) {
+            let out = command(&self.ffmpeg)
+                .args(["-v", "error", "-ss", &format!("{t}"), "-i"])
+                .arg(video)
+                .args([
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    &format!("crop={crop},scale=1:1"),
+                    "-f",
+                    "rawvideo",
+                    "-pix_fmt",
+                    "rgb24",
+                    "-",
+                ])
+                .output()
+                .unwrap();
+            assert_eq!(out.stdout.len(), 3, "no frame at t={t}");
+            (out.stdout[0], out.stdout[1], out.stdout[2])
+        }
+
+        /// Average RGB of the frame at `t`.
+        fn color_at(&self, video: &Path, t: f64) -> (u8, u8, u8) {
+            let out = command(&self.ffmpeg)
+                .args(["-v", "error", "-ss", &format!("{t}"), "-i"])
+                .arg(video)
+                .args([
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    "scale=1:1",
+                    "-f",
+                    "rawvideo",
+                    "-pix_fmt",
+                    "rgb24",
+                    "-",
+                ])
+                .output()
+                .unwrap();
+            assert_eq!(out.stdout.len(), 3, "no frame at t={t}");
+            (out.stdout[0], out.stdout[1], out.stdout[2])
+        }
+
+        /// Mean volume (dB) of `len` seconds of audio starting at `from`.
+        fn volume(&self, video: &Path, from: f64, len: f64) -> f64 {
+            let out = command(&self.ffmpeg)
+                .args([
+                    "-hide_banner",
+                    "-ss",
+                    &format!("{from}"),
+                    "-t",
+                    &format!("{len}"),
+                    "-i",
+                ])
+                .arg(video)
+                .args(["-vn", "-af", "volumedetect", "-f", "null", "-"])
+                .output()
+                .unwrap();
+            let text = String::from_utf8_lossy(&out.stderr).into_owned();
+            text.lines()
+                .find_map(|l| l.split("mean_volume:").nth(1))
+                .and_then(|v| v.trim().trim_end_matches("dB").trim().parse::<f64>().ok())
+                .unwrap_or_else(|| panic!("no mean_volume in:\n{text}"))
+        }
+    }
+
+    fn clip(
+        id: &str,
+        asset: &str,
+        track: &str,
+        start: f64,
+        sin: f64,
+        sout: f64,
+        volume: f64,
+    ) -> Value {
+        json!({"id": id, "assetId": asset, "trackId": track, "timelineStart": start, "sourceIn": sin,
+               "sourceOut": sout, "volume": volume, "x": 0, "y": 0, "scale": 1, "opacity": 1})
+    }
+    fn track(
+        id: &str,
+        ty: &str,
+        order: u32,
+        muted: bool,
+        hidden: bool,
+        clips: Vec<Value>,
+    ) -> Value {
+        json!({"id": id, "name": id, "type": ty, "order": order, "muted": muted, "hidden": hidden, "clips": clips})
+    }
+    fn project(assets: Vec<Value>, tracks: Vec<Value>) -> Project {
+        serde_json::from_value(json!({
+            "id": "p", "name": "t", "schemaVersion": 1,
+            "createdAt": "2026-01-01T00:00:00.000Z", "modifiedAt": "2026-01-01T00:00:00.000Z",
+            "settings": {"width": 640, "height": 360, "fps": 30, "backgroundColor": "#202020"},
+            "assets": assets, "tracks": tracks
+        }))
+        .unwrap()
+    }
+    fn asset(id: &str, path: &str, ty: &str, duration: Option<f64>) -> Value {
+        match duration {
+            Some(d) => json!({"id": id, "path": path, "type": ty, "duration": d}),
+            None => json!({"id": id, "path": path, "type": ty}),
+        }
+    }
+    fn opts(quality: Quality) -> ExportOptions {
+        ExportOptions {
+            width: 640,
+            height: 360,
+            fps: 30.0,
+            quality,
+            format: ExportFormat::Mp4,
+        }
+    }
+
+    fn near(c: (u8, u8, u8), expect: (u8, u8, u8), tol: i32) -> bool {
+        let d = |a: u8, b: u8| (a as i32 - b as i32).abs() <= tol;
+        d(c.0, expect.0) && d(c.1, expect.1) && d(c.2, expect.2)
+    }
+
+    #[test]
+    fn composites_tracks_gaps_and_stills_with_correct_timing_and_sound() {
+        let Some(e) = env("composite") else { return };
+        let (red, blue, green, tone) = (e.red(), e.blue(), e.green_png(), e.tone());
+        let p = project(
+            vec![
+                asset("red", &red, "video", Some(4.0)),
+                asset("blue", &blue, "video", Some(4.0)),
+                asset("green", &green, "image", None),
+                asset("tone", &tone, "audio", Some(3.0)),
+            ],
+            vec![
+                track(
+                    "v1",
+                    "video",
+                    0,
+                    false,
+                    false,
+                    vec![
+                        clip("c1", "red", "v1", 0.0, 0.0, 2.0, 1.0),
+                        clip("c2", "blue", "v1", 3.0, 0.0, 2.0, 1.0),
+                    ],
+                ),
+                track(
+                    "v2",
+                    "video",
+                    1,
+                    false,
+                    false,
+                    vec![clip("c3", "green", "v2", 1.0, 0.0, 1.5, 1.0)],
+                ),
+                track(
+                    "a1",
+                    "audio",
+                    2,
+                    false,
+                    false,
+                    vec![clip("c4", "tone", "a1", 5.0, 0.0, 2.0, 1.0)],
+                ),
+            ],
+        );
+        let out = e.dir.join("out.mp4");
+        let (report, progress) = e.export(&p, &opts(Quality::Draft), &out);
+        let report = report.expect("export should succeed");
+
+        // container: size, duration, streams, encoder
+        assert_eq!((report.width, report.height), (640, 360));
+        assert!(
+            (report.duration - 7.0).abs() < 0.2,
+            "duration {}",
+            report.duration
+        );
+        assert!(report.has_audio && report.size_bytes > 1000);
+        assert_eq!(report.encoder, "libx264");
+        assert!(out.is_file());
+        assert!(!temp_path(&out, ExportFormat::Mp4).exists());
+        assert!(
+            e.decodes_cleanly(&out),
+            "the exported MP4 must decode end to end without errors"
+        );
+
+        // progress is monotonic and ends at 100%
+        assert!(progress.windows(2).all(|w| w[0] <= w[1]), "{progress:?}");
+        assert_eq!(progress.last(), Some(&1.0));
+
+        // picture at specific times
+        let red_px = e.color_at(&out, 0.5);
+        assert!(
+            red_px.0 > 200 && red_px.1 < 70 && red_px.2 < 70,
+            "red clip: {red_px:?}"
+        );
+        let green_px = e.color_at(&out, 1.5);
+        assert!(
+            green_px.1 > 90 && green_px.0 < 60 && green_px.2 < 60,
+            "still over red: {green_px:?}"
+        );
+        let tail_px = e.color_at(&out, 2.25);
+        assert!(
+            tail_px.1 > 90 && tail_px.0 < 60,
+            "still persists after the red clip ends: {tail_px:?}"
+        );
+        let gap_px = e.color_at(&out, 2.75);
+        assert!(
+            near(gap_px, (32, 32, 32), 14),
+            "gap shows the background: {gap_px:?}"
+        );
+        let blue_px = e.color_at(&out, 3.5);
+        assert!(
+            blue_px.2 > 200 && blue_px.0 < 70 && blue_px.1 < 70,
+            "blue clip after the gap: {blue_px:?}"
+        );
+        let end_px = e.color_at(&out, 6.0);
+        assert!(
+            near(end_px, (32, 32, 32), 14),
+            "background after the last picture: {end_px:?}"
+        );
+
+        // sound: tone from the red clip, silence in the gap, the wav at 5-7s
+        assert!(e.volume(&out, 0.2, 1.6) > -40.0, "red clip audio");
+        assert!(e.volume(&out, 2.2, 0.6) < -80.0, "gap is silent");
+        assert!(e.volume(&out, 3.2, 1.6) < -80.0, "blue has no audio");
+        assert!(e.volume(&out, 5.2, 1.6) > -40.0, "wav placed at 5s");
+    }
+
+    #[test]
+    fn honours_mute_volume_hidden_tracks_and_transparency() {
+        let Some(e) = env("mix") else { return };
+        let (red, clear) = (e.red(), e.clear_png());
+        let base_assets = vec![
+            asset("red", &red, "video", Some(4.0)),
+            asset("clear", &clear, "image", None),
+        ];
+
+        let render = |name: &str, tracks: Vec<Value>| {
+            let out = e.dir.join(name);
+            let (r, _) = e.export(
+                &project(base_assets.clone(), tracks),
+                &opts(Quality::Draft),
+                &out,
+            );
+            r.unwrap_or_else(|err| panic!("{name}: {err}"));
+            out
+        };
+
+        let loud = render(
+            "loud.mp4",
+            vec![track(
+                "v1",
+                "video",
+                0,
+                false,
+                false,
+                vec![clip("c", "red", "v1", 0.0, 0.0, 2.0, 1.0)],
+            )],
+        );
+        let half = render(
+            "half.mp4",
+            vec![track(
+                "v1",
+                "video",
+                0,
+                false,
+                false,
+                vec![clip("c", "red", "v1", 0.0, 0.0, 2.0, 0.5)],
+            )],
+        );
+        let muted = render(
+            "muted.mp4",
+            vec![track(
+                "v1",
+                "video",
+                0,
+                true,
+                false,
+                vec![clip("c", "red", "v1", 0.0, 0.0, 2.0, 1.0)],
+            )],
+        );
+        let hidden = render(
+            "hidden.mp4",
+            vec![track(
+                "v1",
+                "video",
+                0,
+                false,
+                true,
+                vec![clip("c", "red", "v1", 0.0, 0.0, 2.0, 1.0)],
+            )],
+        );
+
+        let (l, h) = (e.volume(&loud, 0.2, 1.6), e.volume(&half, 0.2, 1.6));
+        assert!(l > -40.0);
+        assert!(
+            (l - h - 6.0).abs() < 1.5,
+            "volume 0.5 should be ~6 dB quieter: {l} vs {h}"
+        );
+        assert!(e.volume(&muted, 0.2, 1.6) < -80.0, "muted track is silent");
+        assert!(
+            near(e.color_at(&muted, 1.0), (255, 0, 0), 60),
+            "muted track still shows picture"
+        );
+        assert!(
+            near(e.color_at(&hidden, 1.0), (32, 32, 32), 14),
+            "hidden track shows no picture"
+        );
+        assert!(
+            e.volume(&hidden, 0.2, 1.6) > -40.0,
+            "hidden track still plays its sound"
+        );
+
+        // a fully transparent still must not show its (red) hidden RGB: it is flattened onto the background
+        let transparent = render(
+            "clear.mp4",
+            vec![track(
+                "v1",
+                "video",
+                0,
+                false,
+                false,
+                vec![clip("c", "clear", "v1", 0.0, 0.0, 1.0, 1.0)],
+            )],
+        );
+        let px = e.color_at(&transparent, 0.5);
+        assert!(
+            near(px, (32, 32, 32), 14),
+            "transparent still over background: {px:?}"
+        );
+    }
+
+    #[test]
+    fn exports_the_requested_size_and_letterboxes_with_the_background() {
+        let Some(e) = env("size") else { return };
+        let green = e.green_png(); // 2:1 still
+        let p = project(
+            vec![asset("g", &green, "image", None)],
+            vec![track(
+                "v1",
+                "video",
+                0,
+                false,
+                false,
+                vec![clip("c", "g", "v1", 0.0, 0.0, 1.0, 1.0)],
+            )],
+        );
+        let out = e.dir.join("sq.mp4");
+        let o = ExportOptions {
+            width: 360,
+            height: 360,
+            fps: 24.0,
+            quality: Quality::Standard,
+            format: ExportFormat::Mp4,
+        };
+        let r = e.export(&p, &o, &out).0.unwrap();
+        assert_eq!((r.width, r.height), (360, 360));
+
+        // 2:1 picture in a square: bars on top/bottom, picture in the middle
+        assert!(near(e.color_at(&out, 0.5), (0, 128, 0), 40) || e.color_at(&out, 0.5).1 > 60);
+        let probe_top = command(&e.ffmpeg)
+            .args(["-v", "error", "-ss", "0.5", "-i"])
+            .arg(&out)
+            .args([
+                "-frames:v",
+                "1",
+                "-vf",
+                "crop=360:20:0:0,scale=1:1",
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "rgb24",
+                "-",
+            ])
+            .output()
+            .unwrap();
+        let top = (
+            probe_top.stdout[0],
+            probe_top.stdout[1],
+            probe_top.stdout[2],
+        );
+        assert!(
+            near(top, (32, 32, 32), 14),
+            "letterbox bar is the background: {top:?}"
+        );
+    }
+
+    fn still_project(path: &str, fit: Option<&str>) -> Project {
+        let mut c = clip("c", "img", "v1", 0.0, 0.0, 1.0, 1.0);
+        if let Some(f) = fit {
+            c["fit"] = json!(f);
+        }
+        project(
+            vec![asset("img", path, "image", None)],
+            vec![track("v1", "video", 0, false, false, vec![c])],
+        )
+    }
+    fn square() -> ExportOptions {
+        ExportOptions {
+            width: 360,
+            height: 360,
+            fps: 30.0,
+            quality: Quality::Draft,
+            format: ExportFormat::Mp4,
+        }
+    }
+    fn is_red(c: (u8, u8, u8)) -> bool {
+        c.0 > 170 && c.1 < 90 && c.2 < 90
+    }
+    fn is_blue(c: (u8, u8, u8)) -> bool {
+        c.2 > 170 && c.0 < 90 && c.1 < 90
+    }
+
+    #[test]
+    fn stills_honour_exif_orientation_in_probe_thumbnail_and_export() {
+        use crate::media::import::import_one;
+        let Some(e) = env("exif") else { return };
+        let rotated = e.exif_rotated_jpg();
+
+        // probe: displayed size, not stored size (stored is 200x100)
+        let imported = import_one(&e.backend, Path::new(&rotated), &e.dir.join("thumbs")).unwrap();
+        assert_eq!(
+            (imported.info.width, imported.info.height),
+            (Some(100), Some(200))
+        );
+
+        // thumbnail is upright too: portrait, red on top
+        let thumb = PathBuf::from(imported.thumbnail_path.unwrap());
+        let probe = command(&e.ffmpeg)
+            .args(["-v", "error", "-i"])
+            .arg(&thumb)
+            .args([
+                "-vf",
+                "scale=1:2",
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "rgb24",
+                "-",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            is_red((probe.stdout[0], probe.stdout[1], probe.stdout[2])),
+            "thumbnail top should be red"
+        );
+
+        // export: 100x200 portrait fitted into 360x360 -> 180 px wide, centred; red above blue, bars left/right
+        let out = e.dir.join("exif.mp4");
+        e.export(&still_project(&rotated, None), &square(), &out)
+            .0
+            .unwrap();
+        assert!(
+            is_red(e.region(&out, 0.5, "100:100:130:30")),
+            "top of the picture is red: {:?}",
+            e.region(&out, 0.5, "100:100:130:30")
+        );
+        assert!(
+            is_blue(e.region(&out, 0.5, "100:100:130:230")),
+            "bottom is blue"
+        );
+        assert!(
+            near(e.region(&out, 0.5, "60:300:10:30"), (32, 32, 32), 14),
+            "left bar is background"
+        );
+    }
+
+    #[test]
+    fn fit_fill_and_blur_place_a_still_differently() {
+        let Some(e) = env("fit") else { return };
+        let img = e.two_tone_jpg("wide.jpg"); // 2:1, red | blue, into a square canvas
+        let render = |name: &str, fit: Option<&str>| {
+            let out = e.dir.join(name);
+            e.export(&still_project(&img, fit), &square(), &out)
+                .0
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            out
+        };
+        let top_left = "120:50:10:10"; // inside the top bar when the picture is fitted
+        let mid_left = "100:100:30:130";
+        let mid_right = "100:100:230:130";
+
+        // fit (also the default): bars are the background colour, whole picture visible
+        for out in [render("default.mp4", None), render("fit.mp4", Some("fit"))] {
+            assert!(
+                near(e.region(&out, 0.5, top_left), (32, 32, 32), 14),
+                "fit: top bar is background"
+            );
+            assert!(
+                is_red(e.region(&out, 0.5, mid_left)) && is_blue(e.region(&out, 0.5, mid_right))
+            );
+        }
+
+        // fill: no bars at all, the canvas is covered edge to edge
+        let fill = render("fill.mp4", Some("fill"));
+        assert!(
+            is_red(e.region(&fill, 0.5, top_left)),
+            "fill: top-left is picture: {:?}",
+            e.region(&fill, 0.5, top_left)
+        );
+        assert!(
+            is_blue(e.region(&fill, 0.5, "120:50:230:300")),
+            "fill: bottom-right is picture"
+        );
+
+        // blur: bars are a blurred copy (reddish on the left), the sharp picture stays in the middle
+        let blur = render("blur.mp4", Some("blur"));
+        let bar = e.region(&blur, 0.5, top_left);
+        assert!(
+            bar.0 > 120 && bar.1 < 90,
+            "blur: top-left bar is blurred red, not background: {bar:?}"
+        );
+        assert!(!near(bar, (32, 32, 32), 40));
+        assert!(is_red(e.region(&blur, 0.5, mid_left)) && is_blue(e.region(&blur, 0.5, mid_right)));
+    }
+
+    #[test]
+    fn exports_audio_only_as_m4a_and_wav() {
+        let Some(e) = env("audio") else { return };
+        let (red, tone, green) = (e.red(), e.tone(), e.green_png());
+        let p = project(
+            vec![
+                asset("red", &red, "video", Some(4.0)),
+                asset("tone", &tone, "audio", Some(3.0)),
+                asset("green", &green, "image", None),
+            ],
+            vec![
+                track(
+                    "v1",
+                    "video",
+                    0,
+                    false,
+                    false,
+                    vec![
+                        clip("c1", "red", "v1", 0.0, 0.0, 2.0, 1.0),
+                        clip("c2", "green", "v1", 2.0, 0.0, 2.0, 1.0), // silent still: 2..4 s
+                    ],
+                ),
+                track(
+                    "a1",
+                    "audio",
+                    1,
+                    false,
+                    false,
+                    vec![clip("c3", "tone", "a1", 4.0, 0.0, 2.0, 1.0)],
+                ),
+            ],
+        );
+        let has_video = |f: &Path| {
+            let o = command(&e.ffmpeg)
+                .args(["-hide_banner", "-i"])
+                .arg(f)
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&o.stderr).contains("Video:")
+        };
+
+        for (format, name, encoder) in [
+            (ExportFormat::M4a, "mix.m4a", "aac"),
+            (ExportFormat::Wav, "mix.wav", "pcm_s16le"),
+        ] {
+            let out = e.dir.join(name);
+            let o = ExportOptions {
+                format,
+                ..opts(Quality::Standard)
+            };
+            let (r, progress) = e.export(&p, &o, &out);
+            let r = r.unwrap_or_else(|err| panic!("{name}: {err}"));
+
+            assert_eq!(r.encoder, encoder);
+            assert!(
+                r.has_audio && (r.duration - 6.0).abs() < 0.2,
+                "{name}: duration {}",
+                r.duration
+            );
+            assert!(!has_video(&out), "{name} must not contain a video stream");
+            assert!(e.decodes_cleanly(&out));
+            assert_eq!(progress.last(), Some(&1.0));
+            assert!(!temp_path(&out, format).exists());
+
+            // the same mix as the video export: clip audio, silence under the still, then the wav
+            assert!(
+                e.volume(&out, 0.2, 1.6) > -40.0,
+                "{name}: sound of the video clip"
+            );
+            assert!(
+                e.volume(&out, 2.3, 1.4) < -80.0,
+                "{name}: silence under the still"
+            );
+            assert!(e.volume(&out, 4.2, 1.6) > -40.0, "{name}: the audio clip");
+        }
+
+        // nothing audible: refuse with a clear reason instead of writing a silent file
+        let silent = project(
+            vec![asset("green", &green, "image", None)],
+            vec![track(
+                "v1",
+                "video",
+                0,
+                false,
+                false,
+                vec![clip("c", "green", "v1", 0.0, 0.0, 2.0, 1.0)],
+            )],
+        );
+        let o = ExportOptions {
+            format: ExportFormat::M4a,
+            ..opts(Quality::Draft)
+        };
+        let err = e
+            .export(&silent, &o, &e.dir.join("none.m4a"))
+            .0
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("no sound to export"), "{err}");
+        assert!(!e.dir.join("none.m4a").exists());
+    }
+
+    #[test]
+    fn audio_args_carry_no_video_mapping() {
+        let plan = ExportPlan {
+            width: 640,
+            height: 360,
+            fps: 30.0,
+            quality: Quality::Standard,
+            format: ExportFormat::Wav,
+            duration: 2.0,
+            background: "#000000".into(),
+            clips: vec![],
+        };
+        let wav = build_args(&plan, None, Path::new("/o/.x.cutvii-part.wav")).join(" ");
+        assert!(wav.contains("-map [aout] -vn -c:a pcm_s16le") && wav.contains("-f wav"));
+        assert!(!wav.contains("[vout]") && !wav.contains("libx264"), "{wav}");
+        let m4a = build_args(
+            &ExportPlan {
+                format: ExportFormat::M4a,
+                ..plan
+            },
+            None,
+            Path::new("/o/x.m4a"),
+        )
+        .join(" ");
+        assert!(
+            m4a.contains("-c:a aac -b:a 192k")
+                && m4a.contains("-f ipod")
+                && !m4a.contains("[vout]")
+        );
+        assert_eq!(
+            temp_path(Path::new("/o/song.m4a"), ExportFormat::M4a),
+            PathBuf::from("/o/.song.cutvii-part.m4a")
+        );
+    }
+
+    #[test]
+    fn cancel_stops_the_render_and_leaves_no_output() {
+        let Some(e) = env("cancel") else { return };
+        let green = e.green_png();
+        // a still can be any length, so this is a long, slow job
+        let p = project(
+            vec![asset("g", &green, "image", None)],
+            vec![track(
+                "v1",
+                "video",
+                0,
+                false,
+                false,
+                vec![clip("c", "g", "v1", 0.0, 0.0, 600.0, 1.0)],
+            )],
+        );
+        let out = e.dir.join("never.mp4");
+        let facts = gather_facts(&p, &e.backend);
+        let plan = build_plan(
+            &p,
+            &ExportOptions {
+                width: 1920,
+                height: 1080,
+                fps: 30.0,
+                quality: Quality::High,
+                format: ExportFormat::Mp4,
+            },
+            &facts,
+        )
+        .unwrap();
+
+        let cancel = AtomicBool::new(false);
+        let mut ticks = 0;
+        let started = std::time::Instant::now();
+        let r = e.backend.render(
+            &RenderRequest {
+                plan,
+                output: out.clone(),
+            },
+            &mut |_| {
+                ticks += 1;
+                cancel.store(true, Ordering::Relaxed);
+            },
+            &cancel,
+        );
+
+        assert!(matches!(r, Err(AppError::Cancelled)), "{r:?}");
+        assert!(ticks >= 1, "cancel should be triggered by real progress");
+        assert!(
+            started.elapsed() < Duration::from_secs(20),
+            "cancel must be prompt"
+        );
+        assert!(!out.exists());
+        assert!(
+            !temp_path(&out, ExportFormat::Mp4).exists(),
+            "temp file must be cleaned up"
+        );
+    }
+
+    #[test]
+    fn a_failed_render_keeps_the_existing_output() {
+        let Some(e) = env("fail") else { return };
+        let bad = e.dir.join("bad.mp4");
+        fs::write(&bad, b"this is not a video").unwrap();
+        let p = project(
+            vec![asset("bad", &bad.to_string_lossy(), "video", Some(5.0))],
+            vec![track(
+                "v1",
+                "video",
+                0,
+                false,
+                false,
+                vec![clip("c", "bad", "v1", 0.0, 0.0, 2.0, 1.0)],
+            )],
+        );
+        let out = e.dir.join("keep.mp4");
+        fs::write(&out, b"PREVIOUS EXPORT").unwrap();
+
+        let (r, _) = e.export(&p, &opts(Quality::Draft), &out);
+        let msg = r.unwrap_err().to_string();
+        assert!(msg.contains("FFmpeg failed"), "{msg}");
+        assert_eq!(fs::read(&out).unwrap(), b"PREVIOUS EXPORT");
+        assert!(!temp_path(&out, ExportFormat::Mp4).exists());
+    }
+
+    #[test]
+    fn refuses_to_overwrite_a_source_or_export_with_missing_media() {
+        let Some(e) = env("safety") else { return };
+        let red = e.red();
+        let p = project(
+            vec![asset("red", &red, "video", Some(4.0))],
+            vec![track(
+                "v1",
+                "video",
+                0,
+                false,
+                false,
+                vec![clip("c", "red", "v1", 0.0, 0.0, 2.0, 1.0)],
+            )],
+        );
+        let before = fs::read(&red).unwrap();
+        let (r, _) = e.export(&p, &opts(Quality::Draft), Path::new(&red));
+        assert!(r.unwrap_err().to_string().contains("overwrite a source"));
+        assert_eq!(fs::read(&red).unwrap(), before);
+
+        fs::remove_file(&red).unwrap();
+        let (r, _) = e.export(&p, &opts(Quality::Draft), &e.dir.join("o.mp4"));
+        assert!(r.unwrap_err().to_string().contains("missing"));
+    }
+
+    #[test]
+    fn prepare_plan_checks_access_before_anything_is_rendered() {
+        let Some(e) = env("prepare") else { return };
+        let red = e.red();
+        let p = project(
+            vec![asset("red", &red, "video", Some(4.0))],
+            vec![track(
+                "v1",
+                "video",
+                0,
+                false,
+                false,
+                vec![clip("c", "red", "v1", 0.0, 0.0, 2.0, 1.0)],
+            )],
+        );
+        let ok =
+            crate::export::prepare_plan(&p, &opts(Quality::Draft), &e.backend, &|_| true).unwrap();
+        assert_eq!(ok.duration, 2.0);
+        assert!(ok.clips[0].audio);
+
+        let denied = crate::export::prepare_plan(&p, &opts(Quality::Draft), &e.backend, &|_| false)
+            .unwrap_err();
+        assert!(
+            denied.to_string().contains("not imported or opened"),
+            "{denied}"
+        );
+
+        let bad = ExportOptions {
+            width: 641,
+            ..opts(Quality::Draft)
+        };
+        assert!(
+            crate::export::prepare_plan(&p, &bad, &e.backend, &|_| true)
+                .unwrap_err()
+                .to_string()
+                .contains("even")
+        );
+    }
+
+    /// The whole backend pipeline on real files: import (probe + thumbnail) -> project -> save -> reopen
+    /// -> plan -> render -> verify. What comes out must match what went in.
+    #[test]
+    fn full_flow_import_save_reopen_export() {
+        use crate::media::import::import_one;
+        use crate::project::persistence::{missing_paths, read_project, write_project_atomic};
+
+        let Some(e) = env("fullflow") else { return };
+        let (red, tone) = (e.red(), e.tone());
+        let thumbs = e.dir.join("thumbs");
+
+        // import: metadata comes from ffprobe, not from us
+        let v = import_one(&e.backend, Path::new(&red), &thumbs).unwrap();
+        let a = import_one(&e.backend, Path::new(&tone), &thumbs).unwrap();
+        assert!((v.info.duration.unwrap() - 4.0).abs() < 0.1 && v.thumbnail_path.is_some());
+        assert!((a.info.duration.unwrap() - 3.0).abs() < 0.1);
+
+        let ty = |m: &crate::media::MediaType| serde_json::to_value(m).unwrap();
+        let project = project(
+            vec![
+                json!({"id": "v", "path": v.path, "type": ty(&v.info.media_type), "duration": v.info.duration,
+                       "width": v.info.width, "height": v.info.height, "thumbnailPath": v.thumbnail_path}),
+                json!({"id": "a", "path": a.path, "type": ty(&a.info.media_type), "duration": a.info.duration}),
+            ],
+            vec![
+                track(
+                    "v1",
+                    "video",
+                    0,
+                    false,
+                    false,
+                    vec![clip("c1", "v", "v1", 0.0, 1.0, 3.0, 1.0)],
+                ),
+                track(
+                    "a1",
+                    "audio",
+                    1,
+                    false,
+                    false,
+                    vec![clip("c2", "a", "a1", 1.0, 0.0, 2.0, 0.8)],
+                ),
+            ],
+        );
+
+        // save, then reopen from disk: identical
+        let file = e.dir.join("flow.cutvii");
+        write_project_atomic(&file, &project).unwrap();
+        let reopened = read_project(&file).unwrap();
+        assert_eq!(reopened, project);
+        assert!(missing_paths(&reopened).is_empty());
+
+        // export the reopened project
+        let out = e.dir.join("flow.mp4");
+        let (report, _) = e.export(&reopened, &opts(Quality::Standard), &out);
+        let report = report.expect("export of a reopened project");
+        assert!(
+            (report.duration - 3.0).abs() < 0.2,
+            "2s of video starting at 0, audio 1..3s: {}",
+            report.duration
+        );
+        assert!(e.decodes_cleanly(&out));
+        assert!(
+            e.volume(&out, 0.2, 0.6) > -40.0,
+            "tone from the video clip's source 1..3s"
+        );
+        assert!(e.volume(&out, 1.2, 1.6) > -40.0, "the wav joins at 1s");
+
+        // a source that vanished after saving is reported on reopen, and blocks the export before rendering
+        fs::remove_file(&tone).unwrap();
+        let again = read_project(&file).unwrap();
+        assert_eq!(missing_paths(&again), vec![tone.clone()]);
+        let (r, _) = e.export(&again, &opts(Quality::Draft), &e.dir.join("blocked.mp4"));
+        assert!(r.unwrap_err().to_string().contains("missing"));
+        assert!(!e.dir.join("blocked.mp4").exists());
+    }
+
+    #[test]
+    fn facts_report_missing_files_and_audio_presence() {
+        let Some(e) = env("facts") else { return };
+        let (red, blue) = (e.red(), e.blue());
+        let p = project(
+            vec![
+                asset("r", &red, "video", Some(4.0)),
+                asset("b", &blue, "video", Some(4.0)),
+                asset("x", "/definitely/not/here.mp4", "video", Some(4.0)),
+            ],
+            vec![track("v1", "video", 0, false, false, vec![])],
+        );
+        let f: HashMap<String, AssetFacts> = gather_facts(&p, &e.backend);
+        assert!(f[&red].exists && f[&red].has_audio);
+        assert!(f[&blue].exists && !f[&blue].has_audio);
+        assert!(!f["/definitely/not/here.mp4"].exists);
+    }
+}
