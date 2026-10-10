@@ -96,7 +96,7 @@ export function changeReversed(clipId: string, reversed: boolean): EditResult {
 }
 
 export function changeFit(clipId: string, fit: FitMode): EditResult {
-  return run("Change image fit", (p) => setClipFit(p, clipId, fit));
+  return run("Change fit to canvas", (p) => setClipFit(p, clipId, fit));
 }
 
 /**

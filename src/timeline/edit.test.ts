@@ -196,9 +196,10 @@ describe("setClipVolume / setTrackFlag", () => {
 describe("image fit, new tracks, free slots", () => {
   it("setClipFit stores the mode and is a no-op for the default", () => {
     const p = must(addClip(makeProject(), { assetId: IDS.img, trackId: IDS.v1, start: 0, id: "i" }));
-    const same = setClipFit(p, "i", "fit");
+    const same = setClipFit(p, "i", "fill"); // fill is the default
     expect(same.ok && same.project).toBe(p);
-    expect(clip(must(setClipFit(p, "i", "blur")), "i").fit).toBe("blur");
+    expect(clip(must(setClipFit(p, "i", "blur-bg")), "i").fitMode).toBe("blur-bg");
+    expect(clip(must(setClipFit(p, "i", "fit")), "i").fitMode).toBe("fit");
     expect(code(setClipFit(p, "nope", "fill"))).toBe("unknown-clip");
   });
 

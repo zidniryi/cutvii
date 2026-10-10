@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import fixtureV2 from "../../fixtures/project-v2.json";
+import fixtureV3 from "../../fixtures/project-v3.json";
 import { Inspector } from "@/components/layout/Inspector";
 import { AppDialog } from "@/components/AppDialog";
 import type { Project } from "@/project/model";
@@ -116,14 +116,14 @@ describe("preview mapping", () => {
 });
 
 describe("project format", () => {
-  it("is schema version 2, with speed validated in project files", () => {
-    expect(SCHEMA_VERSION).toBe(2);
-    expect(parseProject(fixtureV2).ok).toBe(true);
-    const bad = structuredClone(fixtureV2) as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+  it("is schema version 3, with speed validated in project files", () => {
+    expect(SCHEMA_VERSION).toBe(3);
+    expect(parseProject(fixtureV3).ok).toBe(true);
+    const bad = structuredClone(fixtureV3) as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
     bad.tracks[0].clips[0].speed = 20;
     const r = parseProject(bad);
     expect(!r.ok && r.errors.join(" ")).toMatch(/Speed must be between 0\.1× and 10×/);
-    const old = { ...fixtureV2, schemaVersion: 1 };
+    const old = { ...fixtureV3, schemaVersion: 1 };
     expect(parseProject(old).ok).toBe(false); // v1 files are upgraded by the Rust migration before they get here
   });
 });

@@ -9,6 +9,7 @@ import { useSelectionStore } from "@/store/selection";
 import { useUiStore } from "@/store/ui";
 import { clipDuration, clipSpeed, findClip, sourceDuration } from "@/timeline/clips";
 import { MAX_SPEED, MAX_VOLUME, MIN_SPEED } from "@/timeline/edit";
+import { DEFAULT_FIT_MODE } from "@/timeline/fit";
 import {
   changeFit,
   changeKeepPitch,
@@ -130,6 +131,12 @@ function VolumeField({ volume, onCommit }: { volume: number; onCommit: (v: numbe
     </div>
   );
 }
+
+const FIT_CHIPS: { id: FitMode; label: string; hint: string }[] = [
+  { id: "fill", label: "Fill", hint: "Cover the canvas; the overflow is cropped" },
+  { id: "fit", label: "Fit", hint: "Show the whole picture with background bars" },
+  { id: "blur-bg", label: "Blur", hint: "Show the whole picture over a blurred copy of itself" },
+];
 
 const SPEED_PRESETS = [0.25, 0.5, 1, 2, 4];
 const seconds = (v: number) => `${v.toFixed(2)} s`;
@@ -405,19 +412,33 @@ export function Inspector() {
           </div>
         </dl>
 
-        {asset.type === "image" && (
-          <label className="block">
-            <span className="mb-1 block text-xs text-text-muted">Image fit</span>
-            <select
-              className={fieldClass}
-              value={clip.fit ?? "fit"}
-              onChange={(e) => report(changeFit(clip.id, e.target.value as FitMode))}
-            >
-              <option value="fit">Fit — whole image, background bars</option>
-              <option value="fill">Fill — cover the canvas, crop the rest</option>
-              <option value="blur">Blur — whole image over a blurred copy</option>
-            </select>
-          </label>
+        {asset.type !== "audio" && (
+          <div role="radiogroup" aria-label="Fit to canvas">
+            <p className="mb-1 text-xs text-text-muted">Fit to canvas</p>
+            <div className="grid grid-cols-3 gap-1">
+              {FIT_CHIPS.map((chip) => {
+                const selected = (clip.fitMode ?? DEFAULT_FIT_MODE) === chip.id;
+                return (
+                  <button
+                    key={chip.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    title={chip.hint}
+                    onClick={() => report(changeFit(clip.id, chip.id))}
+                    className={cn(
+                      "h-9 rounded-md border text-xs pointer-coarse:h-11",
+                      selected
+                        ? "border-accent bg-accent-soft text-text"
+                        : "border-border bg-surface-2 text-text-muted hover:text-text",
+                    )}
+                  >
+                    {chip.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         )}
 
         {asset.type !== "image" && (

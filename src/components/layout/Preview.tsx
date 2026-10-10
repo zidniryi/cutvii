@@ -23,6 +23,7 @@ import { usePlaybackStore } from "@/store/playback";
 import { reverseKey, useReverseStore, type ReversePreview } from "@/store/reverse";
 import { useProjectStore } from "@/store/project";
 import { clipSpeed, projectDuration } from "@/timeline/clips";
+import { BLUR_FRACTION, DEFAULT_FIT_MODE, fitLayout, rectStyle, type Rect } from "@/timeline/fit";
 
 type MediaEl = HTMLVideoElement | HTMLAudioElement;
 
@@ -181,6 +182,7 @@ export function Preview() {
                 key={`${layer.clip.id}:${layer.clip.reversed ? (reverseOf(layer)?.status ?? "none") : "fwd"}`}
                 layer={layer}
                 reverse={reverseOf(layer)}
+                canvas={{ width, height }}
                 register={(el) => {
                   if (el) elements.current.set(layer.clip.id, el);
                   else elements.current.delete(layer.clip.id);
@@ -238,12 +240,15 @@ function LayerView({
   layer,
   register,
   reverse,
+  canvas,
 }: {
   layer: Layer;
   register: (el: MediaEl | null) => void;
   reverse?: ReversePreview;
+  canvas: { width: number; height: number };
 }) {
   const { asset, track, visible } = layer;
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const setMediaError = usePlaybackStore.getState().setMediaError;
   // a reversed clip has nothing to show until its reversed copy exists (never play it forwards by mistake)
   if (layer.clip.reversed && asset.type !== "image" && reverse?.status !== "ready") return null;
@@ -259,50 +264,109 @@ function LayerView({
   if (asset.type === "audio") {
     return <audio ref={register} aria-hidden {...common} />;
   }
+  const mode = layer.clip.fitMode ?? DEFAULT_FIT_MODE;
+  // Same geometry as the export: computed from the real picture size, never the native pixel size.
+  const layout = fitLayout(asset.width ?? 0, asset.height ?? 0, canvas.width, canvas.height, mode);
+  const blur = { filter: `blur(${BLUR_FRACTION * 100}cqh)` };
+
   if (asset.type === "image") {
-    // Images need no sync; only the visible one is shown. Fit modes mirror the export filter graph.
+    // Images need no sync; only the visible one is shown.
     if (!visible) return null;
-    const fit = layer.clip.fit ?? "fit";
     return (
       <div
         data-testid="image-layer"
-        data-fit={fit}
+        data-fit={mode}
         className="absolute inset-0 overflow-hidden"
         style={{ zIndex: track.order }}
       >
-        {fit === "blur" && (
-          // same blur as export: sigma = 3% of the canvas height
+        {layout.backdrop && (
           <img
             src={src}
             alt=""
             aria-hidden
-            className="absolute inset-0 h-full w-full object-cover"
-            style={{ filter: "blur(3cqh)" }}
+            className="absolute max-w-none"
+            style={{ ...rectStyle(layout.backdrop), ...blur }}
           />
         )}
         <img
           src={src}
           alt=""
+          data-role="picture"
           onLoad={() => setMediaError(asset.id, null)}
           onError={() => setMediaError(asset.id, mediaErrorMessage(4))}
-          className={
-            fit === "fill"
-              ? "absolute inset-0 h-full w-full object-cover"
-              : "absolute inset-0 h-full w-full object-contain"
-          }
+          className="absolute max-w-none"
+          style={rectStyle(layout.picture)}
         />
       </div>
     );
   }
   // Non-visible video layers stay mounted (opacity 0) so their audio keeps playing underneath.
   return (
-    <video
-      ref={register}
-      {...common}
-      aria-hidden
-      playsInline
-      className="pointer-events-none absolute inset-0 h-full w-full object-contain"
+    <div
+      data-testid="video-layer"
+      data-fit={mode}
+      className="pointer-events-none absolute inset-0 overflow-hidden"
       style={{ opacity: visible ? 1 : 0, zIndex: track.order }}
+    >
+      {layout.backdrop && visible && <VideoBackdrop source={videoRef} rect={layout.backdrop} style={blur} />}
+      <video
+        ref={(el) => {
+          videoRef.current = el;
+          register(el);
+        }}
+        {...common}
+        aria-hidden
+        playsInline
+        data-role="picture"
+        className="absolute max-w-none object-fill"
+        style={rectStyle(layout.picture)}
+      />
+    </div>
+  );
+}
+
+/**
+ * Blurred backdrop for "blur-bg" video: copies the frames of the one playing <video> onto a small canvas,
+ * so the clip is decoded once (a second <video> would need its own decoder and its own sync).
+ */
+function VideoBackdrop({
+  source,
+  rect,
+  style,
+}: {
+  source: React.RefObject<HTMLVideoElement | null>;
+  rect: Rect;
+  style: React.CSSProperties;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    let raf = 0;
+    const draw = () => {
+      const video = source.current;
+      const canvas = canvasRef.current;
+      const ctx = canvas?.getContext?.("2d");
+      if (video && canvas && ctx && video.videoWidth > 0) {
+        // a small copy is plenty: it is blurred anyway
+        const w = 160;
+        const h = Math.max(2, Math.round((w * video.videoHeight) / video.videoWidth));
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w;
+          canvas.height = h;
+        }
+        ctx.drawImage(video, 0, 0, w, h);
+      }
+      raf = requestAnimationFrame(draw);
+    };
+    raf = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(raf);
+  }, [source]);
+  return (
+    <canvas
+      ref={canvasRef}
+      aria-hidden
+      data-role="backdrop"
+      className="absolute max-w-none"
+      style={{ ...rectStyle(rect), ...style }}
     />
   );
 }

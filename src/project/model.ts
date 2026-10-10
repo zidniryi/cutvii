@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-/** Bump when the on-disk shape changes, and add a migration in `src-tauri/src/project/migrate.rs`. v2: clip speed. */
-export const SCHEMA_VERSION = 2;
+/** Bump when the on-disk shape changes, and add a migration in `src-tauri/src/project/migrate.rs`. v2: clip speed. v3: fitMode. */
+export const SCHEMA_VERSION = 3;
 
 /** Tolerance (seconds) when comparing a clip's sourceOut with the asset duration. */
 const DURATION_EPSILON = 1e-3;
@@ -105,8 +105,8 @@ export const TimelineClipSchema = z
     y: z.number().finite(),
     scale: z.number().positive().finite(),
     opacity: z.number().min(0).max(1),
-    /** How a still image is placed on the canvas; absent means "fit". Ignored for video and audio. */
-    fit: z.enum(["fit", "fill", "blur"]).optional(),
+    /** How a video or image is scaled to the canvas; absent means "fill". Never shown at native pixel size. */
+    fitMode: z.enum(["fill", "fit", "blur-bg"]).optional(),
     /** Playback speed, 0.1 to 10; absent means 1. Timeline length = (sourceOut - sourceIn) / speed. */
     speed: z
       .number()
@@ -186,7 +186,7 @@ export const ProjectSchema = z
     });
   });
 
-export type FitMode = NonNullable<z.infer<typeof TimelineClipSchema>["fit"]>;
+export type FitMode = NonNullable<z.infer<typeof TimelineClipSchema>["fitMode"]>;
 export type MediaType = z.infer<typeof MediaTypeSchema>;
 export type ProjectSettings = z.infer<typeof ProjectSettingsSchema>;
 export type MediaAsset = z.infer<typeof MediaAssetSchema>;

@@ -430,7 +430,7 @@ mod tests {
         sout: f64,
     ) -> serde_json::Value {
         json!({"id": id, "assetId": asset, "trackId": track, "timelineStart": start, "sourceIn": sin,
-               "sourceOut": sout, "volume": 1, "x": 0, "y": 0, "scale": 1, "opacity": 1})
+               "sourceOut": sout, "volume": 1, "x": 0, "y": 0, "scale": 1, "opacity": 1, "fitMode": "fit"})
     }
     fn track(
         id: &str,
@@ -665,10 +665,24 @@ mod tests {
         assert!(blur.contains("[g1][bl1]overlay=x=0:y=0:format=auto:shortest=1[m1]"));
         assert!(blur.contains("[m1][s1]overlay=x=(W-w)/2:y=(H-h)/2"));
 
-        // video clips ignore the setting
+        // video follows the same three modes
         p.tracks[0].clips[0].fit_mode = Some(FitMode::Fill);
         let g = build_filter_graph(&build_plan(&p, &opts(), &sample_facts()).unwrap()).graph;
-        assert!(g.contains("[0:v]fps=30,scale=640:360:force_original_aspect_ratio=decrease,pad="));
+        assert!(g.contains("[0:v]fps=30,scale=640:360:force_original_aspect_ratio=increase,crop=640:360,setsar=1"), "{g}");
+        assert!(!g.contains("[0:v]fps=30,scale=640:360:force_original_aspect_ratio=decrease,pad="));
+
+        p.tracks[0].clips[0].fit_mode = Some(FitMode::BlurBg);
+        let g = build_filter_graph(&build_plan(&p, &opts(), &sample_facts()).unwrap()).graph;
+        assert!(
+            g.contains("[0:v]fps=30,split=2[a0][b0]") && g.contains("gblur=sigma=10.8[bl0]"),
+            "{g}"
+        );
+        assert!(g.contains("[bl0][s0]overlay=x=(W-w)/2:y=(H-h)/2,setsar=1"));
+
+        // a clip without the field uses the default: fill
+        p.tracks[0].clips[0].fit_mode = None;
+        let plan = build_plan(&p, &opts(), &sample_facts()).unwrap();
+        assert_eq!(plan.clips[0].fit, FitMode::Fill);
     }
 
     #[test]

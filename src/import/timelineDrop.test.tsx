@@ -172,25 +172,29 @@ describe("image clips", () => {
     await waitFor(() => expect(state().project.tracks[0].clips).toHaveLength(1));
 
     const layer = () => screen.getByTestId("image-layer");
-    expect(layer().dataset.fit).toBe("fit");
+    const chips = () =>
+      within(
+        within(screen.getByRole("region", { name: "Inspector" })).getByRole("radiogroup", {
+          name: "Fit to canvas",
+        }),
+      );
+    expect(layer().dataset.fit).toBe("fill"); // the default: never shown at native size
     expect(layer().querySelectorAll("img")).toHaveLength(1);
-    expect(layer().querySelector("img")!.className).toContain("object-contain");
 
     await userEvent.click(screen.getByRole("tab", { name: "Inspector" }));
-    const select = within(screen.getByRole("region", { name: "Inspector" })).getByLabelText("Image fit");
-    await userEvent.selectOptions(select, "fill");
-    expect(state().project.tracks[0].clips[0].fit).toBe("fill");
-    expect(layer().querySelector("img")!.className).toContain("object-cover");
+    expect(chips().getByRole("radio", { name: "Fill" })).toHaveAttribute("aria-checked", "true");
+    await userEvent.click(chips().getByRole("radio", { name: "Fit" }));
+    expect(state().project.tracks[0].clips[0].fitMode).toBe("fit");
+    expect(layer().dataset.fit).toBe("fit");
 
-    await userEvent.selectOptions(select, "blur");
+    await userEvent.click(chips().getByRole("radio", { name: "Blur" }));
     const imgs = layer().querySelectorAll("img");
     expect(imgs).toHaveLength(2); // blurred copy behind, sharp picture in front
     expect(imgs[0].style.filter).toContain("blur");
-    expect(imgs[1].className).toContain("object-contain");
     expect(parseProject(state().project).ok).toBe(true);
 
     act(() => state().undo());
-    expect(state().project.tracks[0].clips[0].fit).toBe("fill");
-    expect(state().past.at(-1)?.label).toBe("Change image fit");
+    expect(state().project.tracks[0].clips[0].fitMode).toBe("fit");
+    expect(state().past.at(-1)?.label).toBe("Change fit to canvas");
   });
 });

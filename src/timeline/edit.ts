@@ -10,6 +10,7 @@
  */
 import type { FitMode, Project, TimelineClip, TimelineTrack } from "@/project/model";
 import { clipDuration, clipEnd, clipSpeed, EPS, findClip, minClipDuration } from "./clips";
+import { DEFAULT_FIT_MODE } from "./fit";
 
 export const DEFAULT_IMAGE_DURATION = 5;
 
@@ -291,17 +292,17 @@ export function setTrackFlag(
   );
 }
 
-/** Still-image placement: fit (bars), fill (crop) or blur (blurred copy behind). One rule for preview and export. */
-export function setClipFit(project: Project, clipId: string, fit: FitMode): EditResult {
+/** How a video or image clip is scaled to the canvas: fill (crop), fit (bars) or blur-bg. One rule for preview and export. */
+export function setClipFit(project: Project, clipId: string, fitMode: FitMode): EditResult {
   const found = findClip(project, clipId);
   if (!found) return fail("unknown-clip", `Unknown clip ${clipId}`);
-  if ((found.clip.fit ?? "fit") === fit) return ok(project);
+  if ((found.clip.fitMode ?? DEFAULT_FIT_MODE) === fitMode) return ok(project);
   return ok(
     withTracks(
       project,
       project.tracks.map((t) =>
         t.id === found.track.id
-          ? { ...t, clips: t.clips.map((c) => (c.id === clipId ? { ...c, fit } : c)) }
+          ? { ...t, clips: t.clips.map((c) => (c.id === clipId ? { ...c, fitMode } : c)) }
           : t,
       ),
     ),

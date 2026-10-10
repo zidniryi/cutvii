@@ -880,17 +880,7 @@ mod tests {
     fn exports_the_requested_size_and_letterboxes_with_the_background() {
         let Some(e) = env("size") else { return };
         let green = e.green_png(); // 2:1 still
-        let p = project(
-            vec![asset("g", &green, "image", None)],
-            vec![track(
-                "v1",
-                "video",
-                0,
-                false,
-                false,
-                vec![clip("c", "g", "v1", 0.0, 0.0, 1.0, 1.0)],
-            )],
-        );
+        let p = still_project(&green, Some("fit"));
         let out = e.dir.join("sq.mp4");
         let o = ExportOptions {
             width: 360,
@@ -993,7 +983,7 @@ mod tests {
 
         // export: 100x200 portrait fitted into 360x360 -> 180 px wide, centred; red above blue, bars left/right
         let out = e.dir.join("exif.mp4");
-        e.export(&still_project(&rotated, None), &square(), &out)
+        e.export(&still_project(&rotated, Some("fit")), &square(), &out)
             .0
             .unwrap();
         assert!(
@@ -1565,6 +1555,125 @@ mod tests {
                 .is_err()
         );
         assert!(!e.dir.join("none.png").exists() && !e.dir.join("none.part.png").exists());
+    }
+
+    #[test]
+    fn video_fills_fits_or_blurs_into_a_canvas_of_another_shape() {
+        let Some(e) = env("videofit") else { return };
+        // 16:9 landscape video, left half red and right half blue, into a 9:16 portrait canvas
+        let wide = e.make(
+            "wide.mp4",
+            &[
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=red:s=160x180:r=30:d=2",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=blue:s=160x180:r=30:d=2",
+                "-filter_complex",
+                "hstack",
+                "-pix_fmt",
+                "yuv420p",
+            ],
+        );
+        let portrait = ExportOptions {
+            width: 360,
+            height: 640,
+            fps: 30.0,
+            quality: Quality::Draft,
+            format: ExportFormat::Mp4,
+        };
+        let render = |name: &str, mode: Option<&str>| {
+            let mut c = clip("c", "w", "v1", 0.0, 0.0, 2.0, 1.0);
+            if let Some(m) = mode {
+                c["fitMode"] = json!(m);
+            }
+            let p = project(
+                vec![asset("w", &wide, "video", Some(2.0))],
+                vec![track("v1", "video", 0, false, false, vec![c])],
+            );
+            let out = e.dir.join(name);
+            let r = e
+                .export(&p, &portrait, &out)
+                .0
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            assert_eq!((r.width, r.height), (360, 640));
+            out
+        };
+        let top = "200:60:80:20"; // far above the middle band a fitted 16:9 picture occupies (202 px tall)
+        let mid_left = "60:100:40:270";
+        let mid_right = "60:100:260:270";
+
+        // default = fill: the canvas is covered top to bottom, the sides are cropped away equally
+        let fill = render("fill.mp4", None);
+        let t = e.region(&fill, 1.0, "100:60:20:20");
+        assert!(
+            is_red(t),
+            "fill: the top-left corner is picture, not a bar: {t:?}"
+        );
+        assert!(
+            is_blue(e.region(&fill, 1.0, "100:60:240:560")),
+            "fill: bottom-right too"
+        );
+
+        // fit: whole picture in the middle, background bars above and below
+        let fit = render("fit.mp4", Some("fit"));
+        assert!(
+            near(e.region(&fit, 1.0, top), (32, 32, 32), 14),
+            "fit: bar is the background colour"
+        );
+        assert!(
+            is_red(e.region(&fit, 1.0, mid_left)) && is_blue(e.region(&fit, 1.0, mid_right)),
+            "fit: whole picture visible"
+        );
+
+        // blur-bg: same sharp picture in the middle, bars are a blurred copy instead of the background
+        let blur = render("blur.mp4", Some("blur-bg"));
+        let bar = e.region(&blur, 1.0, "100:60:20:20");
+        assert!(
+            bar.0 > 120 && bar.1 < 90,
+            "blur-bg: the bar is blurred picture: {bar:?}"
+        );
+        assert!(is_red(e.region(&blur, 1.0, mid_left)) && is_blue(e.region(&blur, 1.0, mid_right)));
+
+        // and the other way round: a 9:16 video into a 16:9 canvas is filled edge to edge by default
+        let tall = e.make(
+            "tall.mp4",
+            &[
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=red:s=180x160:r=30:d=1",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=blue:s=180x160:r=30:d=1",
+                "-filter_complex",
+                "vstack",
+                "-pix_fmt",
+                "yuv420p",
+            ],
+        );
+        let p = project(
+            vec![asset("t", &tall, "video", Some(1.0))],
+            vec![track(
+                "v1",
+                "video",
+                0,
+                false,
+                false,
+                vec![clip("c", "t", "v1", 0.0, 0.0, 1.0, 1.0)],
+            )],
+        );
+        let out = e.dir.join("tall-fill.mp4");
+        e.export(&p, &opts(Quality::Draft), &out).0.unwrap();
+        let left_edge = e.region(&out, 0.5, "40:100:10:20");
+        assert!(
+            is_red(left_edge),
+            "9:16 into 16:9 with fill: no side bars: {left_edge:?}"
+        );
     }
 
     #[test]

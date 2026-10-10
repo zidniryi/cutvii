@@ -1,4 +1,4 @@
-import fixture from "../../fixtures/project-v2.json";
+import fixture from "../../fixtures/project-v3.json";
 import {
   canvasFromAsset,
   canvasFromValues,
