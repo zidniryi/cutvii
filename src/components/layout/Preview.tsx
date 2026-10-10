@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useRef } from "react";
-import { MonitorPlay, Pause, Play, SkipBack } from "lucide-react";
+import { MonitorPlay } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
-import { IconButton } from "@/components/IconButton";
 import { fileName, mediaUrl } from "@/lib/media";
-import { formatTimecode } from "@/lib/timecode";
-import { goToStart, setMediaClock, startClock, togglePlayback } from "@/playback/controller";
+import { setMediaClock, startClock } from "@/playback/controller";
 import {
   layerKey,
   layersAt,
@@ -18,6 +16,7 @@ import {
   timelineTimeFor,
   type Layer,
 } from "@/playback/engine";
+import { TransportBar } from "@/components/preview/TransportBar";
 import { ensureReversePreviews } from "@/playback/reversePreview";
 import { usePlaybackStore } from "@/store/playback";
 import { reverseKey, useReverseStore, type ReversePreview } from "@/store/reverse";
@@ -26,35 +25,6 @@ import { clipSpeed, projectDuration } from "@/timeline/clips";
 import { BLUR_FRACTION, DEFAULT_FIT_MODE, fitLayout, rectStyle, type Rect } from "@/timeline/fit";
 
 type MediaEl = HTMLVideoElement | HTMLAudioElement;
-
-function Timecode() {
-  const playhead = usePlaybackStore((s) => s.playhead);
-  const fps = useProjectStore((s) => s.project.settings.fps);
-  const duration = useProjectStore((s) => projectDuration(s.project));
-  return (
-    <span className="mx-2 font-mono text-xs tabular-nums" aria-label="Timecode">
-      {formatTimecode(playhead, fps)}
-      <span className="text-text-muted"> / {formatTimecode(duration, fps)}</span>
-    </span>
-  );
-}
-
-function Controls() {
-  const playing = usePlaybackStore((s) => s.playing);
-  const hasContent = useProjectStore((s) => projectDuration(s.project) > 0);
-  return (
-    <div className="flex h-12 shrink-0 items-center justify-center gap-1 border-t bg-surface-1 px-2">
-      <IconButton label="Go to start (Home)" icon={<SkipBack />} onClick={goToStart} />
-      <IconButton
-        label={playing ? "Pause (Space)" : "Play (Space)"}
-        icon={playing ? <Pause /> : <Play />}
-        disabled={!hasContent}
-        onClick={togglePlayback}
-      />
-      <Timecode />
-    </div>
-  );
-}
 
 export function Preview() {
   const project = useProjectStore((s) => s.project);
@@ -91,16 +61,18 @@ export function Preview() {
   // Imperative sync of every mounted element with the playhead (seek, play/pause, volume).
   useEffect(() => {
     const sync = () => {
-      const { playhead, playing: isPlaying, setMediaError } = usePlaybackStore.getState();
+      const monitor = usePlaybackStore.getState();
+      const { playhead, playing: isPlaying, setMediaError } = monitor;
       const lead = pickLead(layers);
       for (const layer of layers) {
         const el = elements.current.get(layer.clip.id);
         if (!el) continue;
-        el.volume = Math.min(1, Math.max(0, layer.clip.volume)); // preview caps at 100%; export applies gain
+        // clip volume (capped at 100% in the preview; export applies gain) times the monitor volume
+        el.volume = Math.min(1, Math.max(0, layer.clip.volume)) * monitor.volume;
         const speed = clipSpeed(layer.clip);
         // same rule as export: no sound above 4x
-        el.muted = layer.track.muted || speed > MAX_AUDIBLE_SPEED;
-        const base = previewRate(speed).rate;
+        el.muted = monitor.muted || layer.track.muted || speed > MAX_AUDIBLE_SPEED;
+        const base = previewRate(speed * monitor.previewSpeed).rate; // preview speed is monitor-only
         if ("preservesPitch" in el) el.preservesPitch = layer.clip.keepPitch ?? true;
 
         const plan = planSync({
@@ -231,7 +203,7 @@ export function Preview() {
           </div>
         </div>
       </div>
-      <Controls />
+      <TransportBar />
     </section>
   );
 }

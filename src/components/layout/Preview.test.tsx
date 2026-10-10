@@ -21,7 +21,9 @@ function place(assetId: string, trackId: string, start: number, id: string, dura
 }
 const seek = (t: number) => act(() => usePlaybackStore.getState().setPlayhead(t));
 const videos = () => Array.from(document.querySelectorAll("video"));
-const visibleVideo = () => videos().find((v) => v.style.opacity === "1");
+// opacity lives on the layer wrapper (the picture inside it is positioned by the fit rules)
+const layerOpacity = (v: HTMLVideoElement) => v.parentElement!.style.opacity;
+const visibleVideo = () => videos().find((v) => layerOpacity(v) === "1");
 
 beforeEach(() => {
   useProjectStore.setState({ project: createProject(), past: [], future: [] });
@@ -60,8 +62,8 @@ describe("Preview", () => {
     expect(videos()).toHaveLength(2);
     const [a, b] = videos();
     expect(a.currentTime).toBeCloseTo(4.5);
-    expect(a.style.opacity).toBe("1");
-    expect(b.style.opacity).toBe("0");
+    expect(layerOpacity(a)).toBe("1");
+    expect(layerOpacity(b)).toBe("0");
     expect(b.currentTime).toBe(0);
   });
 

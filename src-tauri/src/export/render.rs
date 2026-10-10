@@ -1017,15 +1017,12 @@ mod tests {
         let mid_right = "100:100:230:130";
 
         // fit (also the default): bars are the background colour, whole picture visible
-        for out in [render("fit.mp4", Some("fit"))] {
-            assert!(
-                near(e.region(&out, 0.5, top_left), (32, 32, 32), 14),
-                "fit: top bar is background"
-            );
-            assert!(
-                is_red(e.region(&out, 0.5, mid_left)) && is_blue(e.region(&out, 0.5, mid_right))
-            );
-        }
+        let out = render("fit.mp4", Some("fit"));
+        assert!(
+            near(e.region(&out, 0.5, top_left), (32, 32, 32), 14),
+            "fit: top bar is background"
+        );
+        assert!(is_red(e.region(&out, 0.5, mid_left)) && is_blue(e.region(&out, 0.5, mid_right)));
 
         // fill: no bars at all, the canvas is covered edge to edge
         let fill = render("fill.mp4", None); // fill is the default

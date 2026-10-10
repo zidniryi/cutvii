@@ -17,6 +17,61 @@ export function goToStart() {
   usePlaybackStore.getState().setPlayhead(0);
 }
 
+export function goToEnd() {
+  usePlaybackStore.getState().setPlayhead(projectDuration(useProjectStore.getState().project));
+}
+
+/** Seek to a time, kept inside the project. */
+export function seekTo(seconds: number) {
+  const duration = projectDuration(useProjectStore.getState().project);
+  usePlaybackStore.getState().setPlayhead(Math.min(Math.max(0, seconds), duration));
+}
+
+/** Step whole frames from the frame the playhead is on (`,` and `.`). */
+export function stepFrames(frames: number) {
+  const fps = useProjectStore.getState().project.settings.fps;
+  const current = Math.round(usePlaybackStore.getState().playhead * fps);
+  seekTo((current + frames) / fps);
+}
+
+export const PREVIEW_SPEEDS = [0.5, 1, 1.5, 2] as const;
+
+/**
+ * Coalesce many requests into one per animation frame: only the latest value is applied.
+ * Used for scrubbing, so the picture is asked to seek at most once per frame (the element keeps showing
+ * its last frame until the new one is decoded).
+ */
+export function createFrameThrottle<T>(apply: (value: T) => void) {
+  let pending: { value: T } | null = null;
+  let raf = 0;
+  const flush = () => {
+    raf = 0;
+    if (!pending) return;
+    const { value } = pending;
+    pending = null;
+    apply(value);
+  };
+  return {
+    request(value: T) {
+      pending = { value };
+      if (!raf) raf = requestAnimationFrame(flush);
+    },
+    /** Apply whatever is pending right now (pointer released). */
+    flush() {
+      if (raf) cancelAnimationFrame(raf);
+      flush();
+    },
+    cancel() {
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+      pending = null;
+    },
+  };
+}
+
+/** Scrubbing entry point shared by the seek bar. */
+export const scrub = createFrameThrottle<number>(seekTo);
+
 /** What the picture/sound on screen says the time is, if anything is driving it. */
 export type MediaClock = () => { time: number } | "waiting" | null;
 
@@ -51,7 +106,7 @@ export function startClock(): () => void {
     last = now;
 
     const media = mediaClock?.() ?? null;
-    let next = pb.playhead + dt;
+    let next = pb.playhead + dt * pb.previewSpeed;
     if (media === "waiting") {
       waited += dt;
       if (waited < MAX_MEDIA_WAIT) next = pb.playhead;
@@ -64,6 +119,12 @@ export function startClock(): () => void {
 
     const duration = projectDuration(useProjectStore.getState().project);
     if (next >= duration) {
+      if (pb.loop && duration > 0) {
+        pb.setPlayhead(0); // the media elements are far from 0 now, so the sync re-seeks them
+        waited = 0;
+        raf = requestAnimationFrame(tick);
+        return;
+      }
       pb.setPlayhead(duration);
       pb.pause();
       return;

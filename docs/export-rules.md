@@ -7,7 +7,10 @@ Source of truth: `src-tauri/src/export/` (`plan.rs` builds the plan and FFmpeg f
 - Canvas = export size on the project's background colour; the length is the end of the last clip on any track.
 - Tracks are composited in ascending `order`; the clip on the highest **visible** video track covers the ones below
   (same rule as the preview, where only that clip is shown).
-- Clips are fitted inside the canvas keeping aspect ratio, letter/pillar-boxed with the background colour.
+- Each video or image clip is scaled to the canvas by its `fitMode`, never shown at native pixel size:
+  **fill** (default) covers the canvas and crops the overflow equally on both sides; **fit** shows the whole picture
+  with bars in the background colour; **blur-bg** shows the whole picture over a blurred, covering copy of itself
+  (blur sigma = 3 % of the canvas height). The preview uses the same geometry (`src/timeline/fit.ts`).
 - Stills are looped for the clip length; transparency is flattened onto the background.
 - Gaps show the background colour.
 - `hidden` tracks give no picture. `x`, `y`, `scale`, `opacity` are not applied yet (not in the preview either).

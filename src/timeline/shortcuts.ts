@@ -21,7 +21,8 @@ export type ShortcutAction =
   | "seek-forward"
   | "seek-back-second"
   | "seek-forward-second"
-  | "home";
+  | "home"
+  | "end";
 
 export interface KeyLike {
   key: string;
@@ -62,6 +63,7 @@ export const SHORTCUT_LABELS: Record<ShortcutAction, string> = {
   "seek-back-second": "Shift ←",
   "seek-forward-second": "Shift →",
   home: "Home",
+  end: "End",
 };
 
 function withModifier(e: KeyLike): ShortcutAction | null {
@@ -112,8 +114,14 @@ function plain(e: KeyLike): ShortcutAction | null {
       return e.shiftKey ? "seek-back-second" : "seek-back";
     case "ArrowRight":
       return e.shiftKey ? "seek-forward-second" : "seek-forward";
+    case ",":
+      return "seek-back";
+    case ".":
+      return "seek-forward";
     case "Home":
       return "home";
+    case "End":
+      return "end";
     default:
       return null;
   }

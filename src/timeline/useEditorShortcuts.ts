@@ -1,8 +1,7 @@
 import { useEffect } from "react";
-import { togglePlayback } from "@/playback/controller";
+import { goToEnd, goToStart, stepFrames, togglePlayback } from "@/playback/controller";
 import { newProjectFlow, openProjectFlow, saveFlow } from "@/project/fileActions";
 import { usePlaybackStore } from "@/store/playback";
-import { useProjectStore } from "@/store/project";
 import { copySelected, cutSelected, pasteAtPlayhead } from "./clipboard";
 import { deleteSelected, redo, report, splitAtPlayhead, undo } from "./editor";
 import { freezeFrameAtPlayhead } from "./freeze";
@@ -39,11 +38,12 @@ const RUN: Record<ShortcutAction, () => void> = {
   split: () => void report(splitAtPlayhead()),
   freeze: () => void freezeFrameAtPlayhead(),
   delete: () => void deleteSelected(),
-  "seek-back": () => seek(-1 / useProjectStore.getState().project.settings.fps),
-  "seek-forward": () => seek(1 / useProjectStore.getState().project.settings.fps),
+  "seek-back": () => stepFrames(-1),
+  "seek-forward": () => stepFrames(1),
   "seek-back-second": () => seek(-1),
   "seek-forward-second": () => seek(1),
-  home: () => usePlaybackStore.getState().setPlayhead(0),
+  home: goToStart,
+  end: goToEnd,
 };
 
 /**
