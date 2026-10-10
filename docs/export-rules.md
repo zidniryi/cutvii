@@ -30,6 +30,17 @@ Source of truth: `src-tauri/src/export/` (`plan.rs` builds the plan and FFmpeg f
 - The preview can only play 0.25×–4× in the webview; outside that range it plays at the nearest limit while the
   export uses the real speed.
 
+## Reverse and freeze frame
+
+- A reversed clip plays its used source range backwards (picture and sound). Before rendering, that range is
+  reversed into a lossless temporary copy (FFV1 + PCM) next to the output, in chunks sized to keep at most about
+  256 MB of raw frames in memory, joined in reverse order. The copy is deleted when the export ends, fails or is
+  cancelled. Speed is applied after reversing.
+- The preview plays a separate small reversed copy (H.264, 540p max) cached under the app cache; it is never used
+  for export. Until it exists the preview shows "Preparing reverse preview…".
+- Freeze frame extracts the exact frame from the original file at full resolution as a PNG in the app data folder
+  and holds it as a 2 s still.
+
 ## Encoding
 
 - H.264 in MP4 (`+faststart`), AAC 192 kb/s. Software x264 when available (Draft/Standard/High = CRF 28/23/18),

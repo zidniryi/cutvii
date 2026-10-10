@@ -60,6 +60,8 @@ export function Preview() {
   const playing = usePlaybackStore((s) => s.playing);
   const mediaErrors = usePlaybackStore((s) => s.mediaErrors);
   const elements = useRef(new Map<string, MediaEl>());
+  // Reversed clips play from a reversed copy that Rust prepares in the background.
+  const reversePreviews = useReverseStore((s) => s.previews);
   const lastSeekAt = useRef(new Map<string, number>());
 
   // Re-render only when the set of on-screen layers changes, not on every playhead tick.
@@ -132,10 +134,9 @@ export function Preview() {
     };
     sync();
     return usePlaybackStore.subscribe(sync);
-  }, [layers]);
+    // also when a reversed copy becomes ready: its freshly mounted element must be put at the playhead
+  }, [layers, reversePreviews]);
 
-  // Reversed clips play from a reversed copy that Rust prepares in the background.
-  const reversePreviews = useReverseStore((s) => s.previews);
   useEffect(() => ensureReversePreviews(project), [project]);
   const reverseOf = (layer: Layer): ReversePreview | undefined =>
     layer.clip.reversed

@@ -135,12 +135,12 @@ impl FfmpegBackend {
     ) -> AppResult<ExportPlan> {
         let mut plan = plan.clone();
         let total = plan.clips.iter().filter(|c| c.reversed).count().max(1);
-        let mut done = 0usize;
-        for (i, clip) in plan
+        for (done, (i, clip)) in plan
             .clips
             .iter_mut()
             .enumerate()
             .filter(|(_, c)| c.reversed)
+            .enumerate()
         {
             let out = work.join(format!("reversed-{i}.mkv"));
             let base = done as f64 / total as f64;
@@ -155,7 +155,6 @@ impl FfmpegBackend {
             clip.path = out;
             clip.source_in = 0.0;
             clip.reversed = false;
-            done += 1;
         }
         Ok(plan)
     }

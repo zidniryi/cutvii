@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::media::MediaType;
 
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -48,17 +48,20 @@ pub struct MediaAsset {
     pub fps_den: Option<u32>,
 }
 
-/// How a still image is placed on the canvas. Absent means `Fit`.
+/// How a video or image clip is scaled to the canvas. Absent means `Fill`.
+/// The picture is never shown at its native pixel size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
 pub enum FitMode {
-    /// Whole picture visible, bars filled with the background colour.
-    #[default]
-    Fit,
     /// Canvas fully covered, the overflow is cropped.
+    #[default]
+    #[serde(rename = "fill")]
     Fill,
+    /// Whole picture visible, bars filled with the background colour.
+    #[serde(rename = "fit")]
+    Fit,
     /// Whole picture visible over a blurred, enlarged copy of itself.
-    Blur,
+    #[serde(rename = "blur-bg")]
+    BlurBg,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -76,7 +79,7 @@ pub struct TimelineClip {
     pub scale: f64,
     pub opacity: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fit: Option<FitMode>,
+    pub fit_mode: Option<FitMode>,
     /// Playback speed (0.1 to 10). Absent means 1. Timeline length = (sourceOut - sourceIn) / speed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speed: Option<f64>,

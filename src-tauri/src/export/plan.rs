@@ -31,7 +31,7 @@ pub struct PlannedClip {
     pub reversed: bool,
     pub start: f64,
     pub volume: f64,
-    /// Placement of a still image on the canvas (ignored for video).
+    /// How the picture is scaled to the canvas (video and stills).
     pub fit: FitMode,
     /// Contributes picture (on a visible video track, not an audio asset).
     pub video: bool,
@@ -162,7 +162,7 @@ pub fn build_plan(
                 reversed,
                 start: c.timeline_start,
                 volume: c.volume,
-                fit: c.fit.unwrap_or_default(),
+                fit: c.fit_mode.unwrap_or_default(),
                 video,
                 audio,
             });
@@ -295,7 +295,7 @@ pub fn build_filter_graph(plan: &ExportPlan) -> FilterGraph {
                     FitMode::Fill => parts.push(format!(
                         "[{i}:v]format=rgba,scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}[s{i}]"
                     )),
-                    FitMode::Blur => {
+                    FitMode::BlurBg => {
                         // sigma is 3% of the canvas height, mirrored by the preview's CSS blur
                         let sigma = (h as f64 * 0.03).max(2.0);
                         parts.push(format!("[{i}:v]format=rgba,split=2[a{i}][b{i}]"));
@@ -306,7 +306,7 @@ pub fn build_filter_graph(plan: &ExportPlan) -> FilterGraph {
                     }
                 }
                 parts.push(format!("color=c={bg}:s={w}x{h}:r={fps}:d={dur}[g{i}]"));
-                let base = if clip.fit == FitMode::Blur {
+                let base = if clip.fit == FitMode::BlurBg {
                     parts.push(format!(
                         "[g{i}][bl{i}]overlay=x=0:y=0:format=auto:shortest=1[m{i}]"
                     ));
@@ -324,10 +324,30 @@ pub fn build_filter_graph(plan: &ExportPlan) -> FilterGraph {
                 } else {
                     String::new()
                 };
-                parts.push(format!(
-                    "[{i}:v]{retime}fps={fps},scale={w}:{h}:force_original_aspect_ratio=decrease,\
-                     pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color={bg},setsar=1,format=yuv420p,{shift}[c{i}]"
-                ));
+                match clip.fit {
+                    // whole picture, bars in the background colour
+                    FitMode::Fit => parts.push(format!(
+                        "[{i}:v]{retime}fps={fps},scale={w}:{h}:force_original_aspect_ratio=decrease,\
+                         pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color={bg},setsar=1,format=yuv420p,{shift}[c{i}]"
+                    )),
+                    // cover the canvas, crop the overflow equally on both sides
+                    FitMode::Fill => parts.push(format!(
+                        "[{i}:v]{retime}fps={fps},scale={w}:{h}:force_original_aspect_ratio=increase,\
+                         crop={w}:{h},setsar=1,format=yuv420p,{shift}[c{i}]"
+                    )),
+                    // whole picture over a blurred, covering copy of itself
+                    FitMode::BlurBg => {
+                        let sigma = (h as f64 * 0.03).max(2.0);
+                        parts.push(format!("[{i}:v]{retime}fps={fps},split=2[a{i}][b{i}]"));
+                        parts.push(format!(
+                            "[a{i}]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},gblur=sigma={sigma:.1}[bl{i}]"
+                        ));
+                        parts.push(format!("[b{i}]scale={w}:{h}:force_original_aspect_ratio=decrease[s{i}]"));
+                        parts.push(format!(
+                            "[bl{i}][s{i}]overlay=x=(W-w)/2:y=(H-h)/2,setsar=1,format=yuv420p,{shift}[c{i}]"
+                        ));
+                    }
+                }
             }
             parts.push(format!(
                 "[v{current}][c{i}]overlay=eof_action=pass:repeatlast=0[v{n}]",
@@ -393,7 +413,7 @@ mod tests {
 
     pub fn project(assets: serde_json::Value, tracks: serde_json::Value) -> Project {
         serde_json::from_value(json!({
-            "id": "p", "name": "t", "schemaVersion": 2,
+            "id": "p", "name": "t", "schemaVersion": 3,
             "createdAt": "2026-01-01T00:00:00.000Z", "modifiedAt": "2026-01-01T00:00:00.000Z",
             "settings": {"width": 1280, "height": 720, "fps": 30, "backgroundColor": "#102030"},
             "assets": assets, "tracks": tracks
@@ -631,11 +651,11 @@ mod tests {
         );
         assert!(!fit.contains("gblur"));
 
-        p.tracks[1].clips[0].fit = Some(FitMode::Fill);
+        p.tracks[1].clips[0].fit_mode = Some(FitMode::Fill);
         let fill = build_filter_graph(&build_plan(&p, &opts(), &sample_facts()).unwrap()).graph;
         assert!(fill.contains("[1:v]format=rgba,scale=640:360:force_original_aspect_ratio=increase,crop=640:360[s1]"), "{fill}");
 
-        p.tracks[1].clips[0].fit = Some(FitMode::Blur);
+        p.tracks[1].clips[0].fit_mode = Some(FitMode::BlurBg);
         let blur = build_filter_graph(&build_plan(&p, &opts(), &sample_facts()).unwrap()).graph;
         assert!(blur.contains("[1:v]format=rgba,split=2[a1][b1]"));
         assert!(
@@ -646,7 +666,7 @@ mod tests {
         assert!(blur.contains("[m1][s1]overlay=x=(W-w)/2:y=(H-h)/2"));
 
         // video clips ignore the setting
-        p.tracks[0].clips[0].fit = Some(FitMode::Fill);
+        p.tracks[0].clips[0].fit_mode = Some(FitMode::Fill);
         let g = build_filter_graph(&build_plan(&p, &opts(), &sample_facts()).unwrap()).graph;
         assert!(g.contains("[0:v]fps=30,scale=640:360:force_original_aspect_ratio=decrease,pad="));
     }

@@ -11,7 +11,7 @@ use crate::errors::{AppError, AppResult};
 
 pub type Migration = fn(Value) -> Result<Value, String>;
 
-const MIGRATIONS: &[Migration] = &[no_version_zero, v1_to_v2];
+const MIGRATIONS: &[Migration] = &[no_version_zero, v1_to_v2, v2_to_v3];
 
 fn no_version_zero(_: Value) -> Result<Value, String> {
     Err("schema version 0 never existed".into())
@@ -70,6 +70,33 @@ pub fn migrate_with(mut value: Value, current: u32, chain: &[Migration]) -> AppR
     Ok(value)
 }
 
+/// v3 renames the still-only `fit` to `fitMode`, which now applies to video too and defaults to "fill"
+/// for new clips. Existing clips keep exactly the look they had: an explicit choice is carried over
+/// (`blur` becomes `blur-bg`), everything else was letterboxed, so it becomes "fit".
+fn v2_to_v3(mut doc: Value) -> Result<Value, String> {
+    let tracks = doc
+        .get_mut("tracks")
+        .and_then(Value::as_array_mut)
+        .ok_or("tracks missing")?;
+    for track in tracks {
+        let clips = track
+            .get_mut("clips")
+            .and_then(Value::as_array_mut)
+            .ok_or("clips missing")?;
+        for clip in clips {
+            let clip = clip.as_object_mut().ok_or("clip is not an object")?;
+            let old = clip.remove("fit");
+            let mode = match old.as_ref().and_then(Value::as_str) {
+                Some("fill") => "fill",
+                Some("blur") => "blur-bg",
+                _ => "fit",
+            };
+            clip.entry("fitMode").or_insert(Value::from(mode));
+        }
+    }
+    Ok(doc)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,16 +120,17 @@ mod tests {
     }
 
     #[test]
-    fn v1_projects_gain_speed_defaults_and_match_the_v2_fixture() {
+    fn v1_projects_are_upgraded_all_the_way_and_match_the_current_fixture() {
         let v1: Value =
             serde_json::from_str(include_str!("../../../fixtures/project-v1.json")).unwrap();
-        let v2: Value =
-            serde_json::from_str(include_str!("../../../fixtures/project-v2.json")).unwrap();
+        let current: Value =
+            serde_json::from_str(include_str!("../../../fixtures/project-v3.json")).unwrap();
         let migrated = migrate_to_current(v1).unwrap();
-        assert_eq!(migrated["schemaVersion"], 2);
+        assert_eq!(migrated["schemaVersion"], 3);
         assert_eq!(migrated["tracks"][0]["clips"][0]["speed"], 1);
         assert_eq!(migrated["tracks"][0]["clips"][0]["keepPitch"], true);
-        assert_eq!(migrated, v2);
+        assert_eq!(migrated["tracks"][0]["clips"][0]["fitMode"], "fit");
+        assert_eq!(migrated, current);
 
         // an existing value is never overwritten, and broken documents are reported
         let mut odd: Value =
@@ -122,8 +150,31 @@ mod tests {
     }
 
     #[test]
+    fn v2_projects_keep_their_look_when_fit_becomes_fit_mode() {
+        let v2: Value =
+            serde_json::from_str(include_str!("../../../fixtures/project-v2.json")).unwrap();
+        let v3: Value =
+            serde_json::from_str(include_str!("../../../fixtures/project-v3.json")).unwrap();
+        assert_eq!(migrate_to_current(v2.clone()).unwrap(), v3);
+
+        // explicit choices are carried over, `blur` is renamed, and the old key is gone
+        let mut doc = v2;
+        doc["tracks"][0]["clips"][0]["fit"] = json!("fill");
+        doc["tracks"][0]["clips"][1]["fit"] = json!("blur");
+        let out = migrate_to_current(doc).unwrap();
+        let clips = &out["tracks"][0]["clips"];
+        assert_eq!(clips[0]["fitMode"], "fill");
+        assert_eq!(clips[1]["fitMode"], "blur-bg");
+        assert_eq!(out["tracks"][1]["clips"][0]["fitMode"], "fit"); // never chosen: it was letterboxed
+        assert!(clips[0].get("fit").is_none() && clips[1].get("fit").is_none());
+        // the migrated document is a valid current project
+        let project: crate::project::Project = serde_json::from_value(out).unwrap();
+        assert!(crate::project::validate(&project).is_ok());
+    }
+
+    #[test]
     fn current_version_passes_through_untouched() {
-        let doc = json!({"schemaVersion": 2, "name": "x"});
+        let doc = json!({"schemaVersion": 3, "name": "x"});
         assert_eq!(migrate_to_current(doc.clone()).unwrap(), doc);
     }
 

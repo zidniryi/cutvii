@@ -640,7 +640,7 @@ mod tests {
     }
     fn project(assets: Vec<Value>, tracks: Vec<Value>) -> Project {
         serde_json::from_value(json!({
-            "id": "p", "name": "t", "schemaVersion": 2,
+            "id": "p", "name": "t", "schemaVersion": 3,
             "createdAt": "2026-01-01T00:00:00.000Z", "modifiedAt": "2026-01-01T00:00:00.000Z",
             "settings": {"width": 640, "height": 360, "fps": 30, "backgroundColor": "#202020"},
             "assets": assets, "tracks": tracks
@@ -934,7 +934,7 @@ mod tests {
     fn still_project(path: &str, fit: Option<&str>) -> Project {
         let mut c = clip("c", "img", "v1", 0.0, 0.0, 1.0, 1.0);
         if let Some(f) = fit {
-            c["fit"] = json!(f);
+            c["fitMode"] = json!(f);
         }
         project(
             vec![asset("img", path, "image", None)],
@@ -1027,7 +1027,7 @@ mod tests {
         let mid_right = "100:100:230:130";
 
         // fit (also the default): bars are the background colour, whole picture visible
-        for out in [render("default.mp4", None), render("fit.mp4", Some("fit"))] {
+        for out in [render("fit.mp4", Some("fit"))] {
             assert!(
                 near(e.region(&out, 0.5, top_left), (32, 32, 32), 14),
                 "fit: top bar is background"
@@ -1038,7 +1038,7 @@ mod tests {
         }
 
         // fill: no bars at all, the canvas is covered edge to edge
-        let fill = render("fill.mp4", Some("fill"));
+        let fill = render("fill.mp4", None); // fill is the default
         assert!(
             is_red(e.region(&fill, 0.5, top_left)),
             "fill: top-left is picture: {:?}",
@@ -1050,7 +1050,7 @@ mod tests {
         );
 
         // blur: bars are a blurred copy (reddish on the left), the sharp picture stays in the middle
-        let blur = render("blur.mp4", Some("blur"));
+        let blur = render("blur.mp4", Some("blur-bg"));
         let bar = e.region(&blur, 0.5, top_left);
         assert!(
             bar.0 > 120 && bar.1 < 90,
