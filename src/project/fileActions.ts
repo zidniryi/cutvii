@@ -78,10 +78,26 @@ export async function openProjectFlow(): Promise<void> {
   }
 }
 
-/** Returns true when the project was written; false on cancel or error (an error shows a dialog). */
-export async function saveFlow(saveAs = false): Promise<boolean> {
+let saveInFlight: Promise<boolean> | null = null;
+
+/**
+ * Returns true when the project was written; false on cancel or error (an error shows a dialog).
+ * Only one save runs at a time: a second request while one is in flight (for example the same key press
+ * arriving from both the native menu and the webview) joins the first instead of saving twice.
+ */
+export function saveFlow(saveAs = false): Promise<boolean> {
+  if (saveInFlight) return saveInFlight;
+  saveInFlight = runSave(saveAs).finally(() => {
+    saveInFlight = null;
+    useUiStore.getState().setSaving(false);
+  });
+  return saveInFlight;
+}
+
+async function runSave(saveAs: boolean): Promise<boolean> {
   // Capture the exact object being saved: edits made while the dialog is open must stay "unsaved".
   const snapshot = useProjectStore.getState().project;
+  useUiStore.getState().setSaving(true);
   try {
     const path = await saveProjectFile(snapshot, saveAs);
     if (!path) return false;

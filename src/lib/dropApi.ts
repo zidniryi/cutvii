@@ -29,10 +29,13 @@ export async function importDroppedFile(id: number): Promise<ImportedMedia> {
 export async function onFileDrop(handlers: {
   onDrop: (drop: FilesDropped) => void;
   onHover: (active: boolean) => void;
+  /** Pointer position while files hover over the window (logical px). */
+  onOver?: (pos: { x: number; y: number }) => void;
 }): Promise<() => void> {
   const offs = await Promise.all([
     listen<FilesDropped>("files-dropped", (e) => handlers.onDrop(e.payload)),
     listen<{ active: boolean }>("file-drop-hover", (e) => handlers.onHover(e.payload.active)),
+    listen<{ x: number; y: number }>("file-drop-over", (e) => handlers.onOver?.(e.payload)),
   ]);
   return () => offs.forEach((off) => off());
 }

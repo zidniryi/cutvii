@@ -8,9 +8,19 @@ interface IconButtonProps extends Omit<ComponentProps<typeof Button>, "children"
   icon: ReactNode;
   /** Not implemented yet: renders disabled and says so in the tooltip. */
   comingSoon?: boolean;
+  /** Keyboard shortcut, shown in the tooltip (the accessible name stays the plain label). */
+  shortcut?: string;
 }
 
-export function IconButton({ label, icon, comingSoon, disabled, className, ...props }: IconButtonProps) {
+export function IconButton({
+  label,
+  icon,
+  comingSoon,
+  shortcut,
+  disabled,
+  className,
+  ...props
+}: IconButtonProps) {
   const text = comingSoon ? `${label} — Coming soon` : label;
   return (
     <Tooltip>
@@ -20,6 +30,7 @@ export function IconButton({ label, icon, comingSoon, disabled, className, ...pr
           variant="ghost"
           size="icon"
           aria-label={text}
+          aria-keyshortcuts={shortcut}
           disabled={disabled || comingSoon}
           className={cn("pointer-coarse:size-11", className)}
           {...props}
@@ -27,7 +38,10 @@ export function IconButton({ label, icon, comingSoon, disabled, className, ...pr
           {icon}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{text}</TooltipContent>
+      <TooltipContent>
+        {text}
+        {shortcut && <kbd className="ml-1 opacity-70">{shortcut}</kbd>}
+      </TooltipContent>
     </Tooltip>
   );
 }

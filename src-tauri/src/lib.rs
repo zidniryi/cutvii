@@ -13,10 +13,7 @@ pub fn run() {
         .manage(commands::project::CurrentProjectPath::default())
         .manage(commands::export::ExportJob::default())
         .manage(commands::drop::DropState::default())
-        .setup(|app| {
-            commands::menu::install(app.handle())?;
-            Ok(())
-        })
+        .menu(commands::menu::build)
         .on_menu_event(|app, event| commands::menu::handle(app, event.id().as_ref()))
         .on_webview_event(|webview, event| {
             if let tauri::WebviewEvent::DragDrop(drag) = event {

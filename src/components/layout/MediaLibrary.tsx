@@ -23,7 +23,7 @@ import { relinkFlow } from "@/project/fileActions";
 import type { MediaAsset } from "@/project/model";
 import { useImportsStore, type ImportJob } from "@/store/imports";
 import { useProjectStore } from "@/store/project";
-import { ASSET_DRAG_TYPE } from "@/timeline/dnd";
+import { beginAssetDrag } from "@/hooks/useAssetDrag";
 import { addAssetToTimeline, report } from "@/timeline/editor";
 import { useUiStore } from "@/store/ui";
 
@@ -58,12 +58,9 @@ function AssetRow({
     .join(" · ");
   return (
     <li
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.setData(ASSET_DRAG_TYPE, asset.id);
-        e.dataTransfer.effectAllowed = "copy";
-      }}
-      className="flex items-center gap-2 rounded-md bg-surface-2 p-1.5"
+      data-testid="media-card"
+      onPointerDown={(e) => beginAssetDrag(e, asset)}
+      className="flex cursor-grab touch-none items-center gap-2 rounded-md bg-surface-2 p-1.5 select-none"
     >
       <div className="flex h-9 w-14 shrink-0 items-center justify-center overflow-hidden rounded-sm bg-black text-text-muted">
         {asset.thumbnailPath ? (

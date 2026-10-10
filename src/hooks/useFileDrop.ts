@@ -1,38 +1,34 @@
 import { useEffect } from "react";
-import { onFileDrop, type FilesDropped } from "@/lib/dropApi";
+import { onFileDrop } from "@/lib/dropApi";
 import { enqueueDroppedFiles } from "@/import/dropImport";
+import { useDragDropStore } from "@/store/dragDrop";
 import { useImportsStore } from "@/store/imports";
-import { usePlaybackStore } from "@/store/playback";
 import { useProjectStore } from "@/store/project";
-import { useTimelineViewStore } from "@/store/timelineView";
 import { useUiStore } from "@/store/ui";
-import { newDropPlacement, type DropPlacement } from "@/timeline/editor";
-import { SNAP_PX, timelineDropTarget } from "@/timeline/geometry";
-import { snapTime } from "@/timeline/snap";
+import { newDropPlacement } from "@/timeline/editor";
+import { autoScrollTimeline, dropTargetAt } from "@/timeline/dropTargeting";
+import { DEFAULT_IMAGE_DURATION } from "@/timeline/edit";
 
-/** If the drop landed on the timeline, work out the lane and (snapped) time from the live layout. */
-function placementFor(drop: FilesDropped): DropPlacement | undefined {
-  const area = document.querySelector("[data-timeline-area]")?.getBoundingClientRect();
-  const lanes = document.querySelector("[data-timeline-lanes]")?.getBoundingClientRect();
-  if (!area || !lanes) return undefined;
-
-  const project = useProjectStore.getState().project;
-  const { pps, snapping } = useTimelineViewStore.getState();
-  const target = timelineDropTarget(
-    drop.x,
-    drop.y,
-    area,
-    lanes,
-    project.tracks.map((t) => t.id),
-    pps,
-  );
-  if (!target) return undefined;
-
-  const { time } = snapTime(project, target.time, {
-    playhead: usePlaybackStore.getState().playhead,
-    threshold: snapping ? SNAP_PX / pps : 0,
+/** While OS files hover, we do not know what they are yet: show a generic ghost on the lane under the pointer. */
+function previewOsDrag(x: number, y: number) {
+  autoScrollTimeline(x, y);
+  const target = dropTargetAt(x, y);
+  const tracks = useProjectStore.getState().project.tracks;
+  const lane = target?.kind === "track" ? tracks.find((t) => t.id === target.trackId) : undefined;
+  useDragDropStore.getState().set({
+    dragging: { source: "os", label: "Drop to add", x, y },
+    preview: target
+      ? {
+          trackId: lane?.id ?? null,
+          trackType: lane?.type ?? "video",
+          start: target.time,
+          duration: DEFAULT_IMAGE_DURATION,
+          label: "Drop to add",
+        }
+      : null,
   });
-  return newDropPlacement({ ...target, time });
+  // the library overlay is for drops that will only import
+  useImportsStore.getState().setHovering(!target);
 }
 
 /** OS file drops: onto the timeline they become clips where they land; anywhere else they go to the library. */
@@ -40,14 +36,17 @@ export function useFileDrop() {
   useEffect(() => {
     const off = onFileDrop({
       onDrop: (drop) => {
-        const placement = placementFor(drop);
-        if (!placement) useUiStore.getState().setSidePanel("library"); // narrow layouts: show where the files land
-        enqueueDroppedFiles(drop.files, placement);
+        const target = dropTargetAt(drop.x, drop.y);
+        useDragDropStore.getState().clear();
+        if (!target) useUiStore.getState().setSidePanel("library"); // narrow layouts: show where the files land
+        enqueueDroppedFiles(drop.files, target ? newDropPlacement(target) : undefined);
       },
       onHover: (active) => {
         if (active) useUiStore.getState().setSidePanel("library");
+        else useDragDropStore.getState().clear();
         useImportsStore.getState().setHovering(active);
       },
+      onOver: ({ x, y }) => previewOsDrag(x, y),
     });
     return () => void off.then((fn) => fn()).catch(() => {});
   }, []);

@@ -104,13 +104,39 @@ pub struct DropHover {
 
 pub const FILES_DROPPED_EVENT: &str = "files-dropped";
 pub const DROP_HOVER_EVENT: &str = "file-drop-hover";
+pub const DROP_OVER_EVENT: &str = "file-drop-over";
+
+#[derive(Clone, Serialize)]
+pub struct DropOver {
+    pub x: f64,
+    pub y: f64,
+}
 
 /// Called from the webview-event hook in `lib.rs`.
 pub fn handle_drag_drop(app: &AppHandle, event: &tauri::DragDropEvent, scale: f64) {
     use tauri::DragDropEvent::*;
+    let scale = if scale > 0.0 { scale } else { 1.0 };
     match event {
-        Enter { .. } => {
+        Enter { position, .. } => {
             app.emit(DROP_HOVER_EVENT, DropHover { active: true }).ok();
+            app.emit(
+                DROP_OVER_EVENT,
+                DropOver {
+                    x: position.x / scale,
+                    y: position.y / scale,
+                },
+            )
+            .ok();
+        }
+        Over { position } => {
+            app.emit(
+                DROP_OVER_EVENT,
+                DropOver {
+                    x: position.x / scale,
+                    y: position.y / scale,
+                },
+            )
+            .ok();
         }
         Leave => {
             app.emit(DROP_HOVER_EVENT, DropHover { active: false }).ok();
@@ -123,7 +149,6 @@ pub fn handle_drag_drop(app: &AppHandle, event: &tauri::DragDropEvent, scale: f6
                 .lock()
                 .unwrap()
                 .register(paths.clone());
-            let scale = if scale > 0.0 { scale } else { 1.0 };
             app.emit(
                 FILES_DROPPED_EVENT,
                 FilesDropped {

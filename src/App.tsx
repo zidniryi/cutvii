@@ -4,6 +4,7 @@ import { CanvasDialog } from "@/components/canvas/CanvasDialog";
 import { CanvasNotice } from "@/components/canvas/CanvasNotice";
 import { NewProjectDialog } from "@/components/canvas/NewProjectDialog";
 import { ExportDialog } from "@/components/ExportDialog";
+import { DragChip } from "@/components/DragChip";
 import { Inspector } from "@/components/layout/Inspector";
 import { MediaLibrary } from "@/components/layout/MediaLibrary";
 import { Preview } from "@/components/layout/Preview";
@@ -73,6 +74,7 @@ export default function App() {
           <Timeline />
         </main>
       </div>
+      <DragChip />
       <ExportDialog />
       <NewProjectDialog />
       <CanvasDialog />

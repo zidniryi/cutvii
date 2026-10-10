@@ -1,5 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Eye, EyeOff, Magnet, Scissors, Trash2, Volume2, VolumeX, ZoomIn, ZoomOut } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  Eye,
+  EyeOff,
+  Magnet,
+  Maximize2,
+  Scissors,
+  Trash2,
+  Volume2,
+  VolumeX,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
 import { ClipView } from "@/components/timeline/ClipView";
 import { ContextMenu, type MenuState } from "@/components/timeline/ContextMenu";
 import { Ruler } from "@/components/timeline/Ruler";
@@ -7,31 +18,25 @@ import { IconButton } from "@/components/IconButton";
 import { Panel } from "@/components/Panel";
 import { fileName } from "@/lib/media";
 import { cn } from "@/lib/utils";
+import { useDragDropStore } from "@/store/dragDrop";
 import { usePlaybackStore } from "@/store/playback";
 import { useProjectStore } from "@/store/project";
 import { useSelectionStore } from "@/store/selection";
 import { useTimelineViewStore } from "@/store/timelineView";
 import { useUiStore } from "@/store/ui";
 import { projectDuration } from "@/timeline/clips";
-import {
-  addAssetToTimeline,
-  deleteSelected,
-  report,
-  splitAtPlayhead,
-  toggleTrackFlag,
-} from "@/timeline/editor";
+import { deleteSelected, report, splitAtPlayhead, toggleTrackFlag } from "@/timeline/editor";
 import {
   contentWidth,
   HEADER_WIDTH,
   ROW_HEIGHT,
   RULER_HEIGHT,
-  SNAP_PX,
   timeToX,
   visibleClips,
   xToTime,
 } from "@/timeline/geometry";
-import { ASSET_DRAG_TYPE } from "@/timeline/dnd";
-import { snapTime } from "@/timeline/snap";
+import { canZoomIn, canZoomOut, zoomPercent } from "@/timeline/zoom";
+import { zoomStep, zoomToFit } from "@/timeline/zoomController";
 import { useTimelineDrag } from "@/timeline/useTimelineDrag";
 
 const FALLBACK_VIEWPORT = 1000;
@@ -55,7 +60,11 @@ function Playhead({ pps }: { pps: number }) {
 export function Timeline() {
   const project = useProjectStore((s) => s.project);
   const selectedIds = useSelectionStore((s) => s.selectedClipIds);
-  const { pps, snapping, zoomIn, zoomOut, toggleSnapping } = useTimelineViewStore();
+  const pps = useTimelineViewStore((s) => s.pps);
+  const snapping = useTimelineViewStore((s) => s.snapping);
+  const toggleSnapping = useTimelineViewStore((s) => s.toggleSnapping);
+  const scrollTarget = useTimelineViewStore((s) => s.scrollTarget);
+  const dropPreview = useDragDropStore((s) => s.preview);
   const notice = useUiStore((s) => s.notice);
 
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -78,6 +87,14 @@ export function Timeline() {
       ro?.disconnect();
     };
   }, []);
+
+  // After a zoom, put the scroll where the zoom math says so the anchor (playhead or cursor) stays put.
+  useLayoutEffect(() => {
+    const el = scrollerRef.current;
+    if (!el || !scrollTarget) return;
+    el.scrollLeft = scrollTarget.left;
+    setViewport({ left: el.scrollLeft, width: el.clientWidth });
+  }, [scrollTarget]);
 
   useEffect(() => {
     if (!notice) return;
@@ -123,17 +140,21 @@ export function Timeline() {
   }, []);
   const closeMenu = useCallback(() => setMenu(null), []);
 
-  function onLaneDrop(e: React.DragEvent<HTMLDivElement>, trackId: string) {
-    const assetId = e.dataTransfer.getData(ASSET_DRAG_TYPE);
-    if (!assetId) return;
-    e.preventDefault();
-    const raw = xToTime(e.clientX - e.currentTarget.getBoundingClientRect().left, pps);
-    const { playhead } = usePlaybackStore.getState();
-    const start = snapTime(project, raw, { playhead, threshold: snapping ? SNAP_PX / pps : 0 }).time;
-    report(addAssetToTimeline(assetId, { trackId, start }));
-  }
-
-  const height = RULER_HEIGHT + project.tracks.length * ROW_HEIGHT;
+  // while a drop would create a track, draw the row it will occupy
+  const newTrackRow = dropPreview && dropPreview.trackId === null;
+  const height = RULER_HEIGHT + (project.tracks.length + (newTrackRow ? 1 : 0)) * ROW_HEIGHT;
+  const ghost = dropPreview && (
+    <div
+      data-testid="drop-ghost"
+      className="pointer-events-none absolute top-1 bottom-1 z-10 flex items-center overflow-hidden rounded-md border-2 border-dashed border-accent bg-accent-soft px-2 text-xs text-text"
+      style={{
+        left: timeToX(dropPreview.start, pps),
+        width: Math.max(24, timeToX(dropPreview.duration, pps)),
+      }}
+    >
+      <span className="truncate">{dropPreview.hint ?? dropPreview.label}</span>
+    </div>
+  );
 
   return (
     <Panel
@@ -164,8 +185,28 @@ export function Timeline() {
             className={cn(snapping && "text-accent")}
             onClick={toggleSnapping}
           />
-          <IconButton label="Zoom out" icon={<ZoomOut />} onClick={zoomOut} />
-          <IconButton label="Zoom in" icon={<ZoomIn />} onClick={zoomIn} />
+          <IconButton
+            label="Zoom out"
+            shortcut="Ctrl/⌘ −"
+            icon={<ZoomOut />}
+            disabled={!canZoomOut(pps)}
+            onClick={() => zoomStep(-1)}
+          />
+          <span
+            className="w-12 text-center text-xs text-text-muted tabular-nums"
+            aria-label="Zoom level"
+            aria-live="off"
+          >
+            {zoomPercent(pps)}%
+          </span>
+          <IconButton
+            label="Zoom in"
+            shortcut="Ctrl/⌘ +"
+            icon={<ZoomIn />}
+            disabled={!canZoomIn(pps)}
+            onClick={() => zoomStep(1)}
+          />
+          <IconButton label="Fit project" shortcut="Ctrl/⌘ 0" icon={<Maximize2 />} onClick={zoomToFit} />
         </div>
       }
     >
@@ -204,7 +245,11 @@ export function Timeline() {
           ))}
         </div>
 
-        <div ref={scrollerRef} className="relative min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
+        <div
+          ref={scrollerRef}
+          data-timeline-scroller
+          className="relative min-w-0 flex-1 overflow-x-auto overflow-y-hidden"
+        >
           <div className="relative" style={{ width, height: Math.max(height, 0) }}>
             <Ruler pps={pps} from={from} to={to} />
 
@@ -220,15 +265,16 @@ export function Timeline() {
                   role="group"
                   aria-label={`${track.name} lane`}
                   data-track-id={track.id}
-                  className="relative border-b bg-surface-2/40"
+                  className={cn(
+                    "relative border-b bg-surface-2/40",
+                    dropPreview?.trackId === track.id &&
+                      "bg-accent-soft outline outline-1 -outline-offset-1 outline-accent",
+                  )}
+                  data-drop-active={dropPreview?.trackId === track.id || undefined}
                   style={{ height: ROW_HEIGHT }}
                   onPointerDown={(e) => {
                     if (e.target === e.currentTarget) useSelectionStore.getState().clear();
                   }}
-                  onDragOver={(e) => {
-                    if (e.dataTransfer.types.includes(ASSET_DRAG_TYPE)) e.preventDefault();
-                  }}
-                  onDrop={(e) => onLaneDrop(e, track.id)}
                 >
                   {visibleClips(track.clips, from, to).map((clip) => {
                     const asset = assets.get(clip.assetId);
@@ -248,6 +294,7 @@ export function Timeline() {
                       />
                     );
                   })}
+                  {dropPreview?.trackId === track.id && ghost}
                   {/* ghost for a rejected move, so the user sees where it would have landed */}
                   {drag?.kind === "move" && !drag.valid && drag.trackId === track.id && (
                     <div
@@ -258,6 +305,18 @@ export function Timeline() {
                   )}
                 </div>
               ))}
+              {newTrackRow && (
+                <div
+                  data-testid="new-track-row"
+                  className="relative border-b border-dashed border-accent bg-accent-soft"
+                  style={{ height: ROW_HEIGHT }}
+                >
+                  <span className="pointer-events-none absolute top-1 right-2 text-[10px] text-text-muted">
+                    New {dropPreview.trackType} track
+                  </span>
+                  {ghost}
+                </div>
+              )}
             </div>
 
             {project.tracks.every((t) => t.clips.length === 0) && (

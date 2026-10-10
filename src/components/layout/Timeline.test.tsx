@@ -1,4 +1,4 @@
-import { act, createEvent, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import App from "@/App";
@@ -8,7 +8,6 @@ import { useSelectionStore } from "@/store/selection";
 import { useTimelineViewStore } from "@/store/timelineView";
 import { useUiStore } from "@/store/ui";
 import { addAssetToTimeline } from "@/timeline/editor";
-import { ASSET_DRAG_TYPE } from "@/timeline/dnd";
 import { expectValid, IDS, makeProject } from "@/test/makeProject";
 import { findClip } from "@/timeline/clips";
 import { ROW_HEIGHT } from "@/timeline/geometry";
@@ -16,13 +15,6 @@ import { Timeline } from "./Timeline";
 
 const state = () => useProjectStore.getState();
 const clips = () => state().project.tracks.flatMap((t) => t.clips);
-
-/** jsdom has no DragEvent, so clientX must be attached by hand. */
-function drop(target: Element, dataTransfer: unknown, clientX: number) {
-  const ev = createEvent.drop(target, { dataTransfer });
-  Object.defineProperty(ev, "clientX", { value: clientX });
-  fireEvent(target, ev);
-}
 
 function setup() {
   return render(
@@ -68,27 +60,6 @@ describe("Timeline", () => {
 
     fireEvent.pointerDown(screen.getByRole("group", { name: "Video 1 lane" }), { button: 0 });
     expect(useSelectionStore.getState().selectedClipIds).toHaveLength(0);
-  });
-
-  it("drops a library asset onto a lane at the pointer time", () => {
-    setup();
-    const lane = screen.getByRole("group", { name: "Video 1 lane" });
-    const dataTransfer = {
-      types: [ASSET_DRAG_TYPE],
-      getData: (t: string) => (t === ASSET_DRAG_TYPE ? IDS.vid2 : ""),
-    };
-    drop(lane, dataTransfer, 150); // 150px / 50pps = 3s
-    expect(clips()).toHaveLength(1);
-    expect(clips()[0]).toMatchObject({ assetId: IDS.vid2, trackId: IDS.v1, timelineStart: 3 });
-  });
-
-  it("shows a notice when a drop is invalid (audio on a video lane)", () => {
-    setup();
-    const lane = screen.getByRole("group", { name: "Video 1 lane" });
-    const dataTransfer = { types: [ASSET_DRAG_TYPE], getData: () => IDS.aud };
-    drop(lane, dataTransfer, 0);
-    expect(clips()).toHaveLength(0);
-    expect(useUiStore.getState().notice).toMatch(/cannot be placed/);
   });
 
   it("moves a clip by dragging, as one undo step", () => {

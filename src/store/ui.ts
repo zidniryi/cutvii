@@ -25,6 +25,9 @@ interface UiState {
   /** "Canvas set from your first video" banner. Undo is offered while `pastLength` is still the history top. */
   canvasNotice: { message: string; pastLength: number } | null;
   setCanvasNotice: (notice: { message: string; pastLength: number } | null) => void;
+  /** A save is being written (drives the status text; also stops a second save from starting). */
+  saving: boolean;
+  setSaving: (saving: boolean) => void;
   /** In-app modal (we avoid window.confirm: it is blocking and unreliable in webviews). */
   dialog: DialogState | null;
   openDialog: (dialog: DialogState) => void;
@@ -42,6 +45,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   setCanvasDialogOpen: (canvasDialogOpen) => set({ canvasDialogOpen }),
   canvasNotice: null,
   setCanvasNotice: (canvasNotice) => set({ canvasNotice }),
+  saving: false,
+  setSaving: (saving) => set({ saving }),
   dialog: null,
   openDialog: (dialog) => set({ dialog }),
   closeDialog: (confirmed) => {

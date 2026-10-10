@@ -66,7 +66,8 @@ pub fn is_file_action(id: &str) -> bool {
 }
 
 /// Start from the platform's default menu and add our items at the top of File (creating File if needed).
-pub fn install(app: &AppHandle) -> tauri::Result<()> {
+/// Passed to `Builder::menu`, which is what actually installs it (setting it from `setup` was overwritten).
+pub fn build(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let menu = Menu::default(app)?;
     let existing = menu.items()?.into_iter().find_map(|item| match item {
         MenuItemKind::Submenu(s) if s.text().ok().as_deref() == Some("File") => Some(s),
@@ -88,8 +89,7 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
     }
     file.insert(&PredefinedMenuItem::separator(app)?, FILE_ITEMS.len())?;
     install_about(app, &menu)?;
-    app.set_menu(menu)?;
-    Ok(())
+    Ok(menu)
 }
 
 pub fn handle(app: &AppHandle, id: &str) {

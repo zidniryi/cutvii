@@ -19,6 +19,7 @@ export function TopBar() {
   const canvas = useProjectStore(useShallow((s) => canvasOf(s.project)));
   const canvasPending = useProjectStore((s) => s.project.settings.canvasPending === true);
   const openCanvas = useUiStore((s) => s.setCanvasDialogOpen);
+  const saving = useUiStore((s) => s.saving);
   const hasContent = useProjectStore((s) => projectDuration(s.project) > 0);
   const openExport = useExportStore((s) => s.open);
   const filePath = useProjectStore((s) => s.filePath);
@@ -33,12 +34,14 @@ export function TopBar() {
       <IconButton
         label={undoLabel ? `Undo ${undoLabel}` : "Undo"}
         icon={<Undo2 />}
+        shortcut="Ctrl/⌘ Z"
         disabled={!canUndo}
         onClick={undo}
       />
       <IconButton
         label={redoLabel ? `Redo ${redoLabel}` : "Redo"}
         icon={<Redo2 />}
+        shortcut="Ctrl/⌘ Shift Z"
         disabled={!canRedo}
         onClick={redo}
       />
@@ -54,7 +57,13 @@ export function TopBar() {
       </Button>
       <div className="ml-auto flex items-center gap-3">
         <span className="hidden text-xs text-text-muted sm:inline" title={filePath ?? undefined}>
-          {dirty ? "Unsaved changes" : filePath ? `Saved · ${fileName(filePath)}` : "New project"}
+          {saving
+            ? "Saving…"
+            : dirty
+              ? "Unsaved changes"
+              : filePath
+                ? `Saved · ${fileName(filePath)}`
+                : "New project"}
         </span>
         <Button
           disabled={!hasContent}
