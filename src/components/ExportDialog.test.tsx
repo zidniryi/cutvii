@@ -196,4 +196,26 @@ describe("Export dialog", () => {
     await userEvent.click(within(dialog).getByRole("radio", { name: /^Video, MP4/ }));
     expect(within(dialog).getByRole("radiogroup", { name: "Resolution" })).toBeInTheDocument();
   });
+
+  it("Open folder asks Rust to reveal the exported file, and shows why if it cannot", async () => {
+    let reveals = 0;
+    backend({
+      export_project: () => report,
+      reveal_last_export: () => {
+        reveals += 1;
+        if (reveals === 2) throw "the exported file is no longer there (moved or deleted)";
+      },
+    });
+    render(<App />);
+    act(() => void addAssetToTimeline(IDS.vid));
+    await userEvent.click(within(await openDialog()).getByRole("button", { name: "Export…" }));
+    await screen.findByText("Export complete and verified.");
+
+    await userEvent.click(screen.getByRole("button", { name: "Open folder" }));
+    expect(invokeMock).toHaveBeenCalledWith("reveal_last_export"); // no path is sent from the webview
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Open folder" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("no longer there");
+  });
 });

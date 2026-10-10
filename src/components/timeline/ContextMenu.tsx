@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Scissors, Trash2 } from "lucide-react";
+import { ClipboardCopy, Copy, Scissors, Snowflake, Trash2 } from "lucide-react";
 
 export interface MenuState {
   x: number;
@@ -11,10 +11,13 @@ interface Props {
   menu: MenuState;
   onSplit: () => void;
   onDelete: () => void;
+  onCut: () => void;
+  onCopy: () => void;
+  onFreeze: () => void;
   onClose: () => void;
 }
 
-export function ContextMenu({ menu, onSplit, onDelete, onClose }: Props) {
+export function ContextMenu({ menu, onSplit, onDelete, onCut, onCopy, onFreeze, onClose }: Props) {
   useEffect(() => {
     const onDown = (e: PointerEvent) => {
       if (!(e.target as HTMLElement | null)?.closest("[data-context-menu]")) onClose();
@@ -43,6 +46,18 @@ export function ContextMenu({ menu, onSplit, onDelete, onClose }: Props) {
       <button role="menuitem" className={item} onClick={onSplit}>
         <Scissors className="size-4" /> Split at playhead
         <kbd className="ml-auto text-xs text-text-muted">S</kbd>
+      </button>
+      <button role="menuitem" className={item} onClick={onFreeze}>
+        <Snowflake className="size-4" /> Freeze frame
+        <kbd className="ml-auto text-xs text-text-muted">Shift F</kbd>
+      </button>
+      <button role="menuitem" className={item} onClick={onCut}>
+        <ClipboardCopy className="size-4" /> Cut
+        <kbd className="ml-auto text-xs text-text-muted">Ctrl/⌘ X</kbd>
+      </button>
+      <button role="menuitem" className={item} onClick={onCopy}>
+        <Copy className="size-4" /> Copy
+        <kbd className="ml-auto text-xs text-text-muted">Ctrl/⌘ C</kbd>
       </button>
       <button role="menuitem" className={item} onClick={onDelete}>
         <Trash2 className="size-4" /> Delete

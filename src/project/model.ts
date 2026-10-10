@@ -1,13 +1,15 @@
 import { z } from "zod";
 
-/** Bump when the on-disk shape changes; add a migration in Phase 5. */
-export const SCHEMA_VERSION = 1;
+/** Bump when the on-disk shape changes, and add a migration in `src-tauri/src/project/migrate.rs`. v2: clip speed. */
+export const SCHEMA_VERSION = 2;
 
 /** Tolerance (seconds) when comparing a clip's sourceOut with the asset duration. */
 const DURATION_EPSILON = 1e-3;
 const MAX_VOLUME = 2;
 
 const Id = z.string().min(1);
+
+export const SPEED_LIMITS = { min: 0.1, max: 10 } as const;
 
 export const MediaTypeSchema = z.enum(["video", "audio", "image"]);
 
@@ -105,6 +107,16 @@ export const TimelineClipSchema = z
     opacity: z.number().min(0).max(1),
     /** How a still image is placed on the canvas; absent means "fit". Ignored for video and audio. */
     fit: z.enum(["fit", "fill", "blur"]).optional(),
+    /** Playback speed, 0.1 to 10; absent means 1. Timeline length = (sourceOut - sourceIn) / speed. */
+    speed: z
+      .number()
+      .min(SPEED_LIMITS.min, "Speed must be between 0.1× and 10×")
+      .max(SPEED_LIMITS.max, "Speed must be between 0.1× and 10×")
+      .optional(),
+    /** Keep the original pitch when the speed changes; absent means true. */
+    keepPitch: z.boolean().optional(),
+    /** Play the used source range backwards; absent means false. */
+    reversed: z.boolean().optional(),
   })
   .strict()
   .refine((c) => c.sourceOut > c.sourceIn, {

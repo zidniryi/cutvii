@@ -9,13 +9,20 @@ import {
   layerKey,
   layersAt,
   mediaErrorMessage,
+  MAX_AUDIBLE_SPEED,
+  pickLead,
   planSync,
+  previewRate,
+  restTimeFor,
   sourceTimeFor,
+  timelineTimeFor,
   type Layer,
 } from "@/playback/engine";
+import { ensureReversePreviews } from "@/playback/reversePreview";
 import { usePlaybackStore } from "@/store/playback";
+import { reverseKey, useReverseStore, type ReversePreview } from "@/store/reverse";
 import { useProjectStore } from "@/store/project";
-import { projectDuration } from "@/timeline/clips";
+import { clipSpeed, projectDuration } from "@/timeline/clips";
 
 type MediaEl = HTMLVideoElement | HTMLAudioElement;
 
@@ -65,16 +72,15 @@ export function Preview() {
 
   useEffect(() => (playing ? startClock() : undefined), [playing]);
 
-  // The element that leads playback: the visible video, otherwise the first audible clip.
+  // The element that leads playback: an audio clip if there is one, otherwise the visible video.
   useEffect(() => {
     setMediaClock(() => {
-      const active = layers.filter((l) => l.role === "active" && l.asset.type !== "image");
-      const lead = active.find((l) => l.visible) ?? active[0];
+      const lead = pickLead(layers);
       if (!lead || usePlaybackStore.getState().mediaErrors[lead.asset.id]) return null;
       const el = elements.current.get(lead.clip.id);
       if (!el) return null;
       if (el.paused || el.seeking || el.readyState < 3) return "waiting";
-      return { time: lead.clip.timelineStart + (el.currentTime - lead.clip.sourceIn) };
+      return { time: timelineTimeFor(lead.clip, el.currentTime) };
     });
     return () => setMediaClock(null);
   }, [layers]);
@@ -83,19 +89,28 @@ export function Preview() {
   useEffect(() => {
     const sync = () => {
       const { playhead, playing: isPlaying, setMediaError } = usePlaybackStore.getState();
+      const lead = pickLead(layers);
       for (const layer of layers) {
         const el = elements.current.get(layer.clip.id);
         if (!el) continue;
         el.volume = Math.min(1, Math.max(0, layer.clip.volume)); // preview caps at 100%; export applies gain
-        el.muted = layer.track.muted;
+        const speed = clipSpeed(layer.clip);
+        // same rule as export: no sound above 4x
+        el.muted = layer.track.muted || speed > MAX_AUDIBLE_SPEED;
+        const base = previewRate(speed).rate;
+        if ("preservesPitch" in el) el.preservesPitch = layer.clip.keepPitch ?? true;
 
         const plan = planSync({
           role: layer.role,
           playing: isPlaying,
           paused: el.paused,
           currentTime: el.currentTime,
-          desired: layer.role === "active" ? sourceTimeFor(layer.clip, playhead) : layer.clip.sourceIn,
+          desired: layer.role === "active" ? sourceTimeFor(layer.clip, playhead) : restTimeFor(layer.clip),
+          lead: layer === lead,
         });
+        // clip speed times the small catch-up nudge
+        const rate = base * (plan.rate ?? 1);
+        if (el.playbackRate !== rate) el.playbackRate = rate;
         if (plan.seekTo !== undefined) {
           // while playing, never re-seek the same element more than once a second (a seek costs frames)
           const nowMs = performance.now();
@@ -118,6 +133,21 @@ export function Preview() {
     sync();
     return usePlaybackStore.subscribe(sync);
   }, [layers]);
+
+  // Reversed clips play from a reversed copy that Rust prepares in the background.
+  const reversePreviews = useReverseStore((s) => s.previews);
+  useEffect(() => ensureReversePreviews(project), [project]);
+  const reverseOf = (layer: Layer): ReversePreview | undefined =>
+    layer.clip.reversed
+      ? reversePreviews[reverseKey(layer.asset.path, layer.clip.sourceIn, layer.clip.sourceOut)]
+      : undefined;
+  const activeReversed = layers
+    .filter((l) => l.role === "active" && l.clip.reversed)
+    .map((l) => reverseOf(l));
+  const preparing = activeReversed
+    .filter((r): r is ReversePreview => !r || r.status === "preparing")
+    .map((r) => r ?? { status: "preparing" as const, progress: 0 });
+  const reverseFailed = activeReversed.filter((r): r is ReversePreview => r?.status === "failed");
 
   const { width, height, backgroundColor } = project.settings;
   const ratio = width / height;
@@ -146,8 +176,10 @@ export function Preview() {
           >
             {layers.map((layer) => (
               <LayerView
-                key={layer.clip.id}
+                // a reversed clip switches to its reversed copy once that is ready: remount to load it
+                key={`${layer.clip.id}:${layer.clip.reversed ? (reverseOf(layer)?.status ?? "none") : "fwd"}`}
                 layer={layer}
+                reverse={reverseOf(layer)}
                 register={(el) => {
                   if (el) elements.current.set(layer.clip.id, el);
                   else elements.current.delete(layer.clip.id);
@@ -159,6 +191,28 @@ export function Preview() {
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-text-muted [&_svg]:size-8">
                 <MonitorPlay />
                 <p className="text-xs">{empty ? "Preview is empty" : "No clip at playhead"}</p>
+              </div>
+            )}
+            {preparing.length > 0 && (
+              <div
+                role="status"
+                className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-1 bg-black/70 text-xs text-text-muted"
+              >
+                <p>
+                  Preparing reverse preview… {Math.round(Math.max(...preparing.map((r) => r.progress)) * 100)}
+                  %
+                </p>
+                <p>The export does not need this and can start right away.</p>
+              </div>
+            )}
+            {reverseFailed.length > 0 && (
+              <div
+                role="alert"
+                className="absolute inset-x-2 top-2 z-50 rounded-md border border-danger/60 bg-black/80 p-2 text-xs text-danger"
+              >
+                {reverseFailed.map((r) => (
+                  <p key={r.error}>Reverse preview failed: {r.error}</p>
+                ))}
               </div>
             )}
             {activeErrors.length > 0 && (
@@ -179,10 +233,20 @@ export function Preview() {
   );
 }
 
-function LayerView({ layer, register }: { layer: Layer; register: (el: MediaEl | null) => void }) {
+function LayerView({
+  layer,
+  register,
+  reverse,
+}: {
+  layer: Layer;
+  register: (el: MediaEl | null) => void;
+  reverse?: ReversePreview;
+}) {
   const { asset, track, visible } = layer;
   const setMediaError = usePlaybackStore.getState().setMediaError;
-  const src = mediaUrl(asset.path);
+  // a reversed clip has nothing to show until its reversed copy exists (never play it forwards by mistake)
+  if (layer.clip.reversed && asset.type !== "image" && reverse?.status !== "ready") return null;
+  const src = mediaUrl(layer.clip.reversed && reverse?.path ? reverse.path : asset.path);
   const common = {
     src,
     preload: "auto" as const,

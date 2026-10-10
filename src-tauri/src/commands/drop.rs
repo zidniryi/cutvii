@@ -102,17 +102,17 @@ pub struct DropHover {
     pub active: bool,
 }
 
-pub const FILES_DROPPED_EVENT: &str = "files-dropped";
-pub const DROP_HOVER_EVENT: &str = "file-drop-hover";
-pub const DROP_OVER_EVENT: &str = "file-drop-over";
-
 #[derive(Clone, Serialize)]
 pub struct DropOver {
     pub x: f64,
     pub y: f64,
 }
 
-/// Called from the webview-event hook in `lib.rs`.
+pub const FILES_DROPPED_EVENT: &str = "files-dropped";
+pub const DROP_HOVER_EVENT: &str = "file-drop-hover";
+pub const DROP_OVER_EVENT: &str = "file-drop-over";
+
+/// Called from the window-event hook in `lib.rs` (OS drags arrive as window events).
 pub fn handle_drag_drop(app: &AppHandle, event: &tauri::DragDropEvent, scale: f64) {
     use tauri::DragDropEvent::*;
     let scale = if scale > 0.0 { scale } else { 1.0 };

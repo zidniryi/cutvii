@@ -11,6 +11,9 @@ import {
   deleteClip,
   moveClip,
   setClipFit,
+  setClipKeepPitch,
+  setClipReversed,
+  setClipSpeed,
   setClipVolume,
   setTrackFlag,
   splitClip,
@@ -73,6 +76,23 @@ export function trimClipEdge(clipId: string, edge: "start" | "end", time: number
 
 export function changeVolume(clipId: string, volume: number): EditResult {
   return run("Change volume", (p) => setClipVolume(p, clipId, volume));
+}
+
+/** Change speed. Returns `needs-ripple` (nothing changed) when later clips would have to move. */
+export function changeSpeed(clipId: string, speed: number, ripple = false): EditResult {
+  return run(ripple ? "Change speed (move following clips)" : "Change speed", (p) =>
+    setClipSpeed(p, clipId, speed, { ripple }),
+  );
+}
+
+export function changeKeepPitch(clipId: string, keepPitch: boolean): EditResult {
+  return run(keepPitch ? "Keep pitch" : "Let pitch follow speed", (p) =>
+    setClipKeepPitch(p, clipId, keepPitch),
+  );
+}
+
+export function changeReversed(clipId: string, reversed: boolean): EditResult {
+  return run(reversed ? "Reverse clip" : "Play clip forwards", (p) => setClipReversed(p, clipId, reversed));
 }
 
 export function changeFit(clipId: string, fit: FitMode): EditResult {

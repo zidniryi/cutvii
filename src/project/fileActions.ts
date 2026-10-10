@@ -78,23 +78,31 @@ export async function openProjectFlow(): Promise<void> {
   }
 }
 
-let saveInFlight: Promise<boolean> | null = null;
+/** true = written, false = cancelled, string = error message. */
+let saveInFlight: Promise<boolean | string> | null = null;
 
 /**
  * Returns true when the project was written; false on cancel or error (an error shows a dialog).
  * Only one save runs at a time: a second request while one is in flight (for example the same key press
  * arriving from both the native menu and the webview) joins the first instead of saving twice.
  */
-export function saveFlow(saveAs = false): Promise<boolean> {
-  if (saveInFlight) return saveInFlight;
+export async function saveFlow(saveAs = false): Promise<boolean> {
+  if (saveInFlight) return (await saveInFlight) === true;
+
   saveInFlight = runSave(saveAs).finally(() => {
+    // released before any error dialog, so the status never sticks on "Saving…" and a retry is possible
     saveInFlight = null;
     useUiStore.getState().setSaving(false);
   });
-  return saveInFlight;
+  const result = await saveInFlight;
+  if (typeof result === "string") {
+    await messageDialog("Could not save the project", [result, "Your project is unchanged on disk."]);
+    return false;
+  }
+  return result;
 }
 
-async function runSave(saveAs: boolean): Promise<boolean> {
+async function runSave(saveAs: boolean): Promise<boolean | string> {
   // Capture the exact object being saved: edits made while the dialog is open must stay "unsaved".
   const snapshot = useProjectStore.getState().project;
   useUiStore.getState().setSaving(true);
@@ -104,8 +112,7 @@ async function runSave(saveAs: boolean): Promise<boolean> {
     useProjectStore.getState().markSaved(snapshot, path);
     return true;
   } catch (e) {
-    await messageDialog("Could not save the project", [errorText(e), "Your project is unchanged on disk."]);
-    return false;
+    return errorText(e);
   }
 }
 

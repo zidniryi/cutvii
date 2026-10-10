@@ -5,16 +5,22 @@
  * - Clips on the same track never overlap; touching is fine. Gaps are allowed (black / silence).
  * - Clips on different tracks may overlap; a higher track `order` is drawn on top.
  * - Audio tracks hold audio assets; video tracks hold video and image assets.
- * - Speed is always 1, so timeline length == sourceOut - sourceIn.
+ * - Timeline length == (sourceOut - sourceIn) / speed. Speed is per clip (default 1); stills have none.
  * - add/move/split reject invalid requests; trim clamps to the nearest valid edge (drag-friendly).
  */
 import type { FitMode, Project, TimelineClip, TimelineTrack } from "@/project/model";
-import { clipDuration, clipEnd, EPS, findClip, minClipDuration } from "./clips";
+import { clipDuration, clipEnd, clipSpeed, EPS, findClip, minClipDuration } from "./clips";
 
 export const DEFAULT_IMAGE_DURATION = 5;
 
 export type EditErrorCode =
-  "unknown-clip" | "unknown-asset" | "unknown-track" | "incompatible-track" | "overlap" | "out-of-range";
+  | "unknown-clip"
+  | "unknown-asset"
+  | "unknown-track"
+  | "incompatible-track"
+  | "overlap"
+  | "out-of-range"
+  | "needs-ripple";
 
 export interface EditError {
   code: EditErrorCode;
@@ -26,6 +32,8 @@ export type EditResult = { ok: true; project: Project } | { ok: false; error: Ed
 const ok = (project: Project): EditResult => ({ ok: true, project });
 const fail = (code: EditErrorCode, message: string): EditResult => ({ ok: false, error: { code, message } });
 
+/** "A video", "An audio", "An image". */
+const article = (word: string) => `${/^[aeiou]/i.test(word) ? "An" : "A"} ${word}`;
 const byStart = (a: TimelineClip, b: TimelineClip) => a.timelineStart - b.timelineStart;
 const clampRange = (t: number, lo: number, hi: number) => Math.min(Math.max(t, lo), Math.max(lo, hi));
 
@@ -56,7 +64,10 @@ export function addClip(project: Project, args: AddClipArgs): EditResult {
   const track = project.tracks.find((t) => t.id === args.trackId);
   if (!track) return fail("unknown-track", `Unknown track ${args.trackId}`);
   if (!acceptsAsset(track, asset.type)) {
-    return fail("incompatible-track", `A ${asset.type} cannot be placed on a ${track.type} track`);
+    return fail(
+      "incompatible-track",
+      `${article(asset.type)} cannot be placed on ${article(track.type).toLowerCase()} track`,
+    );
   }
   if (!(args.start >= 0)) return fail("out-of-range", "Clip cannot start before 0");
 
@@ -104,7 +115,10 @@ export function moveClip(
   const asset = project.assets.find((a) => a.id === clip.assetId);
   if (!asset) return fail("unknown-asset", `Unknown asset ${clip.assetId}`);
   if (!acceptsAsset(target, asset.type)) {
-    return fail("incompatible-track", `A ${asset.type} cannot be placed on a ${target.type} track`);
+    return fail(
+      "incompatible-track",
+      `${article(asset.type)} cannot be placed on ${article(target.type).toLowerCase()} track`,
+    );
   }
   if (!(to.start >= 0)) return fail("out-of-range", "Clip cannot start before 0");
 
@@ -138,22 +152,39 @@ export function trimClip(project: Project, clipId: string, edge: "start" | "end"
   const others = track.clips.filter((c) => c.id !== clip.id);
   const start = clip.timelineStart;
   const end = clipEnd(clip);
+  const speed = clipSpeed(clip);
+
+  const finite = asset?.type !== "image" && asset?.duration !== undefined;
+  const reversed = clip.reversed === true;
+  // How far each edge may still grow, in source seconds. A reversed clip starts at sourceOut and runs
+  // down to sourceIn, so its start edge is limited by what lies after sourceOut and its end edge by sourceIn.
+  const roomAtStart = reversed ? (finite ? asset.duration! - clip.sourceOut : Infinity) : clip.sourceIn;
+  const roomAtEnd = reversed ? clip.sourceIn : finite ? asset.duration! - clip.sourceOut : Infinity;
 
   let next: TimelineClip;
   if (edge === "start") {
     const prevEnd = Math.max(0, ...others.filter((c) => clipEnd(c) <= start + EPS).map(clipEnd));
-    const t = clampRange(time, Math.max(prevEnd, start - clip.sourceIn), end - min);
-    next = { ...clip, timelineStart: t, sourceIn: Math.max(0, clip.sourceIn + (t - start)) };
+    const t = clampRange(time, Math.max(prevEnd, start - roomAtStart / speed), end - min);
+    const moved = (t - start) * speed; // source seconds removed (+) or revealed (-)
+    next = reversed
+      ? {
+          ...clip,
+          timelineStart: t,
+          sourceOut: finite ? Math.min(asset.duration!, clip.sourceOut - moved) : clip.sourceOut - moved,
+        }
+      : { ...clip, timelineStart: t, sourceIn: Math.max(0, clip.sourceIn + moved) };
   } else {
     const nextStart = Math.min(
       Infinity,
       ...others.filter((c) => c.timelineStart >= end - EPS).map((c) => c.timelineStart),
     );
-    const finite = asset?.type !== "image" && asset?.duration !== undefined;
-    const sourceLimit = finite ? start + (asset.duration! - clip.sourceIn) : Infinity;
-    const t = clampRange(time, start + min, Math.min(nextStart, sourceLimit));
-    const atSourceEnd = finite && t >= sourceLimit - EPS;
-    next = { ...clip, sourceOut: atSourceEnd ? asset.duration! : clip.sourceIn + (t - start) };
+    const limit = end + roomAtEnd / speed;
+    const t = clampRange(time, start + min, Math.min(nextStart, limit));
+    const atLimit = Number.isFinite(limit) && t >= limit - EPS;
+    const used = (t - start) * speed; // source seconds the clip covers after the trim
+    next = reversed
+      ? { ...clip, sourceIn: atLimit ? 0 : Math.max(0, clip.sourceOut - used) }
+      : { ...clip, sourceOut: atLimit && finite ? asset.duration! : clip.sourceIn + used };
   }
 
   if (
@@ -188,9 +219,13 @@ export function splitClip(
     return fail("out-of-range", "Playhead must be inside the clip, at least one frame from either edge");
   }
 
-  const cut = clip.sourceIn + (time - clip.timelineStart);
-  const left: TimelineClip = { ...clip, sourceOut: cut };
-  const right: TimelineClip = { ...clip, id: newId, timelineStart: time, sourceIn: cut };
+  const used = (time - clip.timelineStart) * clipSpeed(clip);
+  // a reversed clip plays from sourceOut down: its first part is the *end* of the source range
+  const cut = clip.reversed ? clip.sourceOut - used : clip.sourceIn + used;
+  const left: TimelineClip = clip.reversed ? { ...clip, sourceIn: cut } : { ...clip, sourceOut: cut };
+  const right: TimelineClip = clip.reversed
+    ? { ...clip, id: newId, timelineStart: time, sourceOut: cut }
+    : { ...clip, id: newId, timelineStart: time, sourceIn: cut };
   return ok(
     withTracks(
       project,
@@ -301,4 +336,155 @@ export function firstFreeStart(clips: TimelineClip[], desired: number, duration:
     if (c.timelineStart < start + duration - EPS && start < clipEnd(c) - EPS) start = clipEnd(c);
   }
   return start;
+}
+
+export const MIN_SPEED = 0.1;
+export const MAX_SPEED = 10;
+
+/**
+ * Change a clip's speed. The source range stays the same, so the clip gets shorter (faster) or longer (slower).
+ * If the longer clip would run into the clips after it on the same track, the result is `needs-ripple`
+ * unless `ripple` is set, in which case those later clips are pushed right by exactly the overlap.
+ */
+export function setClipSpeed(
+  project: Project,
+  clipId: string,
+  speed: number,
+  opts: { ripple?: boolean } = {},
+): EditResult {
+  const found = findClip(project, clipId);
+  if (!found) return fail("unknown-clip", `Unknown clip ${clipId}`);
+  const { clip, track } = found;
+  const asset = project.assets.find((a) => a.id === clip.assetId);
+  if (asset?.type === "image")
+    return fail("out-of-range", "Images have no speed; change their duration instead");
+  if (!Number.isFinite(speed) || speed < MIN_SPEED - EPS || speed > MAX_SPEED + EPS) {
+    return fail("out-of-range", `Speed must be between ${MIN_SPEED}× and ${MAX_SPEED}×`);
+  }
+  if (Math.abs(clipSpeed(clip) - speed) < EPS) return ok(project);
+  if ((clip.sourceOut - clip.sourceIn) / speed < minClipDuration(project) - EPS) {
+    return fail("out-of-range", "At that speed the clip would be shorter than one frame");
+  }
+
+  const next: TimelineClip = { ...clip, speed };
+  const newEnd = clipEnd(next);
+  const later = track.clips.filter((c) => c.id !== clip.id && c.timelineStart >= clip.timelineStart - EPS);
+  const firstLater = Math.min(Infinity, ...later.map((c) => c.timelineStart));
+  const push = newEnd - firstLater;
+
+  if (push > EPS && !opts.ripple) {
+    return fail("needs-ripple", "The slower clip would overlap the clips after it on this track");
+  }
+  const laterIds = new Set(later.map((c) => c.id));
+  return ok(
+    withTracks(
+      project,
+      project.tracks.map((t) =>
+        t.id !== track.id
+          ? t
+          : {
+              ...t,
+              clips: t.clips.map((c) =>
+                c.id === clip.id
+                  ? next
+                  : push > EPS && laterIds.has(c.id)
+                    ? { ...c, timelineStart: c.timelineStart + push }
+                    : c,
+              ),
+            },
+      ),
+    ),
+  );
+}
+
+export function setClipKeepPitch(project: Project, clipId: string, keepPitch: boolean): EditResult {
+  const found = findClip(project, clipId);
+  if (!found) return fail("unknown-clip", `Unknown clip ${clipId}`);
+  if ((found.clip.keepPitch ?? true) === keepPitch) return ok(project);
+  return ok(
+    withTracks(
+      project,
+      project.tracks.map((t) =>
+        t.id === found.track.id
+          ? { ...t, clips: t.clips.map((c) => (c.id === clipId ? { ...c, keepPitch } : c)) }
+          : t,
+      ),
+    ),
+  );
+}
+
+export const FREEZE_SECONDS = 2;
+
+/** Reverse the used source range (video and audio). Length and position on the timeline do not change. */
+export function setClipReversed(project: Project, clipId: string, reversed: boolean): EditResult {
+  const found = findClip(project, clipId);
+  if (!found) return fail("unknown-clip", `Unknown clip ${clipId}`);
+  const asset = project.assets.find((a) => a.id === found.clip.assetId);
+  if (asset?.type === "image") return fail("out-of-range", "Images cannot be reversed");
+  if ((found.clip.reversed ?? false) === reversed) return ok(project);
+  return ok(
+    withTracks(
+      project,
+      project.tracks.map((t) =>
+        t.id === found.track.id
+          ? { ...t, clips: t.clips.map((c) => (c.id === clipId ? { ...c, reversed } : c)) }
+          : t,
+      ),
+    ),
+  );
+}
+
+/** Source time (in the original file) shown at timeline `time`, honouring speed and reverse. */
+export function sourceTimeAt(clip: TimelineClip, time: number): number {
+  const used = (time - clip.timelineStart) * clipSpeed(clip);
+  const t = clip.reversed ? clip.sourceOut - used : clip.sourceIn + used;
+  return Math.min(clip.sourceOut, Math.max(clip.sourceIn, t));
+}
+
+/**
+ * Freeze frame: split the clip at `time`, hold `image` (the extracted frame, already an asset of the
+ * project) for `FREEZE_SECONDS`, and push the second half and everything after it on that track later.
+ */
+export function insertFreezeFrame(
+  project: Project,
+  clipId: string,
+  time: number,
+  imageAssetId: string,
+  ids: { right?: string; still?: string } = {},
+): EditResult {
+  const found = findClip(project, clipId);
+  if (!found) return fail("unknown-clip", `Unknown clip ${clipId}`);
+  if (found.track.type !== "video") return fail("incompatible-track", "Freeze frame needs a video clip");
+  if (!project.assets.some((a) => a.id === imageAssetId && a.type === "image")) {
+    return fail("unknown-asset", "The frame image is not in the project");
+  }
+
+  const split = splitClip(project, clipId, time, ids.right ?? crypto.randomUUID());
+  if (!split.ok) return split;
+  const track = split.project.tracks.find((t) => t.id === found.track.id)!;
+  const still: TimelineClip = {
+    id: ids.still ?? crypto.randomUUID(),
+    assetId: imageAssetId,
+    trackId: track.id,
+    timelineStart: time,
+    sourceIn: 0,
+    sourceOut: FREEZE_SECONDS,
+    volume: 1,
+    x: 0,
+    y: 0,
+    scale: 1,
+    opacity: 1,
+  };
+  const clips = [
+    ...track.clips.map((c) =>
+      c.timelineStart >= time - EPS ? { ...c, timelineStart: c.timelineStart + FREEZE_SECONDS } : c,
+    ),
+    still,
+  ].sort(byStart);
+  return ok(
+    withTracks(
+      split.project,
+      split.project.tracks.map((t) => (t.id === track.id ? { ...t, clips } : t)),
+    ),
+  );
 }

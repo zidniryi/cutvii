@@ -7,9 +7,22 @@ import { cn } from "@/lib/utils";
 import { useProjectStore } from "@/store/project";
 import { useSelectionStore } from "@/store/selection";
 import { useUiStore } from "@/store/ui";
-import { clipDuration, findClip } from "@/timeline/clips";
-import { MAX_VOLUME } from "@/timeline/edit";
-import { changeFit, changeVolume, moveClipTo, report, trimClipEdge } from "@/timeline/editor";
+import { clipDuration, clipSpeed, findClip, sourceDuration } from "@/timeline/clips";
+import { MAX_SPEED, MAX_VOLUME, MIN_SPEED } from "@/timeline/edit";
+import {
+  changeFit,
+  changeKeepPitch,
+  changeReversed,
+  changeSpeed,
+  changeVolume,
+  moveClipTo,
+  report,
+  trimClipEdge,
+} from "@/timeline/editor";
+import { confirmDialog } from "@/lib/dialog";
+import { freezeFrameAtPlayhead } from "@/timeline/freeze";
+import { reverseKey, useReverseStore } from "@/store/reverse";
+import { MAX_AUDIBLE_SPEED, previewRate } from "@/playback/engine";
 import type { FitMode } from "@/project/model";
 
 const fieldClass =
@@ -118,6 +131,193 @@ function VolumeField({ volume, onCommit }: { volume: number; onCommit: (v: numbe
   );
 }
 
+const SPEED_PRESETS = [0.25, 0.5, 1, 2, 4];
+const seconds = (v: number) => `${v.toFixed(2)} s`;
+const times = (v: number) => `${Math.round(v * 100) / 100}×`;
+
+/** Change speed; when later clips are in the way, ask whether to move them (ripple) or cancel. */
+async function applySpeed(clipId: string, speed: number) {
+  const first = changeSpeed(clipId, speed);
+  if (first.ok) return;
+  if (first.error.code !== "needs-ripple") {
+    report(first);
+    return;
+  }
+  const move = await confirmDialog({
+    title: "Move the following clips?",
+    lines: [
+      "At this speed the clip becomes longer and would overlap the clips after it on the same track.",
+      "Move those clips later to make room, or cancel to keep the current speed.",
+    ],
+    confirmLabel: "Move clips",
+  });
+  if (move) report(changeSpeed(clipId, speed, true));
+}
+
+/** Reversing longer than this is slow and needs temporary disk space (same threshold as the export warning). */
+const LONG_REVERSE_SECONDS = 60;
+
+function SpeedPanel({
+  clipId,
+  speed,
+  keepPitch,
+  source,
+  reversed,
+  reverseId,
+  isVideo,
+}: {
+  clipId: string;
+  speed: number;
+  keepPitch: boolean;
+  source: number;
+  reversed: boolean;
+  /** Key of this clip's reversed preview copy. */
+  reverseId: string;
+  isVideo: boolean;
+}) {
+  const reverse = useReverseStore((s) => (reversed ? s.previews[reverseId] : undefined));
+  const [draft, setDraft] = useState<string | null>(null);
+  const typed = draft === null ? null : Number(draft);
+  const shown = typed !== null && Number.isFinite(typed) && typed > 0 ? typed : speed;
+  const invalid = typed !== null && !(Number.isFinite(typed) && typed >= MIN_SPEED && typed <= MAX_SPEED);
+  const preview = previewRate(shown);
+
+  function commit() {
+    if (draft === null) return;
+    const v = Number(draft);
+    setDraft(null);
+    if (Number.isFinite(v) && v >= MIN_SPEED && v <= MAX_SPEED && Math.abs(v - speed) > 1e-9)
+      void applySpeed(clipId, v);
+  }
+
+  return (
+    <section aria-label="Speed" className="space-y-2">
+      <p className="text-xs text-text-muted">Speed</p>
+      <div role="group" aria-label="Speed presets" className="grid grid-cols-5 gap-1">
+        {SPEED_PRESETS.map((p) => {
+          const active = Math.abs(speed - p) < 1e-9 && draft === null;
+          return (
+            <button
+              key={p}
+              type="button"
+              aria-pressed={active}
+              onClick={() => {
+                setDraft(null);
+                void applySpeed(clipId, p);
+              }}
+              className={cn(
+                "h-9 rounded-md border text-xs tabular-nums pointer-coarse:h-11",
+                active
+                  ? "border-accent bg-accent-soft text-text"
+                  : "border-border bg-surface-2 text-text-muted hover:text-text",
+              )}
+            >
+              {times(p)}
+            </button>
+          );
+        })}
+      </div>
+      <div className="flex items-center gap-2">
+        <label htmlFor="inspector-speed" className="text-xs text-text-muted">
+          Custom
+        </label>
+        <div className="relative w-24">
+          <input
+            id="inspector-speed"
+            type="number"
+            inputMode="decimal"
+            min={MIN_SPEED}
+            max={MAX_SPEED}
+            step={0.05}
+            aria-invalid={invalid}
+            className={cn(fieldClass, "pr-6 aria-[invalid=true]:border-danger")}
+            value={draft ?? String(Math.round(speed * 1000) / 1000)}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commit();
+              if (e.key === "Escape") setDraft(null);
+            }}
+          />
+          <span
+            aria-hidden
+            className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-xs text-text-muted"
+          >
+            ×
+          </span>
+        </div>
+        <label className="ml-auto flex min-h-9 items-center gap-1.5 text-xs pointer-coarse:min-h-11">
+          <input
+            type="checkbox"
+            className="size-4 accent-[var(--accent)]"
+            checked={keepPitch}
+            onChange={(e) => report(changeKeepPitch(clipId, e.target.checked))}
+          />
+          Keep pitch
+        </label>
+      </div>
+      {invalid && (
+        <p role="alert" className="text-xs text-danger">
+          Speed must be between {MIN_SPEED}× and {MAX_SPEED}×
+        </p>
+      )}
+      <p className="text-xs text-text-muted tabular-nums" data-testid="speed-duration">
+        Duration: {seconds(source)} → {seconds(source / shown)}
+      </p>
+      {shown > MAX_AUDIBLE_SPEED && (
+        <p className="text-xs text-text-muted">
+          Sound is muted above {MAX_AUDIBLE_SPEED}×, in the preview and the export.
+        </p>
+      )}
+      <div className="flex flex-wrap items-center gap-2 pt-1">
+        <button
+          type="button"
+          aria-pressed={reversed}
+          onClick={() => report(changeReversed(clipId, !reversed))}
+          className={cn(
+            "h-9 rounded-md border px-3 text-xs pointer-coarse:h-11",
+            reversed
+              ? "border-accent bg-accent-soft text-text"
+              : "border-border bg-surface-2 text-text-muted hover:text-text",
+          )}
+        >
+          Reverse
+        </button>
+        {isVideo && (
+          <button
+            type="button"
+            title="Hold the frame under the playhead for 2 seconds (Shift+F)"
+            onClick={() => void freezeFrameAtPlayhead()}
+            className="h-9 rounded-md border border-border bg-surface-2 px-3 text-xs text-text-muted hover:text-text pointer-coarse:h-11"
+          >
+            Freeze frame
+          </button>
+        )}
+      </div>
+      {reversed && (!reverse || reverse.status === "preparing") && (
+        <p role="status" className="text-xs text-text-muted">
+          Preparing reverse preview… {Math.round((reverse?.progress ?? 0) * 100)}%
+        </p>
+      )}
+      {reversed && reverse?.status === "failed" && (
+        <p role="alert" className="text-xs text-danger">
+          Reverse preview failed: {reverse.error}
+        </p>
+      )}
+      {reversed && source > LONG_REVERSE_SECONDS && (
+        <p className="text-xs text-text-muted">
+          Reversing {Math.round(source)} s is slow and needs temporary disk space when exporting.
+        </p>
+      )}
+      {!preview.exact && !invalid && (
+        <p className="text-xs text-text-muted">
+          The preview can only play at {times(preview.rate)} here; the export uses the real {times(shown)}.
+        </p>
+      )}
+    </section>
+  );
+}
+
 export function Inspector() {
   const active = useUiStore((s) => s.sidePanel === "inspector");
   const project = useProjectStore((s) => s.project);
@@ -218,6 +418,19 @@ export function Inspector() {
               <option value="blur">Blur — whole image over a blurred copy</option>
             </select>
           </label>
+        )}
+
+        {asset.type !== "image" && (
+          <SpeedPanel
+            key={`${clip.id}-speed`}
+            clipId={clip.id}
+            speed={clipSpeed(clip)}
+            keepPitch={clip.keepPitch ?? true}
+            source={sourceDuration(clip)}
+            reversed={clip.reversed ?? false}
+            reverseId={reverseKey(asset.path, clip.sourceIn, clip.sourceOut)}
+            isVideo={asset.type === "video"}
+          />
         )}
 
         {asset.type !== "image" && (

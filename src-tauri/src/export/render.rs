@@ -308,6 +308,7 @@ fn verify(job: &RenderJob, file: &Path) -> AppResult<ExportReport> {
         height: h,
         has_audio: true,
         size_bytes: fs::metadata(file)?.len(),
+        warnings: plan.warnings.clone(),
         encoder: match (plan.format, job.encoder) {
             (ExportFormat::Wav, _) => "pcm_s16le".to_string(),
             (ExportFormat::M4a, _) | (_, None) => "aac".to_string(),
@@ -346,6 +347,7 @@ mod tests {
             duration: 2.0,
             background: "#000000".into(),
             clips: vec![],
+            warnings: vec![],
         };
         let tmp = PathBuf::from("/out/.x.cutvii-part.mp4");
         let a = build_args(&plan, Some(Encoder::Libx264), &tmp);
@@ -638,7 +640,7 @@ mod tests {
     }
     fn project(assets: Vec<Value>, tracks: Vec<Value>) -> Project {
         serde_json::from_value(json!({
-            "id": "p", "name": "t", "schemaVersion": 1,
+            "id": "p", "name": "t", "schemaVersion": 2,
             "createdAt": "2026-01-01T00:00:00.000Z", "modifiedAt": "2026-01-01T00:00:00.000Z",
             "settings": {"width": 640, "height": 360, "fps": 30, "backgroundColor": "#202020"},
             "assets": assets, "tracks": tracks
@@ -1170,6 +1172,7 @@ mod tests {
             duration: 2.0,
             background: "#000000".into(),
             clips: vec![],
+            warnings: vec![],
         };
         let wav = build_args(&plan, None, Path::new("/o/.x.cutvii-part.wav")).join(" ");
         assert!(wav.contains("-map [aout] -vn -c:a pcm_s16le") && wav.contains("-f wav"));
@@ -1192,6 +1195,376 @@ mod tests {
             temp_path(Path::new("/o/song.m4a"), ExportFormat::M4a),
             PathBuf::from("/o/.song.cutvii-part.m4a")
         );
+    }
+
+    /// Loudest frequency band of the audio in [from, from+len): which of two bands holds more energy.
+    fn band_volume(e: &Env, file: &Path, from: f64, len: f64, centre: u32) -> f64 {
+        let out = command(&e.ffmpeg)
+            .args([
+                "-hide_banner",
+                "-ss",
+                &format!("{from}"),
+                "-t",
+                &format!("{len}"),
+                "-i",
+            ])
+            .arg(file)
+            .args([
+                "-vn",
+                "-af",
+                &format!("bandpass=f={centre}:width_type=h:w=120,volumedetect"),
+                "-f",
+                "null",
+                "-",
+            ])
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&out.stderr).into_owned();
+        text.lines()
+            .find_map(|l| l.split("mean_volume:").nth(1))
+            .and_then(|v| v.trim().trim_end_matches("dB").trim().parse::<f64>().ok())
+            .unwrap_or(-120.0)
+    }
+
+    #[test]
+    fn speed_changes_exported_duration_pitch_and_mutes_above_4x() {
+        let Some(e) = env("speed") else { return };
+        let red = e.red(); // 4 s, 1 kHz tone
+        let render = |name: &str, speed: f64, keep_pitch: bool| {
+            let mut c = clip("c", "red", "v1", 0.0, 0.0, 4.0, 1.0);
+            c["speed"] = json!(speed);
+            c["keepPitch"] = json!(keep_pitch);
+            let p = project(
+                vec![asset("red", &red, "video", Some(4.0))],
+                vec![track("v1", "video", 0, false, false, vec![c])],
+            );
+            let out = e.dir.join(name);
+            let r = e
+                .export(&p, &opts(Quality::Draft), &out)
+                .0
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            (out, r)
+        };
+
+        // 2x: half as long (checked by ffprobe inside verify, and here), picture intact, pitch kept
+        let (fast, r) = render("fast.mp4", 2.0, true);
+        assert!(
+            (r.duration - 2.0).abs() < 0.15,
+            "2x of 4 s should be 2 s, got {}",
+            r.duration
+        );
+        assert!(r.warnings.is_empty());
+        assert!(e.decodes_cleanly(&fast));
+        assert!(is_red(e.region(&fast, 1.0, "100:100:270:130")));
+        assert!(
+            band_volume(&e, &fast, 0.3, 1.4, 1000) > band_volume(&e, &fast, 0.3, 1.4, 2000) + 10.0,
+            "pitch kept at 1 kHz"
+        );
+
+        // 2x without keep-pitch: the tone moves up an octave
+        let (chip, _) = render("chipmunk.mp4", 2.0, false);
+        assert!(
+            band_volume(&e, &chip, 0.3, 1.4, 2000) > band_volume(&e, &chip, 0.3, 1.4, 1000) + 10.0,
+            "pitch doubled to 2 kHz"
+        );
+
+        // 0.5x: twice as long, pitch kept (needs no chain); 0.25x needs the atempo chain
+        let (slow, r) = render("slow.mp4", 0.5, true);
+        assert!(
+            (r.duration - 8.0).abs() < 0.2,
+            "0.5x of 4 s should be 8 s, got {}",
+            r.duration
+        );
+        assert!(
+            band_volume(&e, &slow, 1.0, 5.0, 1000) > band_volume(&e, &slow, 1.0, 5.0, 500) + 10.0
+        );
+        let (slower, r) = render("slower.mp4", 0.25, true);
+        assert!(
+            (r.duration - 16.0).abs() < 0.3,
+            "0.25x of 4 s should be 16 s, got {}",
+            r.duration
+        );
+        assert!(
+            e.volume(&slower, 2.0, 10.0) > -40.0,
+            "chained atempo still produces sound"
+        );
+
+        // 8x: 0.5 s long, silent, and the report says why
+        let (hyper, r) = render("hyper.mp4", 8.0, true);
+        assert!(
+            (r.duration - 0.5).abs() < 0.15,
+            "8x of 4 s should be 0.5 s, got {}",
+            r.duration
+        );
+        assert!(e.volume(&hyper, 0.0, 0.5) < -80.0, "muted above 4x");
+        assert!(
+            r.warnings.len() == 1 && r.warnings[0].contains("muted above 4"),
+            "{:?}",
+            r.warnings
+        );
+    }
+
+    /// 4 s clip: red with a 500 Hz tone for 2 s, then blue with a 1500 Hz tone for 2 s.
+    fn red_then_blue(e: &Env) -> String {
+        e.make(
+            "redblue.mp4",
+            &[
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=red:s=320x180:r=30:d=2",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=blue:s=320x180:r=30:d=2",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=500:duration=2",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=1500:duration=2",
+                "-filter_complex",
+                "[0:v][1:v]concat=n=2:v=1:a=0[v];[2:a][3:a]concat=n=2:v=0:a=1[a]",
+                "-map",
+                "[v]",
+                "-map",
+                "[a]",
+                "-pix_fmt",
+                "yuv420p",
+            ],
+        )
+    }
+    fn frame_count(e: &Env, file: &Path) -> u32 {
+        let ffprobe =
+            crate::media::tools::locate_tool("ffprobe", crate::media::tools::FFPROBE_ENV).unwrap();
+        let out = command(&ffprobe)
+            .args([
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-count_frames",
+                "-show_entries",
+                "stream=nb_read_frames",
+                "-of",
+                "csv=p=0",
+            ])
+            .arg(file)
+            .output()
+            .unwrap();
+        let _ = e;
+        String::from_utf8_lossy(&out.stdout)
+            .trim()
+            .parse()
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn chunked_reverse_plays_backwards_with_every_frame_and_sound() {
+        use crate::media::reverse::{ReverseProfile, reverse_range};
+        let Some(e) = env("reverse") else { return };
+        let src = red_then_blue(&e);
+        let shape = e.backend.shape(Path::new(&src)).unwrap();
+        assert!(shape.has_video && shape.has_audio && (shape.fps - 30.0).abs() < 0.01);
+
+        // force small chunks (0.7 s -> 6 pieces) so the chunk joins are really exercised
+        let out = e.dir.join("rev.mkv");
+        let mut seen = Vec::new();
+        reverse_range(
+            &e.ffmpeg,
+            Path::new(&src),
+            &shape,
+            0.0,
+            4.0,
+            &out,
+            ReverseProfile::Lossless,
+            Some(0.7),
+            &mut |f| seen.push(f),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+
+        assert_eq!(
+            frame_count(&e, &out),
+            frame_count(&e, Path::new(&src)),
+            "no frame lost or doubled at chunk joins"
+        );
+        assert!(
+            is_blue(e.region(&out, 0.5, "100:100:110:40")),
+            "starts with what was the end"
+        );
+        assert!(
+            is_red(e.region(&out, 3.5, "100:100:110:40")),
+            "ends with what was the start"
+        );
+        assert!(
+            band_volume(&e, &out, 0.3, 1.4, 1500) > band_volume(&e, &out, 0.3, 1.4, 500) + 10.0,
+            "sound is reversed too"
+        );
+        assert!(
+            band_volume(&e, &out, 2.3, 1.4, 500) > band_volume(&e, &out, 2.3, 1.4, 1500) + 10.0
+        );
+        assert!(seen.windows(2).all(|w| w[0] <= w[1]) && seen.last() == Some(&1.0));
+        // no chunk folder or partial file is left behind
+        let leftovers: Vec<_> = fs::read_dir(&e.dir)
+            .unwrap()
+            .filter_map(|d| d.ok())
+            .map(|d| d.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.contains("chunks") || n.contains("part"))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+
+        // a sub-range reverses only that range: 1..3 s is red then blue, so reversed is blue then red, 2 s long
+        let part = e.dir.join("part.mkv");
+        reverse_range(
+            &e.ffmpeg,
+            Path::new(&src),
+            &shape,
+            1.0,
+            3.0,
+            &part,
+            ReverseProfile::Lossless,
+            Some(0.7),
+            &mut |_| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!(frame_count(&e, &part), 60);
+        assert!(
+            is_blue(e.region(&part, 0.3, "100:100:110:40"))
+                && is_red(e.region(&part, 1.7, "100:100:110:40"))
+        );
+
+        // cancel stops between chunks and cleans up
+        let cancelled = e.dir.join("never.mkv");
+        let flag = AtomicBool::new(false);
+        let r = reverse_range(
+            &e.ffmpeg,
+            Path::new(&src),
+            &shape,
+            0.0,
+            4.0,
+            &cancelled,
+            ReverseProfile::Lossless,
+            Some(0.5),
+            &mut |_| flag.store(true, Ordering::Relaxed),
+            &flag,
+        );
+        assert!(matches!(r, Err(AppError::Cancelled)));
+        assert!(!cancelled.exists());
+    }
+
+    #[test]
+    fn reverse_preview_is_a_small_playable_file() {
+        let Some(e) = env("revpreview") else { return };
+        let src = red_then_blue(&e);
+        let out = e.dir.join("preview.mp4");
+        e.backend
+            .reverse_preview(
+                Path::new(&src),
+                0.0,
+                4.0,
+                &out,
+                &mut |_| {},
+                &AtomicBool::new(false),
+            )
+            .unwrap();
+        assert!(e.decodes_cleanly(&out));
+        assert!(
+            is_blue(e.region(&out, 0.5, "100:100:110:40"))
+                && is_red(e.region(&out, 3.5, "100:100:110:40"))
+        );
+        assert_eq!(frame_count(&e, &out), 120);
+    }
+
+    #[test]
+    fn exports_reversed_clips_alone_and_combined_with_speed() {
+        let Some(e) = env("revexport") else { return };
+        let src = red_then_blue(&e);
+        let render = |name: &str, speed: f64| {
+            let mut c = clip("c", "rb", "v1", 0.0, 0.0, 4.0, 1.0);
+            c["reversed"] = json!(true);
+            c["speed"] = json!(speed);
+            let p = project(
+                vec![asset("rb", &src, "video", Some(4.0))],
+                vec![track("v1", "video", 0, false, false, vec![c])],
+            );
+            let out = e.dir.join(name);
+            let (r, progress) = e.export(&p, &opts(Quality::Draft), &out);
+            (
+                out,
+                r.unwrap_or_else(|err| panic!("{name}: {err}")),
+                progress,
+            )
+        };
+
+        let (out, r, progress) = render("reversed.mp4", 1.0);
+        assert!((r.duration - 4.0).abs() < 0.15, "duration {}", r.duration);
+        assert!(
+            is_blue(e.region(&out, 0.5, "200:120:220:120")),
+            "reversed export starts blue"
+        );
+        assert!(
+            is_red(e.region(&out, 3.5, "200:120:220:120")),
+            "and ends red"
+        );
+        assert!(
+            band_volume(&e, &out, 0.3, 1.4, 1500) > band_volume(&e, &out, 0.3, 1.4, 500) + 10.0
+        );
+        assert!(
+            progress.windows(2).all(|w| w[0] <= w[1]) && progress.last() == Some(&1.0),
+            "{progress:?}"
+        );
+        assert!(
+            !e.dir.join(".reversed.cutvii-reverse").exists(),
+            "temporary reversed copies are removed"
+        );
+        assert!(e.decodes_cleanly(&out));
+
+        // reversed and 2x: 2 s long, still blue first
+        let (fast, r, _) = render("reversed2x.mp4", 2.0);
+        assert!((r.duration - 2.0).abs() < 0.15, "duration {}", r.duration);
+        assert!(
+            is_blue(e.region(&fast, 0.3, "200:120:220:120"))
+                && is_red(e.region(&fast, 1.7, "200:120:220:120"))
+        );
+    }
+
+    #[test]
+    fn freeze_frame_is_the_exact_frame_at_full_resolution() {
+        let Some(e) = env("freeze") else { return };
+        let src = red_then_blue(&e); // 320x180
+        let before = e.dir.join("before.png");
+        let after = e.dir.join("after.png");
+        e.backend
+            .extract_frame(Path::new(&src), 1.9, &before)
+            .unwrap();
+        e.backend
+            .extract_frame(Path::new(&src), 2.05, &after)
+            .unwrap();
+
+        let info = e.backend.probe(&before).unwrap();
+        assert_eq!(
+            (info.width, info.height),
+            (Some(320), Some(180)),
+            "full source resolution, not a thumbnail"
+        );
+        assert!(
+            is_red(e.region(&before, 0.0, "100:100:110:40")),
+            "1.9 s is still red"
+        );
+        assert!(
+            is_blue(e.region(&after, 0.0, "100:100:110:40")),
+            "2.05 s is already blue: the cut is frame-accurate"
+        );
+        assert!(
+            e.backend
+                .extract_frame(Path::new(&src), 99.0, &e.dir.join("none.png"))
+                .is_err()
+        );
+        assert!(!e.dir.join("none.png").exists() && !e.dir.join("none.part.png").exists());
     }
 
     #[test]

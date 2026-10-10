@@ -36,7 +36,8 @@
       "assetProtocol": {
         "enable": true,
         "scope": [
-          "$APPCACHE/thumbnails/**"
+          "$APPCACHE/thumbnails/**",
+          "$APPCACHE/reverse/**"
         ]
       },
       "devCsp": null

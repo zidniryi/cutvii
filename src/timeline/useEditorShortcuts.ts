@@ -3,7 +3,9 @@ import { togglePlayback } from "@/playback/controller";
 import { newProjectFlow, openProjectFlow, saveFlow } from "@/project/fileActions";
 import { usePlaybackStore } from "@/store/playback";
 import { useProjectStore } from "@/store/project";
+import { copySelected, cutSelected, pasteAtPlayhead } from "./clipboard";
 import { deleteSelected, redo, report, splitAtPlayhead, undo } from "./editor";
+import { freezeFrameAtPlayhead } from "./freeze";
 import { resolveShortcut, type ShortcutAction } from "./shortcuts";
 import { zoomByFactorAt, zoomByWheel, zoomStep, zoomToFit } from "./zoomController";
 
@@ -27,11 +29,15 @@ const RUN: Record<ShortcutAction, () => void> = {
   new: () => void newProjectFlow(),
   undo,
   redo,
+  cut: () => void cutSelected(),
+  copy: () => void copySelected(),
+  paste: () => void report(pasteAtPlayhead()),
   "zoom-in": () => zoomStep(1),
   "zoom-out": () => zoomStep(-1),
   "zoom-fit": zoomToFit,
   "play-pause": togglePlayback,
   split: () => void report(splitAtPlayhead()),
+  freeze: () => void freezeFrameAtPlayhead(),
   delete: () => void deleteSelected(),
   "seek-back": () => seek(-1 / useProjectStore.getState().project.settings.fps),
   "seek-forward": () => seek(1 / useProjectStore.getState().project.settings.fps),
@@ -47,11 +53,16 @@ const RUN: Record<ShortcutAction, () => void> = {
  */
 export function useEditorShortcuts() {
   useEffect(() => {
+    let lastClipboardAction = 0;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return; // already handled closer to the target (e.g. the ruler slider)
       const hit = resolveShortcut(e, { typing: isTyping(e.target), onButton: isButton(e.target) });
       if (!hit) return;
       e.preventDefault();
+      if (hit.action === "cut" || hit.action === "copy" || hit.action === "paste") {
+        if (performance.now() - lastClipboardAction < 150) return;
+        lastClipboardAction = performance.now();
+      }
       RUN[hit.action]();
     };
 
@@ -77,6 +88,22 @@ export function useEditorShortcuts() {
     };
     const onGestureEnd = (e: Event) => e.preventDefault();
 
+    // The native Edit menu (macOS) may deliver Cmd+X/C/V as clipboard events instead of key presses.
+    // Handle those too, but only once per gesture and never while typing in a field.
+    const clipboard = (action: "cut" | "copy" | "paste") => (e: Event) => {
+      if (isTyping(e.target) || isTyping(document.activeElement)) return;
+      e.preventDefault();
+      if (performance.now() - lastClipboardAction < 150) return;
+      lastClipboardAction = performance.now();
+      RUN[action]();
+    };
+    const onCut = clipboard("cut");
+    const onCopy = clipboard("copy");
+    const onPaste = clipboard("paste");
+    document.addEventListener("cut", onCut);
+    document.addEventListener("copy", onCopy);
+    document.addEventListener("paste", onPaste);
+
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("wheel", onWheel, { passive: false });
     window.addEventListener("gesturestart", onGestureStart);
@@ -84,6 +111,9 @@ export function useEditorShortcuts() {
     window.addEventListener("gestureend", onGestureEnd);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("cut", onCut);
+      document.removeEventListener("copy", onCopy);
+      document.removeEventListener("paste", onPaste);
       window.removeEventListener("wheel", onWheel);
       window.removeEventListener("gesturestart", onGestureStart);
       window.removeEventListener("gesturechange", onGestureChange);

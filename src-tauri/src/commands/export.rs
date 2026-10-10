@@ -18,6 +18,11 @@ pub const PROGRESS_EVENT: &str = "export-progress";
 #[derive(Default)]
 pub struct ExportJob(pub Mutex<Option<Arc<AtomicBool>>>);
 
+/// Where the last successful export was written. Kept in Rust so the webview can ask to reveal *that*
+/// file, never an arbitrary path.
+#[derive(Default)]
+pub struct LastExport(pub Mutex<Option<PathBuf>>);
+
 #[derive(Clone, Serialize)]
 struct Progress {
     fraction: f64,
@@ -43,6 +48,9 @@ pub async fn export_project(
         *slot = Some(Arc::clone(&cancel));
     }
     let result = run(&app, project, options, cancel).await;
+    if let Ok(Some(report)) = &result {
+        *app.state::<LastExport>().0.lock().unwrap() = Some(PathBuf::from(&report.path));
+    }
     *job.0.lock().unwrap() = None;
     result
 }
@@ -110,5 +118,59 @@ async fn run(
 pub fn cancel_export(job: State<'_, ExportJob>) {
     if let Some(flag) = job.0.lock().unwrap().as_ref() {
         flag.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Arguments for the platform's file manager to show `path` selected (macOS/Windows) or its folder (Linux).
+pub fn reveal_command(path: &std::path::Path) -> (&'static str, Vec<std::ffi::OsString>) {
+    if cfg!(target_os = "macos") {
+        ("open", vec!["-R".into(), path.into()])
+    } else if cfg!(target_os = "windows") {
+        let mut arg = std::ffi::OsString::from("/select,");
+        arg.push(path);
+        ("explorer", vec![arg])
+    } else {
+        ("xdg-open", vec![path.parent().unwrap_or(path).into()])
+    }
+}
+
+/// Show the last exported file in Finder / Explorer / the file manager.
+#[tauri::command]
+pub fn reveal_last_export(last: State<'_, LastExport>) -> AppResult<()> {
+    let path =
+        last.0.lock().unwrap().clone().ok_or_else(|| {
+            AppError::InvalidInput("there is no exported file to show yet".into())
+        })?;
+    if !path.exists() {
+        return Err(AppError::InvalidInput(
+            "the exported file is no longer there (moved or deleted)".into(),
+        ));
+    }
+    let (program, args) = reveal_command(&path);
+    // argument vector, no shell; only a failure to start the file manager counts as an error
+    std::process::Command::new(program).args(args).spawn()?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reveal_uses_the_platform_file_manager_without_a_shell() {
+        let (program, args) = reveal_command(std::path::Path::new("/out/My Movie.mp4"));
+        if cfg!(target_os = "macos") {
+            assert_eq!(program, "open");
+            assert_eq!(
+                args,
+                vec![std::ffi::OsString::from("-R"), "/out/My Movie.mp4".into()]
+            );
+        } else if cfg!(target_os = "windows") {
+            assert_eq!(program, "explorer");
+            assert_eq!(args.len(), 1); // the path with spaces stays one argument
+        } else {
+            assert_eq!(program, "xdg-open");
+            assert_eq!(args, vec![std::ffi::OsString::from("/out")]);
+        }
     }
 }

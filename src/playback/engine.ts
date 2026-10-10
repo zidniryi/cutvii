@@ -3,12 +3,15 @@
  * Kept free of React/DOM so it can be unit-tested; the Preview component only applies the plans.
  */
 import type { MediaAsset, Project, TimelineClip, TimelineTrack } from "@/project/model";
-import { clipEnd, EPS } from "@/timeline/clips";
+import { clipEnd, clipSpeed, EPS } from "@/timeline/clips";
 
 /** Clips starting within this many seconds are mounted (paused) so they are ready when reached. */
 export const PRELOAD_SECONDS = 1;
-/** While playing, correct a media element only when it drifts further than this from the clock. */
-export const DRIFT_SECONDS = 0.3;
+/** While playing, a follower further than this from the clock is re-seeked (a jump you can hear or see). */
+export const DRIFT_SECONDS = 0.75;
+/** Smaller differences are closed smoothly by playing slightly faster or slower. */
+export const RATE_DEADBAND = 0.04;
+export const MAX_RATE_NUDGE = 0.08;
 /** While paused/scrubbing, seek when further than this (about half a frame at 24fps). */
 export const SEEK_EPSILON = 0.02;
 
@@ -46,7 +49,30 @@ export function layersAt(project: Project, t: number, horizon = PRELOAD_SECONDS)
 
 /** Position inside the source file for timeline time t, clamped to the clip's used range. */
 export function sourceTimeFor(clip: TimelineClip, t: number): number {
-  return Math.min(clip.sourceOut, Math.max(clip.sourceIn, clip.sourceIn + (t - clip.timelineStart)));
+  const used = (t - clip.timelineStart) * clipSpeed(clip);
+  // Reversed clips are previewed from a reversed copy of exactly the used range, which starts at 0.
+  if (clip.reversed) return Math.min(clip.sourceOut - clip.sourceIn, Math.max(0, used));
+  return Math.min(clip.sourceOut, Math.max(clip.sourceIn, clip.sourceIn + used));
+}
+
+/** Where an element should rest while its clip is still upcoming. */
+export const restTimeFor = (clip: TimelineClip) => (clip.reversed ? 0 : clip.sourceIn);
+
+/** The webview can only preview this range of speeds reliably; export is exact at any speed. */
+export const PREVIEW_SPEED = { min: 0.25, max: 4 } as const;
+/** Above this speed sound is muted, in the preview and in the export alike. */
+export const MAX_AUDIBLE_SPEED = 4;
+
+/** The rate to give a media element for a clip speed, and whether that is the real speed. */
+export function previewRate(speed: number): { rate: number; exact: boolean } {
+  const rate = Math.min(PREVIEW_SPEED.max, Math.max(PREVIEW_SPEED.min, speed));
+  return { rate, exact: Math.abs(rate - speed) < 1e-9 };
+}
+
+/** Timeline time shown by an element that is at `currentTime` in the source. */
+export function timelineTimeFor(clip: TimelineClip, currentTime: number): number {
+  const base = clip.reversed ? 0 : clip.sourceIn;
+  return clip.timelineStart + (currentTime - base) / clipSpeed(clip);
 }
 
 /** Stable identity of a layer set; changes only when something mounts, unmounts or toggles visibility. */
@@ -59,26 +85,52 @@ export interface SyncInput {
   currentTime: number;
   /** Where the element should be right now (sourceIn for upcoming clips). */
   desired: number;
+  /** This element drives the playhead: it is never corrected while it plays. */
+  lead?: boolean;
 }
 
 export interface SyncPlan {
   seekTo?: number;
   play?: boolean;
   pause?: boolean;
+  /** Playback rate to use while playing (1 = normal). Followers are nudged instead of re-seeked. */
+  rate?: number;
 }
 
-export function planSync({ role, playing, paused, currentTime, desired }: SyncInput): SyncPlan {
-  const off = Math.abs(currentTime - desired);
+export function planSync({ role, playing, paused, currentTime, desired, lead = false }: SyncInput): SyncPlan {
+  const ahead = currentTime - desired; // > 0: the element is ahead of the clock
+  const off = Math.abs(ahead);
   const plan: SyncPlan = {};
 
   if (role === "upcoming" || !playing) {
     if (!paused) plan.pause = true;
     if (off > SEEK_EPSILON) plan.seekTo = desired;
+    plan.rate = 1;
     return plan;
   }
-  if (off > DRIFT_SECONDS) plan.seekTo = desired;
+
+  if (off > DRIFT_SECONDS) {
+    // far away (the user seeked, or it fell badly behind): jump once, then play normally
+    plan.seekTo = desired;
+    plan.rate = 1;
+  } else if (lead || off <= RATE_DEADBAND) {
+    plan.rate = 1;
+  } else {
+    // close the gap over about two seconds, never by more than a few percent (inaudible, invisible)
+    const nudge = Math.max(-MAX_RATE_NUDGE, Math.min(MAX_RATE_NUDGE, -ahead * 0.5));
+    plan.rate = Math.round((1 + nudge) * 1000) / 1000;
+  }
   if (paused) plan.play = true;
   return plan;
+}
+
+/**
+ * The layer whose own clock drives the playhead. Sound comes first: a hiccup in music or speech is far
+ * more noticeable than a picture that speeds up by a few percent to keep in step.
+ */
+export function pickLead(layers: Layer[]): Layer | undefined {
+  const active = layers.filter((l) => l.role === "active" && l.asset.type !== "image");
+  return active.find((l) => l.asset.type === "audio") ?? active.find((l) => l.visible) ?? active[0];
 }
 
 export function mediaErrorMessage(code: number | undefined): string {

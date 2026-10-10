@@ -11,6 +11,8 @@ export interface ExportReport {
   hasAudio: boolean;
   sizeBytes: number;
   encoder: string;
+  /** Things the user should know, e.g. sound muted at high speed. */
+  warnings?: string[];
 }
 
 export const CANCELLED_MESSAGE = "export cancelled";
@@ -34,4 +36,13 @@ export async function cancelExport(): Promise<void> {
 /** Subscribe to 0..1 progress; returns the unsubscribe function. */
 export async function onExportProgress(cb: (fraction: number) => void): Promise<() => void> {
   return listen<{ fraction: number }>("export-progress", (e) => cb(e.payload.fraction));
+}
+
+/** Show the file that was just exported in Finder / Explorer. Rust knows which file; no path is sent. */
+export async function revealLastExport(): Promise<void> {
+  try {
+    await invoke("reveal_last_export");
+  } catch (e) {
+    throw new Error(message(e), { cause: e });
+  }
 }

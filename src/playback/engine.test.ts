@@ -1,7 +1,17 @@
 import { expectValid, IDS, makeProject } from "@/test/makeProject";
 import { addClip } from "@/timeline/edit";
 import type { Project } from "@/project/model";
-import { DRIFT_SECONDS, layerKey, layersAt, mediaErrorMessage, planSync, sourceTimeFor } from "./engine";
+import {
+  DRIFT_SECONDS,
+  layerKey,
+  layersAt,
+  MAX_RATE_NUDGE,
+  mediaErrorMessage,
+  pickLead,
+  planSync,
+  RATE_DEADBAND,
+  sourceTimeFor,
+} from "./engine";
 
 function build(): Project {
   let p = makeProject();
@@ -74,27 +84,70 @@ describe("sourceTimeFor", () => {
 describe("planSync", () => {
   const base = { role: "active", playing: true, paused: false, currentTime: 3, desired: 3 } as const;
 
-  it("leaves a healthy playing element alone", () => {
-    expect(planSync(base)).toEqual({});
-    expect(planSync({ ...base, currentTime: 3 + DRIFT_SECONDS - 0.01 })).toEqual({});
+  it("leaves an in-step element alone", () => {
+    expect(planSync(base)).toEqual({ rate: 1 });
+    expect(planSync({ ...base, currentTime: 3 + RATE_DEADBAND / 2 })).toEqual({ rate: 1 });
   });
 
-  it("corrects drift and starts a paused element while playing", () => {
-    expect(planSync({ ...base, currentTime: 3 + DRIFT_SECONDS + 0.1 })).toEqual({ seekTo: 3 });
-    expect(planSync({ ...base, paused: true, currentTime: 3 })).toEqual({ play: true });
-    expect(planSync({ ...base, paused: true, currentTime: 0 })).toEqual({ seekTo: 3, play: true });
+  it("closes small drift by nudging the speed, never by jumping", () => {
+    const ahead = planSync({ ...base, currentTime: 3.2 }); // element ahead: slow down
+    expect(ahead.seekTo).toBeUndefined();
+    expect(ahead.rate).toBeLessThan(1);
+    const behind = planSync({ ...base, currentTime: 2.8 }); // element behind: speed up
+    expect(behind.seekTo).toBeUndefined();
+    expect(behind.rate).toBeGreaterThan(1);
+    // bounded to a few percent whatever the gap
+    for (const t of [2.3, 2.6, 3.4, 3.7]) {
+      const r = planSync({ ...base, currentTime: t }).rate!;
+      expect(Math.abs(r - 1)).toBeLessThanOrEqual(MAX_RATE_NUDGE + 1e-9);
+    }
   });
 
-  it("pauses and seeks precisely when not playing (scrubbing)", () => {
-    expect(planSync({ ...base, playing: false, currentTime: 1 })).toEqual({ pause: true, seekTo: 3 });
-    expect(planSync({ ...base, playing: false, paused: true, currentTime: 3.01 })).toEqual({});
+  it("never corrects the lead while it plays (it is the clock)", () => {
+    expect(planSync({ ...base, currentTime: 3.3, lead: true })).toEqual({ rate: 1 });
+    // ...unless it is far away, which means the user seeked
+    expect(planSync({ ...base, currentTime: 9, lead: true })).toEqual({ seekTo: 3, rate: 1 });
+  });
+
+  it("jumps only when far away, and starts a paused element", () => {
+    expect(planSync({ ...base, currentTime: 3 + DRIFT_SECONDS + 0.1 })).toEqual({ seekTo: 3, rate: 1 });
+    expect(planSync({ ...base, paused: true, currentTime: 3 })).toEqual({ rate: 1, play: true });
+    expect(planSync({ ...base, paused: true, currentTime: 0 })).toEqual({ seekTo: 3, rate: 1, play: true });
+  });
+
+  it("pauses and seeks precisely when not playing (scrubbing), at normal speed", () => {
+    expect(planSync({ ...base, playing: false, currentTime: 1 })).toEqual({
+      pause: true,
+      seekTo: 3,
+      rate: 1,
+    });
+    expect(planSync({ ...base, playing: false, paused: true, currentTime: 3.01 })).toEqual({ rate: 1 });
   });
 
   it("keeps upcoming clips paused at their start", () => {
     expect(planSync({ ...base, role: "upcoming", currentTime: 0, desired: 2 })).toEqual({
       pause: true,
       seekTo: 2,
+      rate: 1,
     });
+  });
+});
+
+describe("pickLead", () => {
+  const p = build();
+  const lead = (t: number) => pickLead(layersAt(p, t, 0))?.clip.id;
+
+  it("prefers sound: the audio clip leads whenever one is playing", () => {
+    expect(lead(1.5)).toBe("music"); // video "a" is visible, but the music leads
+    expect(lead(3)).toBe("music"); // a still on top changes nothing
+    expect(lead(6)).toBe("music");
+  });
+
+  it("falls back to the visible video, and to nothing in gaps or over stills only", () => {
+    expect(lead(0.5)).toBe("a"); // before the music starts
+    expect(lead(11.5)).toBeUndefined();
+    const stillOnly = { ...p, tracks: p.tracks.map((t) => (t.id === IDS.v2 ? t : { ...t, clips: [] })) };
+    expect(pickLead(layersAt(stillOnly, 3, 0))).toBeUndefined();
   });
 });
 

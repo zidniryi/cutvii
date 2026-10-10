@@ -120,6 +120,14 @@ pub fn validate(project: &Project) -> Result<(), Vec<String>> {
             if !(0.0..=MAX_VOLUME).contains(&clip.volume) {
                 err(format!("{at}.volume: must be between 0 and {MAX_VOLUME}"));
             }
+            if clip
+                .speed
+                .is_some_and(|v| !(MIN_SPEED..=MAX_SPEED).contains(&v))
+            {
+                err(format!(
+                    "{at}.speed: must be between {MIN_SPEED} and {MAX_SPEED}"
+                ));
+            }
             if !(0.0..=1.0).contains(&clip.opacity) {
                 err(format!("{at}.opacity: must be between 0 and 1"));
             }
@@ -165,7 +173,7 @@ mod tests {
     use super::*;
 
     fn fixture() -> Project {
-        serde_json::from_str(include_str!("../../../fixtures/project-v1.json"))
+        serde_json::from_str(include_str!("../../../fixtures/project-v2.json"))
             .expect("fixture parses")
     }
 
@@ -180,7 +188,7 @@ mod tests {
     #[test]
     fn unknown_fields_are_rejected() {
         let mut v: serde_json::Value =
-            serde_json::from_str(include_str!("../../../fixtures/project-v1.json")).unwrap();
+            serde_json::from_str(include_str!("../../../fixtures/project-v2.json")).unwrap();
         v["extra"] = 1.into();
         assert!(serde_json::from_value::<Project>(v).is_err());
     }
@@ -279,8 +287,22 @@ mod tests {
     }
 
     #[test]
+    fn speed_must_be_within_range() {
+        assert!(
+            first_error(|p| p.tracks[0].clips[0].speed = Some(0.05))
+                .contains("speed: must be between 0.1 and 10")
+        );
+        assert!(first_error(|p| p.tracks[0].clips[0].speed = Some(10.5)).contains("speed"));
+        let mut p = fixture();
+        p.tracks[0].clips[0].speed = Some(0.1);
+        p.tracks[1].clips[0].speed = Some(10.0);
+        assert!(validate(&p).is_ok());
+        assert_eq!(p.tracks[0].clips[0].timeline_duration(), 50.0); // 5 s of source at 0.1x
+    }
+
+    #[test]
     fn rejects_bad_settings_and_version() {
         assert!(first_error(|p| p.settings.background_color = "red".into()).contains("#RRGGBB"));
-        assert!(first_error(|p| p.schema_version = 2).contains("schemaVersion"));
+        assert!(first_error(|p| p.schema_version = 99).contains("schemaVersion"));
     }
 }

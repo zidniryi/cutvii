@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::media::MediaType;
 
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -77,6 +77,31 @@ pub struct TimelineClip {
     pub opacity: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fit: Option<FitMode>,
+    /// Playback speed (0.1 to 10). Absent means 1. Timeline length = (sourceOut - sourceIn) / speed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed: Option<f64>,
+    /// Keep the original pitch when the speed changes. Absent means true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_pitch: Option<bool>,
+    /// Play the used source range backwards. Absent means false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reversed: Option<bool>,
+}
+
+pub const MIN_SPEED: f64 = 0.1;
+pub const MAX_SPEED: f64 = 10.0;
+
+impl TimelineClip {
+    pub fn speed(&self) -> f64 {
+        self.speed.unwrap_or(1.0)
+    }
+    pub fn keep_pitch(&self) -> bool {
+        self.keep_pitch.unwrap_or(true)
+    }
+    /// Length on the timeline, in seconds.
+    pub fn timeline_duration(&self) -> f64 {
+        (self.source_out - self.source_in) / self.speed()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

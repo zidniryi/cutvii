@@ -1,7 +1,7 @@
 //! Upgrading older project files to the current schema.
 //!
 //! `MIGRATIONS[n]` upgrades a document from `schemaVersion` n to n + 1. Version 1 is the first released
-//! format, so the chain is empty today; the machinery is exercised with a synthetic chain in tests.
+//! format; v2 added clip speed. The machinery is also exercised with a synthetic chain in tests.
 //! Add one function per schema bump and never edit an existing one.
 
 use serde_json::Value;
@@ -11,7 +11,31 @@ use crate::errors::{AppError, AppResult};
 
 pub type Migration = fn(Value) -> Result<Value, String>;
 
-const MIGRATIONS: &[Migration] = &[];
+const MIGRATIONS: &[Migration] = &[no_version_zero, v1_to_v2];
+
+fn no_version_zero(_: Value) -> Result<Value, String> {
+    Err("schema version 0 never existed".into())
+}
+
+/// v2 adds clip speed. Older clips always played at normal speed with their original pitch.
+fn v1_to_v2(mut doc: Value) -> Result<Value, String> {
+    let tracks = doc
+        .get_mut("tracks")
+        .and_then(Value::as_array_mut)
+        .ok_or("tracks missing")?;
+    for track in tracks {
+        let clips = track
+            .get_mut("clips")
+            .and_then(Value::as_array_mut)
+            .ok_or("clips missing")?;
+        for clip in clips {
+            let clip = clip.as_object_mut().ok_or("clip is not an object")?;
+            clip.entry("speed").or_insert(Value::from(1));
+            clip.entry("keepPitch").or_insert(Value::from(true));
+        }
+    }
+    Ok(doc)
+}
 
 pub fn migrate_to_current(value: Value) -> AppResult<Value> {
     migrate_with(value, SCHEMA_VERSION, MIGRATIONS)
@@ -69,8 +93,37 @@ mod tests {
     }
 
     #[test]
+    fn v1_projects_gain_speed_defaults_and_match_the_v2_fixture() {
+        let v1: Value =
+            serde_json::from_str(include_str!("../../../fixtures/project-v1.json")).unwrap();
+        let v2: Value =
+            serde_json::from_str(include_str!("../../../fixtures/project-v2.json")).unwrap();
+        let migrated = migrate_to_current(v1).unwrap();
+        assert_eq!(migrated["schemaVersion"], 2);
+        assert_eq!(migrated["tracks"][0]["clips"][0]["speed"], 1);
+        assert_eq!(migrated["tracks"][0]["clips"][0]["keepPitch"], true);
+        assert_eq!(migrated, v2);
+
+        // an existing value is never overwritten, and broken documents are reported
+        let mut odd: Value =
+            serde_json::from_str(include_str!("../../../fixtures/project-v1.json")).unwrap();
+        odd["tracks"][0]["clips"][0]["speed"] = json!(2);
+        assert_eq!(
+            migrate_to_current(odd).unwrap()["tracks"][0]["clips"][0]["speed"],
+            2
+        );
+        assert!(
+            migrate_to_current(json!({"schemaVersion": 1}))
+                .unwrap_err()
+                .to_string()
+                .contains("tracks missing")
+        );
+        assert!(migrate_to_current(json!({"schemaVersion": 0, "tracks": []})).is_err());
+    }
+
+    #[test]
     fn current_version_passes_through_untouched() {
-        let doc = json!({"schemaVersion": 1, "name": "x"});
+        let doc = json!({"schemaVersion": 2, "name": "x"});
         assert_eq!(migrate_to_current(doc.clone()).unwrap(), doc);
     }
 

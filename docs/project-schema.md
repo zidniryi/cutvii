@@ -1,16 +1,16 @@
-# CutVii project file (schemaVersion 1)
+# CutVii project file (schemaVersion 2)
 
 Plain JSON. Source of truth: `src/project/model.ts` (Zod) and `src-tauri/src/project/` (serde + `validate`).
 Both are tested against `fixtures/project-v1.json`; change the fixture and both test suites together.
 
-| Field                      | Notes                                                                                                                                    |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `schemaVersion`            | Integer, currently `1`. Unknown versions are rejected until migrations exist (Phase 5).                                                  |
-| `createdAt` / `modifiedAt` | ISO-8601 UTC strings.                                                                                                                    |
-| `settings`                 | `width`, `height` (positive ints), `fps` (0–240], `backgroundColor` (`#RRGGBB`).                                                         |
-| `assets[]`                 | `id`, `path`, `type` (`video`/`audio`/`image`), optional `duration` (s), `width`, `height`, `thumbnailPath`.                             |
-| `tracks[]`                 | `id`, `name`, `type` (`video`/`audio`), `order`, `muted`, `hidden`, `clips[]`.                                                           |
-| `clips[]`                  | `id`, `assetId`, `trackId`, `timelineStart`, `sourceIn`, `sourceOut` (seconds), `volume` (0–2), `x`, `y`, `scale` (>0), `opacity` (0–1). |
+| Field                      | Notes                                                                                                                                                                                                                                                                              |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schemaVersion`            | Integer, currently `1`. Unknown versions are rejected until migrations exist (Phase 5).                                                                                                                                                                                            |
+| `createdAt` / `modifiedAt` | ISO-8601 UTC strings.                                                                                                                                                                                                                                                              |
+| `settings`                 | `width`, `height` (positive ints), `fps` (0–240], `backgroundColor` (`#RRGGBB`).                                                                                                                                                                                                   |
+| `assets[]`                 | `id`, `path`, `type` (`video`/`audio`/`image`), optional `duration` (s), `width`, `height`, `thumbnailPath`.                                                                                                                                                                       |
+| `tracks[]`                 | `id`, `name`, `type` (`video`/`audio`), `order`, `muted`, `hidden`, `clips[]`.                                                                                                                                                                                                     |
+| `clips[]`                  | `id`, `assetId`, `trackId`, `timelineStart`, `sourceIn`, `sourceOut` (seconds), `volume` (0–2), `x`, `y`, `scale` (>0), `opacity` (0–1); optional `fit` (stills), `speed` (0.1–10, default 1), `keepPitch` (default true). Timeline length = (`sourceOut` − `sourceIn`) / `speed`. |
 
 ## Rules enforced on load
 

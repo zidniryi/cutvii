@@ -82,6 +82,28 @@ Project also has: id, name, settings, assets, tracks, schemaVersion, createdAt, 
 - Export: validate → resolve timing → build FFmpeg filter graph (trim, scale, audio mix, compose, gaps/overlaps with documented rules) → encode H.264/AAC MP4 (software first) → progress + cancel → temp cleanup → never corrupt an existing output on failure.
 - State: Zustand, separate slices (project, selection, playback, UI, jobs, history). Undo/redo via command pattern; no media buffers in history. Granular selectors so playhead updates don't re-render everything.
 
+## 6j. Inspector Roadmap (collapsible sections)
+The inspector is organised into collapsible sections that remember their last open/closed state. Planned features slot into these sections. Status as of 2026-10-11: only Clip (name, Start, Duration, Source in/out), Speed (step 6d-1), Image fit and Volume exist. Everything below is NOT built unless marked done.
+
+Cheap and most noticeable (do first):
+- **Transform:** Position X/Y, Scale (with aspect lock), Rotation, Flip horizontal/vertical, Opacity, and Fit / Fill / Reset buttons. Position, scale and opacity already exist in the data model; rotation and flip must be added (schema bump + migration). Must be applied identically in preview and export.
+- **Audio:** Mute button, Fade in / Fade out (seconds), and Detach audio (split a video clip's sound into its own clip on an audio track).
+- **Clip info (read-only):** resolution, fps, codec, file size, file location with "Show in Finder", proxy status, and a Replace media (relink) button.
+- **Basic colour:** Brightness, Contrast, Saturation, Temperature. Verify the preview matches the export (do not rely on CSS filters alone).
+
+Already planned elsewhere, to be given a slot here:
+- Speed (presets, reverse, keep pitch, freeze frame), Crop, Background (remove background), Upscale, Audio fx (noise reduction, remove rumble), and Text (when a text clip is selected).
+- Transition in/out per clip (fade, dissolve), if transitions are built.
+
+Inspector comfort:
+- Collapsible sections (remember last state), a Reset button per field, and numbers that can be scrubbed by dragging their label.
+- A "set to playhead" button on Start, and timecode inputs that snap to frames.
+- Copy / paste properties between clips (for example colour and transform).
+- With several clips selected: show "mixed" on fields whose values differ, and apply a change to all of them.
+- Later: a keyframe (diamond) button next to fields, for animation.
+
+Rules: show only controls that work (section 1); every property must look the same in preview and export; each change is one undoable action.
+
 ## 7. Shortcuts
 Space play/pause · Delete/Backspace delete clip · Ctrl/Cmd+Z undo · Ctrl/Cmd+Shift+Z redo · Ctrl/Cmd+S save · S split at playhead · Left/Right seek · Home to start. Ignore while typing in inputs.
 

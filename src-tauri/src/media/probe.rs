@@ -208,6 +208,8 @@ pub struct StreamSummary {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub duration: Option<f64>,
+    /// Frame rate of the first video stream, when known.
+    pub fps: Option<f64>,
 }
 
 /// Type-agnostic view of ffprobe output (used to detect audio streams and to verify exports).
@@ -227,6 +229,9 @@ pub fn parse_stream_summary(json: &str) -> AppResult<StreamSummary> {
         width: video.and_then(|v| v.width),
         height: video.and_then(|v| v.height),
         duration: out.format.as_ref().and_then(|f| parse_seconds(&f.duration)),
+        fps: video
+            .and_then(stream_rate)
+            .map(|(n, d)| n as f64 / d as f64),
     })
 }
 

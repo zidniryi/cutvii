@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AudioLines, CheckCircle2, Clapperboard, Loader2, TriangleAlert, Upload } from "lucide-react";
+import {
+  AudioLines,
+  CheckCircle2,
+  Clapperboard,
+  FolderOpen,
+  Loader2,
+  TriangleAlert,
+  Upload,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cancelRunningExport, startExport } from "@/export/flow";
 import {
@@ -12,6 +20,7 @@ import {
   type ExportOptions,
 } from "@/export/options";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
+import { revealLastExport } from "@/lib/exportApi";
 import { formatDuration } from "@/lib/timecode";
 import { cn } from "@/lib/utils";
 import { useExportStore } from "@/store/export";
@@ -86,6 +95,7 @@ function ExportDialogBody() {
   }, [project]);
   const [options, setOptions] = useState<ExportOptions>(() => defaultOptions(project));
   const rootRef = useRef<HTMLDivElement>(null);
+  const [revealError, setRevealError] = useState<string | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -253,7 +263,34 @@ function ExportDialogBody() {
                 </p>
               </div>
             </div>
-            <div className="mt-5 flex justify-end">
+            {report.warnings && report.warnings.length > 0 && (
+              <ul
+                className="mt-3 space-y-1 rounded-md border border-dashed px-3 py-2 text-xs text-text-muted"
+                aria-label="Export notes"
+              >
+                {report.warnings.map((w) => (
+                  <li key={w}>{w}</li>
+                ))}
+              </ul>
+            )}
+            {revealError && (
+              <p role="alert" className="mt-3 text-xs text-danger">
+                {revealError}
+              </p>
+            )}
+            <div className="mt-5 flex justify-end gap-2">
+              <Button
+                variant="secondary"
+                className="pointer-coarse:h-11"
+                onClick={() => {
+                  setRevealError(null);
+                  revealLastExport().catch((e: unknown) =>
+                    setRevealError(e instanceof Error ? e.message : String(e)),
+                  );
+                }}
+              >
+                <FolderOpen /> Open folder
+              </Button>
               <Button className="pointer-coarse:h-11" onClick={close}>
                 Done
               </Button>

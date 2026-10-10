@@ -7,11 +7,15 @@ export type ShortcutAction =
   | "new"
   | "undo"
   | "redo"
+  | "cut"
+  | "copy"
+  | "paste"
   | "zoom-in"
   | "zoom-out"
   | "zoom-fit"
   | "play-pause"
   | "split"
+  | "freeze"
   | "delete"
   | "seek-back"
   | "seek-forward"
@@ -43,11 +47,15 @@ export const SHORTCUT_LABELS: Record<ShortcutAction, string> = {
   new: "Ctrl/⌘ N",
   undo: "Ctrl/⌘ Z",
   redo: "Ctrl/⌘ Shift Z",
+  cut: "Ctrl/⌘ X",
+  copy: "Ctrl/⌘ C",
+  paste: "Ctrl/⌘ V",
   "zoom-in": "Ctrl/⌘ +",
   "zoom-out": "Ctrl/⌘ −",
   "zoom-fit": "Ctrl/⌘ 0",
   "play-pause": "Space",
   split: "S",
+  freeze: "Shift F",
   delete: "Del",
   "seek-back": "←",
   "seek-forward": "→",
@@ -69,6 +77,12 @@ function withModifier(e: KeyLike): ShortcutAction | null {
       return e.shiftKey ? "redo" : "undo";
     case "y":
       return "redo";
+    case "x":
+      return e.shiftKey ? null : "cut";
+    case "c":
+      return e.shiftKey ? null : "copy";
+    case "v":
+      return e.shiftKey ? null : "paste";
     case "=":
     case "+":
       return "zoom-in";
@@ -89,6 +103,8 @@ function plain(e: KeyLike): ShortcutAction | null {
     case "s":
     case "S":
       return "split";
+    case "F":
+      return e.shiftKey ? "freeze" : null;
     case "Delete":
     case "Backspace":
       return "delete";

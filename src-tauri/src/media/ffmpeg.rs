@@ -6,11 +6,13 @@ use super::probe::{
     apply_rotation, classify_extension, parse_frame_rotation, parse_probe_json,
     parse_stream_summary,
 };
+use super::reverse::{ReverseProfile, SourceShape, extract_frame, reverse_range};
 use super::tools::{FFMPEG_ENV, FFPROBE_ENV, command, locate_tool};
 use super::{MediaBackend, MediaInfo, RenderRequest};
 use crate::errors::{AppError, AppResult};
 use crate::export::ExportReport;
 use crate::export::encoder::choose_encoder;
+use crate::export::plan::ExportPlan;
 use crate::export::render::{self, RenderJob};
 use std::sync::atomic::AtomicBool;
 
@@ -50,6 +52,117 @@ fn require_file(path: &Path) -> AppResult<()> {
         )))
     }
 }
+
+impl FfmpegBackend {
+    /// Size, frame rate and stream kinds of a file (what the reverse pipeline needs to size its chunks).
+    pub fn shape(&self, path: &Path) -> AppResult<SourceShape> {
+        require_file(path)?;
+        let out = command(&self.ffprobe)
+            .args([
+                "-v",
+                "error",
+                "-print_format",
+                "json",
+                "-show_format",
+                "-show_streams",
+                "-i",
+            ])
+            .arg(path)
+            .output()?;
+        if !out.status.success() {
+            return Err(AppError::InvalidInput(format!(
+                "ffprobe could not read file: {}",
+                first_line(&out.stderr)
+            )));
+        }
+        let s = parse_stream_summary(&String::from_utf8_lossy(&out.stdout))?;
+        Ok(SourceShape {
+            width: s.width.unwrap_or(0),
+            height: s.height.unwrap_or(0),
+            fps: s.fps.unwrap_or(30.0),
+            has_video: s.has_video,
+            has_audio: s.has_audio,
+        })
+    }
+
+    /// Small reversed copy the webview can play (preview only, never used for export).
+    pub fn reverse_preview(
+        &self,
+        src: &Path,
+        source_in: f64,
+        source_out: f64,
+        out: &Path,
+        progress: &mut dyn FnMut(f64),
+        cancel: &AtomicBool,
+    ) -> AppResult<()> {
+        let shape = self.shape(src)?;
+        let listing = command(&self.ffmpeg)
+            .args(["-hide_banner", "-v", "error", "-encoders"])
+            .output()?;
+        let encoder =
+            choose_encoder(&String::from_utf8_lossy(&listing.stdout)).ok_or_else(|| {
+                AppError::ToolMissing(
+                    "this FFmpeg has no H.264 encoder for the reverse preview".into(),
+                )
+            })?;
+        reverse_range(
+            &self.ffmpeg,
+            src,
+            &shape,
+            source_in,
+            source_out,
+            out,
+            ReverseProfile::Preview(encoder),
+            None,
+            progress,
+            cancel,
+        )
+    }
+
+    /// The exact frame at `time`, at the file's full resolution, as a PNG.
+    pub fn extract_frame(&self, src: &Path, time: f64, out: &Path) -> AppResult<()> {
+        require_file(src)?;
+        extract_frame(&self.ffmpeg, src, time, out)
+    }
+
+    /// Replace every reversed clip with a lossless reversed copy of its used range, written into `work`.
+    fn resolve_reversed(
+        &self,
+        plan: &ExportPlan,
+        work: &Path,
+        progress: &mut dyn FnMut(f64),
+        cancel: &AtomicBool,
+    ) -> AppResult<ExportPlan> {
+        let mut plan = plan.clone();
+        let total = plan.clips.iter().filter(|c| c.reversed).count().max(1);
+        let mut done = 0usize;
+        for (i, clip) in plan
+            .clips
+            .iter_mut()
+            .enumerate()
+            .filter(|(_, c)| c.reversed)
+        {
+            let out = work.join(format!("reversed-{i}.mkv"));
+            let base = done as f64 / total as f64;
+            self.reverse_lossless(
+                &clip.path,
+                clip.source_in,
+                clip.source_in + clip.source_duration,
+                &out,
+                &mut |f| progress(base + f / total as f64),
+                cancel,
+            )?;
+            clip.path = out;
+            clip.source_in = 0.0;
+            clip.reversed = false;
+            done += 1;
+        }
+        Ok(plan)
+    }
+}
+
+/// Share of the progress bar given to preparing reversed clips before the render itself.
+const REVERSE_PROGRESS_SHARE: f64 = 0.4;
 
 impl MediaBackend for FfmpegBackend {
     fn probe(&self, path: &Path) -> AppResult<MediaInfo> {
@@ -133,6 +246,30 @@ impl MediaBackend for FfmpegBackend {
         Ok(())
     }
 
+    fn reverse_lossless(
+        &self,
+        src: &Path,
+        source_in: f64,
+        source_out: f64,
+        out: &Path,
+        progress: &mut dyn FnMut(f64),
+        cancel: &AtomicBool,
+    ) -> AppResult<()> {
+        let shape = self.shape(src)?;
+        reverse_range(
+            &self.ffmpeg,
+            src,
+            &shape,
+            source_in,
+            source_out,
+            out,
+            ReverseProfile::Lossless,
+            None,
+            progress,
+            cancel,
+        )
+    }
+
     fn has_audio(&self, path: &Path) -> AppResult<bool> {
         require_file(path)?;
         let out = command(&self.ffprobe)
@@ -171,16 +308,53 @@ impl MediaBackend for FfmpegBackend {
                 AppError::ToolMissing("this FFmpeg has no H.264 encoder (need libx264, libopenh264 or VideoToolbox)".into())
             })?)
         };
-        render::run(
-            &RenderJob {
-                ffmpeg: &self.ffmpeg,
-                ffprobe: &self.ffprobe,
-                plan: &request.plan,
-                encoder,
-                output: &request.output,
-            },
-            progress,
-            cancel,
-        )
+        if !request.plan.clips.iter().any(|c| c.reversed) {
+            return render::run(
+                &RenderJob {
+                    ffmpeg: &self.ffmpeg,
+                    ffprobe: &self.ffprobe,
+                    plan: &request.plan,
+                    encoder,
+                    output: &request.output,
+                },
+                progress,
+                cancel,
+            );
+        }
+
+        // Reversed clips: build lossless reversed copies in a temp folder next to the output, render from
+        // those, and always remove the folder (success, failure or cancel).
+        let stem = request
+            .output
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("export");
+        let work = request
+            .output
+            .with_file_name(format!(".{stem}.cutvii-reverse"));
+        std::fs::remove_dir_all(&work).ok();
+        std::fs::create_dir_all(&work)?;
+        let result = self
+            .resolve_reversed(
+                &request.plan,
+                &work,
+                &mut |f| progress(f * REVERSE_PROGRESS_SHARE),
+                cancel,
+            )
+            .and_then(|plan| {
+                render::run(
+                    &RenderJob {
+                        ffmpeg: &self.ffmpeg,
+                        ffprobe: &self.ffprobe,
+                        plan: &plan,
+                        encoder,
+                        output: &request.output,
+                    },
+                    &mut |f| progress(REVERSE_PROGRESS_SHARE + f * (1.0 - REVERSE_PROGRESS_SHARE)),
+                    cancel,
+                )
+            });
+        std::fs::remove_dir_all(&work).ok();
+        result
     }
 }

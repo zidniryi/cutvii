@@ -25,6 +25,8 @@ import { useSelectionStore } from "@/store/selection";
 import { useTimelineViewStore } from "@/store/timelineView";
 import { useUiStore } from "@/store/ui";
 import { projectDuration } from "@/timeline/clips";
+import { copySelected, cutSelected } from "@/timeline/clipboard";
+import { freezeFrameAtPlayhead } from "@/timeline/freeze";
 import { deleteSelected, report, splitAtPlayhead, toggleTrackFlag } from "@/timeline/editor";
 import {
   contentWidth,
@@ -347,6 +349,18 @@ export function Timeline() {
           onSplit={() => {
             closeMenu();
             report(splitAtPlayhead());
+          }}
+          onFreeze={() => {
+            closeMenu();
+            void freezeFrameAtPlayhead();
+          }}
+          onCut={() => {
+            closeMenu();
+            cutSelected();
+          }}
+          onCopy={() => {
+            closeMenu();
+            copySelected();
           }}
           onDelete={() => {
             closeMenu();

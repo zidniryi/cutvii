@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 pub mod ffmpeg;
 pub mod import;
 pub mod probe;
+pub mod reverse;
 pub mod tools;
 
 use crate::errors::AppResult;
@@ -52,6 +53,16 @@ pub trait MediaBackend: Send + Sync {
     fn probe(&self, path: &Path) -> AppResult<MediaInfo>;
     /// Write a thumbnail for `path` at `at_seconds` into `out`.
     fn thumbnail(&self, path: &Path, at_seconds: f64, out: &Path) -> AppResult<()>;
+    /// Reverse `[source_in, source_out)` of `src` into a lossless file at `out`, with bounded memory.
+    fn reverse_lossless(
+        &self,
+        src: &Path,
+        source_in: f64,
+        source_out: f64,
+        out: &Path,
+        progress: &mut dyn FnMut(f64),
+        cancel: &AtomicBool,
+    ) -> AppResult<()>;
     /// Whether the file contains at least one audio stream.
     fn has_audio(&self, path: &Path) -> AppResult<bool>;
     /// Render `request`. `progress` receives 0.0..=1.0; set `cancel` to stop early (the output is untouched).

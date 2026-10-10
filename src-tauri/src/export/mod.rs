@@ -89,6 +89,8 @@ pub struct ExportReport {
     pub has_audio: bool,
     pub size_bytes: u64,
     pub encoder: String,
+    /// Things the user should know (for example sound muted at high speed).
+    pub warnings: Vec<String>,
 }
 
 use std::collections::HashMap;

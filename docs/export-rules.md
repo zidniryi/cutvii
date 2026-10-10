@@ -20,6 +20,16 @@ Source of truth: `src-tauri/src/export/` (`plan.rs` builds the plan and FFmpeg f
 - `muted` tracks contribute nothing; `hidden` video tracks still play their sound (as in the preview).
 - The file always has an audio stream (silent if nothing is audible).
 
+## Speed
+
+- A clip plays `(sourceOut - sourceIn) / speed` seconds. Picture: `setpts=(PTS-STARTPTS)/speed`, then resampled to the
+  output frame rate (frames are dropped or repeated; no frame blending).
+- Sound with **Keep pitch**: `atempo`, chained in factors of 0.5–2 (0.25× = two filters). Without it: `asetrate`, so
+  pitch rises and falls with the speed.
+- Above 4× the clip's sound is left out, and the export result says so. The preview follows the same rule.
+- The preview can only play 0.25×–4× in the webview; outside that range it plays at the nearest limit while the
+  export uses the real speed.
+
 ## Encoding
 
 - H.264 in MP4 (`+faststart`), AAC 192 kb/s. Software x264 when available (Draft/Standard/High = CRF 28/23/18),
