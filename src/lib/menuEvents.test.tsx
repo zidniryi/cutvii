@@ -46,6 +46,28 @@ describe("native File menu", () => {
     );
   });
 
+  it("Open Recent opens the project at that position, and shows why when it cannot", async () => {
+    const project = useProjectStore.getState().project;
+    vi.mocked(invoke).mockImplementation((async (cmd: string, args?: { index: number }) => {
+      if (cmd !== "open_recent_project") return null;
+      if (args?.index === 3) throw "trip.cutvii is no longer there; it was removed from Open Recent";
+      return { path: "/films/trip.cutvii", project: { ...project, name: "Trip" }, missingPaths: [] };
+    }) as typeof invoke);
+    render(<App />);
+    await waitFor(() => expect(handlers.has("menu-action")).toBe(true));
+
+    await menu("recent-0");
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("open_recent_project", { index: 0 }));
+    await waitFor(() => expect(useProjectStore.getState().project.name).toBe("Trip"));
+    expect(useProjectStore.getState().filePath).toBe("/films/trip.cutvii");
+
+    await menu("recent-3");
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent("This project can't be opened");
+    expect(dialog).toHaveTextContent("no longer there");
+    expect(useProjectStore.getState().project.name).toBe("Trip"); // the open project is untouched
+  });
+
   it("ignores ids it does not know", async () => {
     render(<App />);
     await waitFor(() => expect(handlers.has("menu-action")).toBe(true));

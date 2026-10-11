@@ -5,6 +5,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
+use super::recent;
 use crate::errors::{AppError, AppResult};
 use crate::project::Project;
 use crate::project::persistence::{self, FILE_EXTENSION};
@@ -47,7 +48,34 @@ pub async fn open_project(
     let Some(path) = picked.and_then(|p| p.into_path().ok()) else {
         return Ok(None);
     };
+    open_at(&app, &state, path).await.map(Some)
+}
 
+/// Open the project at the given position of File > Open Recent. The path comes from our own list.
+#[tauri::command]
+pub async fn open_recent_project(
+    app: AppHandle,
+    state: State<'_, CurrentProjectPath>,
+    index: usize,
+) -> AppResult<OpenedProject> {
+    let path = recent::path_at(&app, index)
+        .ok_or_else(|| AppError::InvalidInput("that recent project is no longer listed".into()))?;
+    if !path.is_file() {
+        recent::forget(&app, &path);
+        return Err(AppError::InvalidInput(format!(
+            "{} is no longer there; it was removed from Open Recent",
+            display(&path)
+        )));
+    }
+    open_at(&app, &state, path).await
+}
+
+/// Read, migrate and validate the project file at `path` and make it the current one.
+async fn open_at(
+    app: &AppHandle,
+    state: &State<'_, CurrentProjectPath>,
+    path: PathBuf,
+) -> AppResult<OpenedProject> {
     let read_path = path.clone();
     let mut project =
         tauri::async_runtime::spawn_blocking(move || persistence::read_project(&read_path))
@@ -77,11 +105,12 @@ pub async fn open_project(
     }
 
     *state.0.lock().unwrap() = Some(path.clone());
-    Ok(Some(OpenedProject {
+    recent::remember(app, &path);
+    Ok(OpenedProject {
         path: display(&path),
         project,
         missing_paths,
-    }))
+    })
 }
 
 /// Save to the current file, or ask for one (`save_as`, or no file yet). Returns the saved path,
@@ -126,6 +155,7 @@ pub async fn save_project(
     .map_err(|e| AppError::InvalidInput(format!("save failed: {e}")))??;
 
     *state.0.lock().unwrap() = Some(target.clone());
+    recent::remember(&app, &target);
     Ok(Some(display(&target)))
 }
 

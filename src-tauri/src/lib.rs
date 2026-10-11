@@ -15,6 +15,7 @@ pub fn run() {
         .manage(commands::export::LastExport::default())
         .manage(commands::drop::DropState::default())
         .manage(commands::ai::AiJob::default())
+        .manage(commands::recent::RecentProjects::default())
         .setup(|app| {
             commands::clip_tools::load_fonts(app.handle());
             Ok(())
@@ -53,6 +54,7 @@ pub fn run() {
             commands::media::relink_media,
             commands::media::pick_image,
             commands::project::open_project,
+            commands::project::open_recent_project,
             commands::project::save_project,
             commands::project::forget_project_path
         ])

@@ -2,7 +2,9 @@
 //! The menu only tells the webview *which* action was chosen; the flows (confirm discard, dialogs) live there.
 
 use tauri::menu::{Menu, MenuItemBuilder, MenuItemKind, PredefinedMenuItem, SubmenuBuilder};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
+
+use super::recent;
 
 pub const MENU_EVENT: &str = "menu-action";
 
@@ -49,6 +51,8 @@ fn install_about(app: &AppHandle, menu: &Menu<tauri::Wry>) -> tauri::Result<()> 
     Ok(())
 }
 
+pub const OPEN_RECENT_LABEL: &str = "Open Recent";
+
 /// Only our own ids are forwarded to the webview.
 pub fn is_file_action(id: &str) -> bool {
     FILE_ITEMS.iter().any(|(known, _, _)| *known == id)
@@ -56,7 +60,7 @@ pub fn is_file_action(id: &str) -> bool {
 
 /// Every id the webview acts on: the File items and About.
 pub fn is_forwarded(id: &str) -> bool {
-    is_file_action(id) || id == ABOUT_ID
+    is_file_action(id) || id == ABOUT_ID || recent::index_of(id).is_some()
 }
 
 /// Start from the platform's default menu and add our items at the top of File (creating File if needed).
@@ -81,13 +85,23 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             .build(app)?;
         file.insert(&item, position)?;
     }
-    file.insert(&PredefinedMenuItem::separator(app)?, FILE_ITEMS.len())?;
+    // Open Recent sits right under Open Project
+    let recents = SubmenuBuilder::new(app, OPEN_RECENT_LABEL).build()?;
+    file.insert(&recents, 2)?;
+    if let Some(state) = app.try_state::<recent::RecentProjects>() {
+        *state.menu.lock().unwrap() = Some(recents);
+    }
+    recent::load(app);
+    recent::refresh_menu(app);
+    file.insert(&PredefinedMenuItem::separator(app)?, FILE_ITEMS.len() + 1)?;
     install_about(app, &menu)?;
     Ok(menu)
 }
 
 pub fn handle(app: &AppHandle, id: &str) {
-    if is_forwarded(id) {
+    if id == recent::CLEAR_ID {
+        recent::clear(app);
+    } else if is_forwarded(id) {
         app.emit(MENU_EVENT, id).ok();
     }
 }
@@ -103,6 +117,8 @@ mod tests {
         assert!(!is_file_action("quit") && !is_file_action(""));
         assert!(is_forwarded(ABOUT_ID) && is_forwarded("save-project") && !is_forwarded("quit"));
         assert!(!is_file_action(ABOUT_ID), "About is not a file action");
+        assert!(is_forwarded("recent-0") && !is_forwarded(recent::CLEAR_ID));
+        assert!(!is_forwarded("recent-none") && !is_forwarded("recent-99"));
         let mut ids: Vec<_> = FILE_ITEMS.iter().map(|i| i.0).collect();
         ids.dedup();
         assert_eq!(ids.len(), FILE_ITEMS.len());

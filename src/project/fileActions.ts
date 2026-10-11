@@ -5,7 +5,14 @@ import { commitImportedMedia } from "@/lib/importFlow";
 import type { ImportedMedia } from "@/lib/media";
 import { setClipFitBackground } from "@/timeline/edit";
 import { fileName } from "@/lib/media";
-import { forgetProjectPath, openProjectFile, pickReplacementMedia, saveProjectFile } from "@/lib/projectFile";
+import {
+  forgetProjectPath,
+  openProjectFile,
+  openRecentProjectFile,
+  pickReplacementMedia,
+  saveProjectFile,
+  type OpenedProjectFile,
+} from "@/lib/projectFile";
 import { parseProject } from "@/project/parse";
 import { relinkAsset } from "@/project/relink";
 import { usePlaybackStore } from "@/store/playback";
@@ -56,10 +63,19 @@ export async function createProjectWithCanvas(canvas: Canvas, pending: boolean):
   useUiStore.getState().setNewProjectOpen(false);
 }
 
-export async function openProjectFlow(): Promise<void> {
+export function openProjectFlow(): Promise<void> {
+  return openWith(openProjectFile);
+}
+
+/** Open the project at a position of File > Open Recent (Rust knows the path; the webview never names one). */
+export function openRecentFlow(index: number): Promise<void> {
+  return openWith(() => openRecentProjectFile(index));
+}
+
+async function openWith(open: () => Promise<OpenedProjectFile | null>): Promise<void> {
   if (!(await okToDiscard("Opening another project"))) return;
   try {
-    const opened = await openProjectFile();
+    const opened = await open();
     if (!opened) return;
 
     const parsed = parseProject(opened.project);

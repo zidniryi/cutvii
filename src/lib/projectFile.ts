@@ -21,6 +21,9 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 
 /** Native open dialog + read. null when cancelled. */
 export const openProjectFile = () => call<OpenedProjectFile | null>("open_project");
+/** Open the project at a position of File > Open Recent; Rust resolves the path from its own list. */
+export const openRecentProjectFile = (index: number) =>
+  call<OpenedProjectFile>("open_recent_project", { index });
 
 /** Write the project to its file (or ask for one). Returns the path, or null when cancelled. */
 export const saveProjectFile = (project: unknown, saveAs: boolean) =>
