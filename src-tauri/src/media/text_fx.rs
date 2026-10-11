@@ -114,7 +114,7 @@ fn box_pass(src: &[f32], dst: &mut [f32], len: usize, stride: usize, radius: usi
 }
 
 /// Soften a layer: three box blurs each way, which is very close to a Gaussian of about `radius` pixels.
-pub fn blur(layer: &mut Vec<f32>, w: usize, h: usize, radius: usize) {
+pub fn blur(layer: &mut [f32], w: usize, h: usize, radius: usize) {
     if radius == 0 || w == 0 || h == 0 {
         return;
     }
@@ -216,8 +216,8 @@ impl Canvas {
             if a <= 0.0 {
                 continue;
             }
-            for k in 0..3 {
-                self.rgb[i][k] = c[k] * a + self.rgb[i][k] * (1.0 - a);
+            for (kept, new) in self.rgb[i].iter_mut().zip(c) {
+                *kept = new * a + *kept * (1.0 - a);
             }
             self.alpha[i] = a + self.alpha[i] * (1.0 - a);
         }
@@ -265,11 +265,7 @@ mod tests {
             at(5, 1)
         );
         // nothing covered at all: far everywhere, and no panic on a 1-pixel layer
-        assert!(
-            distance_outside(&vec![0.0; 6], 3, 2)
-                .iter()
-                .all(|v| *v > 1e6)
-        );
+        assert!(distance_outside(&[0.0; 6], 3, 2).iter().all(|v| *v > 1e6));
         assert_eq!(distance_outside(&[1.0], 1, 1), vec![0.0]);
     }
 

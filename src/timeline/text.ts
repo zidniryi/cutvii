@@ -1,6 +1,14 @@
 /** Text and titles: a text clip is an image asset whose picture CutVii draws from its `text` properties. */
 import { invoke } from "@tauri-apps/api/core";
-import { TextSpecSchema, type MediaAsset, type Project, type TextSpec } from "@/project/model";
+import {
+  TextSpecSchema,
+  type MediaAsset,
+  type Project,
+  type StylePreset,
+  type TextSpec,
+  type TimelineClip,
+} from "@/project/model";
+import { withStyle } from "./textStyles";
 import { usePlaybackStore } from "@/store/playback";
 import { useProjectStore } from "@/store/project";
 import { useSelectionStore } from "@/store/selection";
@@ -66,9 +74,10 @@ export function addTextClip(
 }
 
 /** "Add text": draw the default text for this canvas (in Rust) and place it at the playhead. */
-export async function addTextAtPlayhead(): Promise<void> {
+export async function addTextAtPlayhead(preset?: StylePreset): Promise<void> {
   const { width, height } = useProjectStore.getState().project.settings;
-  const spec = defaultTextSpec(height);
+  const plain = defaultTextSpec(height);
+  const spec = preset ? withStyle(plain, preset.style) : plain;
   let picture: string;
   try {
     picture = await invoke<string>("render_text", { spec, width, height });
@@ -80,15 +89,17 @@ export async function addTextAtPlayhead(): Promise<void> {
   const clipId = crypto.randomUUID();
   const result = useProjectStore.getState().execute({
     label: "Add text",
-    apply: (p) =>
-      addTextClip(p, {
+    apply: (p) => {
+      const added = addTextClip(p, {
         picture,
         spec,
         start: usePlaybackStore.getState().playhead,
         assetId: crypto.randomUUID(),
         clipId,
         trackId: crypto.randomUUID(),
-      }),
+      });
+      return added.ok && preset?.fade ? setTextFade(added.project, clipId, preset.fade) : added;
+    },
   });
   if (result.ok) useSelectionStore.getState().select(clipId);
   else useUiStore.getState().setNotice(result.error.message);
@@ -100,7 +111,14 @@ export async function addTextAtPlayhead(): Promise<void> {
  */
 export function applyTextEdit(
   project: Project,
-  args: { clipId: string; picture: string; spec: TextSpec; newAssetId: string },
+  args: {
+    clipId: string;
+    picture: string;
+    spec: TextSpec;
+    newAssetId: string;
+    /** Also set how long the text fades in and out (seconds; 0 for none). Left alone when absent. */
+    fade?: number;
+  },
 ): EditResult {
   const clip = project.tracks.flatMap((t) => t.clips).find((c) => c.id === args.clipId);
   const asset = clip && project.assets.find((a) => a.id === clip.assetId);
@@ -110,20 +128,60 @@ export function applyTextEdit(
   const { width, height } = project.settings;
   const edited: MediaAsset = { ...asset, path: args.picture, width, height, text: args.spec };
   const shared = project.tracks.flatMap((t) => t.clips).filter((c) => c.assetId === asset.id).length > 1;
-  if (!shared) {
-    return {
-      ok: true,
-      project: { ...project, assets: project.assets.map((a) => (a.id === asset.id ? edited : a)) },
-    };
-  }
+  const assetId = shared ? args.newAssetId : asset.id;
   return {
     ok: true,
     project: {
       ...project,
-      assets: [...project.assets, { ...edited, id: args.newAssetId }],
+      assets: shared
+        ? [...project.assets, { ...edited, id: assetId }]
+        : project.assets.map((a) => (a.id === asset.id ? edited : a)),
+      tracks:
+        shared || args.fade !== undefined
+          ? project.tracks.map((t) => ({
+              ...t,
+              clips: t.clips.map((c) => (c.id === clip.id ? withFade({ ...c, assetId }, args.fade) : c)),
+            }))
+          : project.tracks,
+    },
+  };
+}
+
+/** The longest a text can fade in or out (the stored limit for any fade). */
+export const MAX_TEXT_FADE = 60;
+
+/** A clip with its fade in and out set to `seconds` (0 removes them); untouched when `seconds` is absent. */
+function withFade(clip: TimelineClip, seconds: number | undefined): TimelineClip {
+  if (seconds === undefined) return clip;
+  const out = { ...clip };
+  if (seconds > 0) {
+    out.fadeIn = seconds;
+    out.fadeOut = seconds;
+  } else {
+    delete out.fadeIn;
+    delete out.fadeOut;
+  }
+  return out;
+}
+
+/** Set how long a text clip fades in and out. One undoable step; nothing is redrawn. */
+export function setTextFade(project: Project, clipId: string, seconds: number): EditResult {
+  const clip = project.tracks.flatMap((t) => t.clips).find((c) => c.id === clipId);
+  const asset = clip && project.assets.find((a) => a.id === clip.assetId);
+  if (!clip || !asset?.text) {
+    return { ok: false, error: { code: "unknown-clip", message: "That text is no longer on the timeline" } };
+  }
+  if (!(seconds >= 0 && seconds <= MAX_TEXT_FADE)) {
+    return { ok: false, error: { code: "out-of-range", message: "A fade can be 0 to 60 seconds" } };
+  }
+  if ((clip.fadeIn ?? 0) === seconds && (clip.fadeOut ?? 0) === seconds) return { ok: true, project };
+  return {
+    ok: true,
+    project: {
+      ...project,
       tracks: project.tracks.map((t) => ({
         ...t,
-        clips: t.clips.map((c) => (c.id === clip.id ? { ...c, assetId: args.newAssetId } : c)),
+        clips: t.clips.map((c) => (c.id === clipId ? withFade(c, seconds) : c)),
       })),
     },
   };
@@ -138,13 +196,35 @@ let turns = 0;
  * step. Quick successive edits build on each other, and only the newest picture is applied.
  * Returns a message when the change is not valid, otherwise null.
  */
-export async function editText(clipId: string, patch: Partial<TextSpec>): Promise<string | null> {
+export function editText(clipId: string, patch: Partial<TextSpec>): Promise<string | null> {
+  return changeText(clipId, (current) => ({ ...current, ...patch }), "Edit text");
+}
+
+/**
+ * Give a text clip a style preset: its look is replaced, its words, size and place are kept, and the
+ * preset's fade (if any) is set on the clip. ONE undoable step.
+ */
+export function applyTextStyle(clipId: string, preset: StylePreset): Promise<string | null> {
+  return changeText(
+    clipId,
+    (current) => withStyle(current, preset.style),
+    "Change text style",
+    preset.fade ?? 0,
+  );
+}
+
+async function changeText(
+  clipId: string,
+  change: (current: TextSpec) => TextSpec,
+  label: string,
+  fade?: number,
+): Promise<string | null> {
   const project = useProjectStore.getState().project;
   const clip = project.tracks.flatMap((t) => t.clips).find((c) => c.id === clipId);
   const stored = clip && project.assets.find((a) => a.id === clip.assetId)?.text;
   if (!stored) return "That text is no longer on the timeline";
 
-  const parsed = TextSpecSchema.safeParse({ ...(pendingSpecs.get(clipId)?.spec ?? stored), ...patch });
+  const parsed = TextSpecSchema.safeParse(change(pendingSpecs.get(clipId)?.spec ?? stored));
   if (!parsed.success) return parsed.error.issues[0]?.message ?? "Invalid text";
   const spec = parsed.data;
   const turn = ++turns;
@@ -155,8 +235,8 @@ export async function editText(clipId: string, patch: Partial<TextSpec>): Promis
     const picture = await invoke<string>("render_text", { spec, width, height });
     if (pendingSpecs.get(clipId)?.turn !== turn) return null; // a newer edit is on its way
     const result = useProjectStore.getState().execute({
-      label: "Edit text",
-      apply: (p) => applyTextEdit(p, { clipId, picture, spec, newAssetId: crypto.randomUUID() }),
+      label,
+      apply: (p) => applyTextEdit(p, { clipId, picture, spec, newAssetId: crypto.randomUUID(), fade }),
     });
     return result.ok ? null : result.error.message;
   } catch (e) {

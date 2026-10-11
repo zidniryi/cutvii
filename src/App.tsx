@@ -4,6 +4,7 @@ import { AppDialog } from "@/components/AppDialog";
 import { CanvasDialog } from "@/components/canvas/CanvasDialog";
 import { CanvasNotice } from "@/components/canvas/CanvasNotice";
 import { NewProjectDialog } from "@/components/canvas/NewProjectDialog";
+import { NoticeToast } from "@/components/NoticeToast";
 import { ExportDialog } from "@/components/ExportDialog";
 import { DragChip } from "@/components/DragChip";
 import { Inspector } from "@/components/layout/Inspector";
@@ -83,6 +84,7 @@ export default function App() {
       <CanvasDialog />
       <AppDialog />
       <AboutDialog />
+      <NoticeToast />
     </TooltipProvider>
   );
 }

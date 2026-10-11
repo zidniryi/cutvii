@@ -26,6 +26,7 @@ import {
 import { detachAudio, setClipSound, type ClipSound } from "./audio";
 import { setClipColor, type ColorAdjust } from "./color";
 import { planPlacement, type DropPlacement } from "./placement";
+import { setTextFade } from "./text";
 import { setClipTransform, type Transform } from "./transform";
 
 export { newDropPlacement, type DropPlacement, type DropTarget } from "./placement";
@@ -125,6 +126,10 @@ export function detachClipAudio(clipId: string): EditResult {
   const result = run("Detach audio", (p) => detachAudio(p, clipId, ids));
   if (result.ok) useSelectionStore.getState().select(ids.clipId);
   return result;
+}
+
+export function changeTextFade(clipId: string, seconds: number): EditResult {
+  return run("Change text fade", (p) => setTextFade(p, clipId, seconds));
 }
 
 export function changeColor(clipId: string, patch: Partial<ColorAdjust> | null): EditResult {

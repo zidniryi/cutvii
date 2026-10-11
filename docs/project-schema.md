@@ -24,7 +24,8 @@ these were applied. Sound ignores them.
 
 Optional on a clip: `muted` (the clip makes no sound, its picture still shows; absent means false), `fadeIn` and
 `fadeOut` (seconds on the timeline, 0–60; absent means 0). A fade longer than its clip is shortened when applied:
-the fade-in is at most the clip's length and the fade-out takes what is left.
+the fade-in is at most the clip's length and the fade-out takes what is left. On a **text** clip the same two
+values fade the text itself in and out (it has no sound).
 
 An audio track may hold a **video** asset: that is the video's detached sound, heard but never shown. A still on
 an audio track is still rejected.
@@ -48,7 +49,10 @@ v5 changes nothing but the version number.
 A text clip is an ordinary clip whose asset is an `image` with an extra `text` object: `content` (1–2000
 characters, line breaks kept), `fontSize` (8–2000, in canvas pixels), `color` (`#RRGGBB`), optional `bold`,
 optional `font` (a family name, added in schemaVersion 6; absent means Noto Sans, and a family that is not
-installed on this machine is drawn in Noto Sans), optional `align` (`left` / `center` default / `right`), and `x`, `y` (centre of the text block as a share of the
+installed on this machine is drawn in Noto Sans), optional `align` (`left` / `center` default / `right`); optional style parts whose sizes are shares of the
+font size: `uppercase`, `outline` (`color`, `width` up to 0.5), `shadow` (`color`, `blur`, `x`, `y`, `opacity`; a
+glow is a shadow with no offset), `box` (`color`, `opacity`, `shape` = `rect` / `per-line` / `jagged`, `padding`,
+`radius`) and `highlight` (`color`, `lines` = `last` / `first` / `even`), and `x`, `y` (centre of the text block as a share of the
 canvas, 0–1). The asset's `path` is the picture CutVii drew from those properties: a transparent PNG the size of
 the canvas, kept in the app data folder. If that file is gone when the project is opened (another machine, data
 folder cleared) it is drawn again and is not reported as missing media. Migration from v4 changes nothing but the

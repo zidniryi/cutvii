@@ -5,6 +5,7 @@ import { ColorPanel } from "@/components/inspector/ColorPanel";
 import { CropPanel } from "@/components/inspector/CropPanel";
 import { MediaInfo } from "@/components/inspector/MediaInfo";
 import { SoundPanel } from "@/components/inspector/SoundPanel";
+import { StyleGallery } from "@/components/inspector/StyleGallery";
 import { TextPanel } from "@/components/inspector/TextPanel";
 import { TransformPanel } from "@/components/inspector/TransformPanel";
 import { Panel } from "@/components/Panel";
@@ -756,7 +757,15 @@ function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset;
           />
         )}
         {active === "text" && asset.text && (
-          <TextPanel key={`${clip.id}-text`} clipId={clip.id} spec={asset.text} />
+          <StyleGallery key={`${clip.id}-styles`} clipId={clip.id} spec={asset.text} />
+        )}
+        {active === "text" && asset.text && (
+          <TextPanel
+            key={`${clip.id}-text`}
+            clipId={clip.id}
+            spec={asset.text}
+            fade={Math.max(clip.fadeIn ?? 0, clip.fadeOut ?? 0)}
+          />
         )}
         {active === "text" && asset.text && (
           <TransformPanel key={`${clip.id}-transform`} clip={clip} position={false} />

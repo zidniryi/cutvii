@@ -26,6 +26,10 @@ Source of truth: `src-tauri/src/export/` (`plan.rs` builds the plan and FFmpeg f
 - Known preview gaps for colour: the blurred backdrop of **blur-bg** is not graded in the preview (it is in the
   export), and a video with no colour-matrix tag may be read with a different matrix by FFmpeg than by the webview.
 - Stills are looped for the clip length; transparency is flattened onto the background.
+- Text styles (outline, shadow or glow, background box in the shapes `rect`, `per-line` and `jagged`, a
+  highlighted line, capitals) are all drawn into the text's picture by the one rasterizer in Rust
+  (`media/text.rs`, `media/text_fx.rs`). The export never restyles text: it overlays that picture. A text's
+  `fadeIn` / `fadeOut` fade its transparency (`fade=…:alpha=1`); the preview ramps the picture's opacity the same way.
 - **Text** is the exception to both rules above: a text picture keeps its transparency and is laid over whatever
   the tracks below show, with no background of its own (`fitMode` and `fitBackground` do not apply to it). It is
   scaled to fit the export size and centred. The preview shows the same file the export overlays, and shows every

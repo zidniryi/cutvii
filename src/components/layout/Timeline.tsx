@@ -25,7 +25,6 @@ import { usePlaybackStore } from "@/store/playback";
 import { useProjectStore } from "@/store/project";
 import { useSelectionStore } from "@/store/selection";
 import { useTimelineViewStore } from "@/store/timelineView";
-import { useUiStore } from "@/store/ui";
 import { clipDuration, projectDuration } from "@/timeline/clips";
 import { aiKindOf, openAiTools } from "@/timeline/ai";
 import { copySelected, cutSelected } from "@/timeline/clipboard";
@@ -48,7 +47,6 @@ import { useTimelineDrag } from "@/timeline/useTimelineDrag";
 
 const FALLBACK_VIEWPORT = 1000;
 const BUFFER_PX = 200;
-const NOTICE_MS = 4000;
 
 function Playhead({ pps }: { pps: number }) {
   const playhead = usePlaybackStore((s) => s.playhead);
@@ -72,7 +70,6 @@ export function Timeline() {
   const toggleSnapping = useTimelineViewStore((s) => s.toggleSnapping);
   const scrollTarget = useTimelineViewStore((s) => s.scrollTarget);
   const dropPreview = useDragDropStore((s) => s.preview);
-  const notice = useUiStore((s) => s.notice);
 
   const scrollerRef = useRef<HTMLDivElement>(null);
   const lanesRef = useRef<HTMLDivElement>(null);
@@ -102,12 +99,6 @@ export function Timeline() {
     el.scrollLeft = scrollTarget.left;
     setViewport({ left: el.scrollLeft, width: el.clientWidth });
   }, [scrollTarget]);
-
-  useEffect(() => {
-    if (!notice) return;
-    const id = setTimeout(() => useUiStore.getState().setNotice(null), NOTICE_MS);
-    return () => clearTimeout(id);
-  }, [notice]);
 
   const view = drag?.preview ?? project;
   const assets = useMemo(() => new Map(project.assets.map((a) => [a.id, a])), [project.assets]);
@@ -169,11 +160,6 @@ export function Timeline() {
       className="min-h-0 border-t lg:col-span-3 lg:row-start-2"
       actions={
         <div className="flex items-center">
-          {notice && (
-            <span role="status" aria-live="polite" className="mr-2 max-w-[40ch] truncate text-xs text-danger">
-              {notice}
-            </span>
-          )}
           <button
             type="button"
             aria-label="AI tools"

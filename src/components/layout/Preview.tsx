@@ -45,7 +45,7 @@ import { useLutStore } from "@/store/luts";
 import { fadeGain, isSoundOnly } from "@/timeline/audio";
 import { colorKey, colorOf, isGraded } from "@/timeline/color";
 import { transformStyle } from "@/timeline/transform";
-import type { Crop } from "@/project/model";
+import type { Crop, TimelineClip } from "@/project/model";
 
 type MediaEl = HTMLVideoElement | HTMLAudioElement;
 /** A share as a percentage without float noise (0.2 -> 20, not 19.999999999999996). */
@@ -301,12 +301,15 @@ function TextPicture({
   zIndex,
   shift,
   placed,
+  clip,
   onLoad,
   onError,
   onShown,
 }: {
   src: string;
   zIndex: number;
+  /** The text clip: its fade in and out follow the playhead. */
+  clip: TimelineClip;
   shift?: { dx: number; dy: number } | null;
   /** The clip's own transform (applied after the drag shift). */
   placed?: { transform?: string; opacity?: number };
@@ -337,8 +340,25 @@ function TextPicture({
       live = false;
     };
   }, [src, shown]);
+
+  // A fading text gets more or less see-through as the playhead moves through it: straight-line ramps over
+  // the clip's fade in and out, the same ones the export applies to the picture's transparency.
+  const imgRef = useRef<HTMLImageElement>(null);
+  const fades = (clip.fadeIn ?? 0) > 0 || (clip.fadeOut ?? 0) > 0;
+  const base = placed?.opacity ?? 1;
+  useEffect(() => {
+    const el = imgRef.current;
+    if (!el || !fades) return;
+    const apply = () => {
+      el.style.opacity = String(base * fadeGain(clip, usePlaybackStore.getState().playhead));
+    };
+    apply();
+    return usePlaybackStore.subscribe(apply);
+  }, [fades, base, clip]);
+
   return (
     <img
+      ref={imgRef}
       src={shown}
       alt=""
       data-testid="text-layer"
@@ -348,7 +368,8 @@ function TextPicture({
       className="pointer-events-none absolute inset-0 h-full w-full object-contain"
       style={{
         zIndex,
-        opacity: placed?.opacity,
+        // while it fades, the effect above owns the opacity
+        opacity: fades ? undefined : placed?.opacity,
         transform:
           [shift ? `translate(${percent(shift.dx)}%, ${percent(shift.dy)}%)` : "", placed?.transform ?? ""]
             .filter(Boolean)
@@ -463,6 +484,7 @@ function LayerView({
         zIndex={track.order}
         shift={shift}
         placed={placed}
+        clip={layer.clip}
         onLoad={() => setMediaError(asset.id, null)}
         onError={() => setMediaError(asset.id, mediaErrorMessage(4))}
         onShown={onTextShown}

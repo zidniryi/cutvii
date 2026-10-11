@@ -41,7 +41,8 @@
           "$APPCACHE/previews/**",
           "$APPCACHE/waveforms/**",
           "$APPCACHE/font-previews/**",
-          "$APPCACHE/luts/**"
+          "$APPCACHE/luts/**",
+          "$APPCACHE/text-style-previews/**"
         ]
       },
       "devCsp": null

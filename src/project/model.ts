@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** Bump when the on-disk shape changes, and add a migration in `src-tauri/src/project/migrate.rs`. v2: clip speed. v3: fitMode. v4: fitBackground. v5: text assets. v6: clip crop, text font, rotation and flip, clip mute and fades, clip colour. */
+/** Bump when the on-disk shape changes, and add a migration in `src-tauri/src/project/migrate.rs`. v2: clip speed. v3: fitMode. v4: fitBackground. v5: text assets. v6: clip crop, text font, rotation and flip, clip mute and fades, clip colour, text styles. */
 export const SCHEMA_VERSION = 6;
 
 /** Tolerance (seconds) when comparing a clip's sourceOut with the asset duration. */
@@ -75,6 +75,45 @@ export const ProjectSettingsSchema = z
     }
   });
 
+const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, "must be a #RRGGBB color");
+const share = z.number().min(0).max(1);
+const offset = z.number().min(-1).max(1);
+
+/**
+ * The style parts of a text. Sizes are shares of the font size, so a style looks the same at any size.
+ * Drawn by Rust (`media/text.rs` + `media/text_fx.rs`): the same picture serves preview and export.
+ */
+const textLook = {
+  /** Draw the text in capitals (the stored text keeps its own case). */
+  uppercase: z.boolean().optional(),
+  /** A line of another colour around the letters. */
+  outline: z
+    .object({ color: hexColor, width: z.number().gt(0).max(0.5) })
+    .strict()
+    .optional(),
+  /** A shadow behind the letters; with no offset and a bright colour it is a glow. */
+  shadow: z
+    .object({ color: hexColor, blur: share, x: offset, y: offset, opacity: share })
+    .strict()
+    .optional(),
+  /** A filled shape behind the text: one box, one per line, or a box with zigzag sides. */
+  box: z
+    .object({
+      color: hexColor,
+      opacity: share,
+      shape: z.enum(["rect", "per-line", "jagged"]),
+      padding: share,
+      radius: share,
+    })
+    .strict()
+    .optional(),
+  /** Some lines drawn in another colour. */
+  highlight: z
+    .object({ color: hexColor, lines: z.enum(["last", "first", "even"]) })
+    .strict()
+    .optional(),
+};
+
 /**
  * Text and titles. The same limits are enforced in Rust (`src-tauri/src/media/text.rs`), which draws the text
  * onto a transparent picture the size of the canvas.
@@ -96,6 +135,28 @@ export const TextSpecSchema = z
     /** Centre of the text block as a share of the canvas (0.5, 0.5 = the middle). */
     x: z.number().min(0).max(1),
     y: z.number().min(0).max(1),
+    ...textLook,
+  })
+  .strict();
+
+/** The look of a text without its words, size or place: what a style preset carries. */
+export const TextStyleSchema = z
+  .object({
+    color: hexColor,
+    bold: z.boolean().optional(),
+    font: z.string().trim().min(1).max(100).optional(),
+    ...textLook,
+  })
+  .strict();
+
+/** A ready-made text style from `presets/text-styles.json` (Rust reads the same file). */
+export const StylePresetSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    style: TextStyleSchema,
+    /** Seconds the text fades in and out over, when the style calls for it. */
+    fade: z.number().min(0).max(5).optional(),
   })
   .strict();
 
@@ -304,6 +365,8 @@ export const ProjectSchema = z
 export type ColorAdjust = z.infer<typeof ColorAdjustSchema>;
 export type Crop = z.infer<typeof CropSchema>;
 export type TextSpec = z.infer<typeof TextSpecSchema>;
+export type TextStyle = z.infer<typeof TextStyleSchema>;
+export type StylePreset = z.infer<typeof StylePresetSchema>;
 export type FitBackground = z.infer<typeof FitBackgroundSchema>;
 export type FitMode = NonNullable<z.infer<typeof TimelineClipSchema>["fitMode"]>;
 export type MediaType = z.infer<typeof MediaTypeSchema>;

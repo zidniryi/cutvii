@@ -17,8 +17,9 @@ use crate::media::ffmpeg::FfmpegBackend;
 use crate::media::import::{ImportedMedia, cache_key, import_one};
 use crate::media::probe::MediaDetails;
 use crate::media::text::{
-    FONT_EXTENSIONS, FontInfo, TextSpec, ensure_font_preview, ensure_text_picture, import_font,
-    list_fonts, load_bundled_fonts, load_user_fonts,
+    FONT_EXTENSIONS, FontInfo, TextSpec, ensure_font_preview, ensure_style_preview,
+    ensure_text_picture, import_font, list_fonts, load_bundled_fonts, load_user_fonts,
+    style_presets,
 };
 use crate::media::waveform::{FORMAT_VERSION, write_waveform};
 
@@ -267,6 +268,38 @@ pub async fn bake_color_lut(app: AppHandle, adjust: ColorAdjust) -> AppResult<St
     })
     .await
     .map_err(|e| AppError::InvalidInput(format!("colour task failed: {e}")))?
+}
+
+#[derive(Clone, Serialize)]
+pub struct StylePreview {
+    id: String,
+    /// A small picture of two sample lines drawn in the style.
+    preview: String,
+}
+
+/// Gallery pictures for the bundled text styles (`presets/text-styles.json`), drawn by the same rasterizer
+/// as every text and cached. A style whose picture cannot be drawn is left out.
+#[tauri::command]
+pub async fn text_style_previews(app: AppHandle) -> AppResult<Vec<StylePreview>> {
+    let dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| AppError::InvalidInput(format!("no cache directory: {e}")))?
+        .join("text-style-previews");
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(style_presets()?
+            .iter()
+            .filter_map(|preset| {
+                let preview = ensure_style_preview(&dir, preset).ok()?;
+                Some(StylePreview {
+                    id: preset.id.clone(),
+                    preview: preview.to_string_lossy().into_owned(),
+                })
+            })
+            .collect())
+    })
+    .await
+    .map_err(|e| AppError::InvalidInput(format!("style task failed: {e}")))?
 }
 
 fn fonts_dir(app: &AppHandle) -> AppResult<PathBuf> {

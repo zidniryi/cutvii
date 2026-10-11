@@ -4,7 +4,8 @@ import { FontPicker } from "@/components/inspector/FontPicker";
 import type { TextSpec } from "@/project/model";
 import { cn } from "@/lib/utils";
 import { DEFAULT_FONT, useFontStore } from "@/store/fonts";
-import { editText, TEXT_FONT_LIMITS } from "@/timeline/text";
+import { changeTextFade, report } from "@/timeline/editor";
+import { editText, MAX_TEXT_FADE, TEXT_FONT_LIMITS } from "@/timeline/text";
 
 const fieldClass =
   "h-9 w-full rounded-md border bg-surface-2 px-2 text-sm tabular-nums pointer-coarse:h-11 focus-visible:outline-accent";
@@ -66,7 +67,25 @@ function PositionField({
 }
 
 /** Editor for a text clip. Every committed change redraws the text and is one undo step. */
-export function TextPanel({ clipId, spec }: { clipId: string; spec: TextSpec }) {
+export function TextPanel({
+  clipId,
+  spec,
+  /** Seconds the clip fades in and out over (0 for none). */
+  fade = 0,
+}: {
+  clipId: string;
+  spec: TextSpec;
+  fade?: number;
+}) {
+  const [fadeDraft, setFadeDraft] = useState<string | null>(null);
+  function commitFade() {
+    if (fadeDraft === null) return;
+    const parsed = Number(fadeDraft);
+    setFadeDraft(null);
+    if (!Number.isFinite(parsed)) return;
+    const seconds = Math.round(Math.min(MAX_TEXT_FADE, Math.max(0, parsed)) * 100) / 100;
+    if (seconds !== fade) report(changeTextFade(clipId, seconds));
+  }
   const [content, setContent] = useState<string | null>(null);
   const [size, setSize] = useState<string | null>(null);
   const [color, setColor] = useState<string | null>(null);
@@ -245,6 +264,25 @@ export function TextPanel({ clipId, spec }: { clipId: string; spec: TextSpec }) 
       <PositionField label="Position across" value={spec.x} onCommit={(x) => apply({ x })} />
       <PositionField label="Position down" value={spec.y} onCommit={(y) => apply({ y })} />
       <p className="text-xs text-text-muted">50% / 50% is the middle of the picture.</p>
+
+      <label className="block">
+        <span className="mb-1 block text-xs text-text-muted">Fade in and out (s)</span>
+        <input
+          type="number"
+          inputMode="decimal"
+          min={0}
+          max={MAX_TEXT_FADE}
+          step={0.1}
+          className={fieldClass}
+          value={fadeDraft ?? String(fade)}
+          onChange={(e) => setFadeDraft(e.target.value)}
+          onBlur={commitFade}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commitFade();
+            if (e.key === "Escape") setFadeDraft(null);
+          }}
+        />
+      </label>
     </div>
   );
 }

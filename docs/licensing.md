@@ -76,13 +76,13 @@ No GPL/LGPL/AGPL crates.
 
 - The app icon (`design/app-icon.png`) and in-app logo are original artwork for this project; no third-party logo or
   mascot is used. The default Tauri icon set was replaced.
-- Fonts: the UI uses the system font stack. Text and titles can be drawn in 37 font families that ship with the
-  app: 36 under the **SIL Open Font License 1.1** and one (Luckiest Guy) under the **Apache License 2.0**. The
+- Fonts: the UI uses the system font stack. Text and titles can be drawn in 38 font families that ship with the
+  app: 37 under the **SIL Open Font License 1.1** and one (Luckiest Guy) under the **Apache License 2.0**. The
   files are in `src-tauri/assets/fonts/` and each licence text, with its copyright line, is in
   `src-tauri/assets/fonts/licenses/`. Noto Sans (the default) is compiled into the program; the others are bundle
   resources (`bundle.resources` in `tauri.conf.json`), about 30 MB in total, read from disk only when used:
 
-  Alegreya, Aleo, Alex Brush, Arapey, Assistant, Barlow, Bitcount Ink, Bitter, Brawler, Bungee Spice, Caladea,
+  Alegreya, Aleo, Alex Brush, Anton, Arapey, Assistant, Barlow, Bitcount Ink, Bitter, Brawler, Bungee Spice, Caladea,
   Carme, DM Sans, Enriqueta, Fraunces, Google Sans, Grandiflora One, Grechen Fuemen, Lato, Libre Baskerville, LINE
   Seed JP, Luckiest Guy, Merienda, Merriweather, Mulish (formerly Muli), Noto Sans, Nunito, Open Sans, Oswald,
   Pinyon Script, Playfair Display, Playwrite NZ Basic Guides, Poppins, Roboto, Rokkitt, Rubik, Work Sans.
@@ -98,7 +98,9 @@ No GPL/LGPL/AGPL crates.
   - "Google" and "Google Sans" are trademarks of Google LLC (`licenses/GoogleSans-TRADEMARKS.md`): the font may be
     offered under its name, but the name must not be used to suggest any affiliation with Google.
   - Bitcount Ink and Bungee Spice are colour fonts; CutVii draws them in the single text colour.
-  - Alex Brush, Arapey, Bungee Spice, Carme, Grandiflora One, Grechen Fuemen, Luckiest Guy, Pinyon Script and
+  - Anton (Copyright 2020 The Anton Project Authors, OFL 1.1) is the heavy display face used by the Hot Take
+    text style.
+  - Alex Brush, Anton, Arapey, Bungee Spice, Carme, Grandiflora One, Grechen Fuemen, Luckiest Guy, Pinyon Script and
     Playwrite NZ Basic Guides have one weight (Bold does nothing).
     Barlow, Brawler, Caladea, Enriqueta, Lato, LINE Seed JP and Poppins ship as Regular and Bold only.
 
