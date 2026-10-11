@@ -3,7 +3,8 @@ import { goToEnd, goToStart, stepFrames, togglePlayback } from "@/playback/contr
 import { newProjectFlow, openProjectFlow, saveFlow } from "@/project/fileActions";
 import { usePlaybackStore } from "@/store/playback";
 import { copySelected, cutSelected, pasteAtPlayhead } from "./clipboard";
-import { deleteSelected, redo, report, selectAllClips, splitAtPlayhead, undo } from "./editor";
+import { deleteSelection, redo, report, selectAll, splitAtPlayhead, undo } from "./editor";
+import { useSelectionStore } from "@/store/selection";
 import { freezeFrameAtPlayhead } from "./freeze";
 import { resolveShortcut, type ShortcutAction } from "./shortcuts";
 import { zoomByFactorAt, zoomByWheel, zoomStep, zoomToFit } from "./zoomController";
@@ -31,14 +32,14 @@ const RUN: Record<ShortcutAction, () => void> = {
   cut: () => void cutSelected(),
   copy: () => void copySelected(),
   paste: () => void report(pasteAtPlayhead()),
-  "select-all": selectAllClips,
+  "select-all": selectAll,
   "zoom-in": () => zoomStep(1),
   "zoom-out": () => zoomStep(-1),
   "zoom-fit": zoomToFit,
   "play-pause": togglePlayback,
   split: () => void report(splitAtPlayhead()),
   freeze: () => void freezeFrameAtPlayhead(),
-  delete: () => void deleteSelected(),
+  delete: deleteSelection,
   "seek-back": () => stepFrames(-1),
   "seek-forward": () => stepFrames(1),
   "seek-back-second": () => seek(-1),
@@ -105,12 +106,28 @@ export function useEditorShortcuts() {
     document.addEventListener("copy", onCopy);
     document.addEventListener("paste", onPaste);
 
+    // Select all and Delete act on the part of the editor the pointer last went down in.
+    const onPointerDown = (e: PointerEvent) => {
+      const inLibrary =
+        e.target instanceof Element && e.target.closest('section[aria-label="Media"]') !== null;
+      const area = inLibrary ? "library" : "timeline";
+      if (useSelectionStore.getState().area !== area) useSelectionStore.getState().setArea(area);
+      // a press anywhere but on a media card (or the bar that acts on the selection) lets the media go
+      const onMedia =
+        e.target instanceof Element &&
+        e.target.closest('[data-testid="media-card"], [aria-label="Selected media"]') !== null;
+      if (!onMedia && useSelectionStore.getState().selectedAssetIds.length > 0) {
+        useSelectionStore.getState().setAssetSelection([]);
+      }
+    };
+    window.addEventListener("pointerdown", onPointerDown, true);
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("wheel", onWheel, { passive: false });
     window.addEventListener("gesturestart", onGestureStart);
     window.addEventListener("gesturechange", onGestureChange);
     window.addEventListener("gestureend", onGestureEnd);
     return () => {
+      window.removeEventListener("pointerdown", onPointerDown, true);
       window.removeEventListener("keydown", onKeyDown);
       document.removeEventListener("cut", onCut);
       document.removeEventListener("copy", onCopy);

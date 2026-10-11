@@ -11,6 +11,8 @@ import { Inspector } from "@/components/layout/Inspector";
 import { MediaLibrary } from "@/components/layout/MediaLibrary";
 import { Preview } from "@/components/layout/Preview";
 import { Timeline } from "@/components/layout/Timeline";
+import { StyleEditorSheet } from "@/components/text/StyleEditor";
+import { TextStylesPanel } from "@/components/text/TextStylesPanel";
 import { TopBar } from "@/components/layout/TopBar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useUiStore, type SidePanel } from "@/store/ui";
@@ -23,6 +25,7 @@ import { useEditorShortcuts } from "@/timeline/useEditorShortcuts";
 
 const TABS: { id: SidePanel; label: string }[] = [
   { id: "library", label: "Media" },
+  { id: "text", label: "Text" },
   { id: "inspector", label: "Inspector" },
 ];
 
@@ -73,6 +76,7 @@ export default function App() {
           <div className="flex min-h-0 flex-col lg:contents">
             <SidePanelTabs />
             <MediaLibrary />
+            <TextStylesPanel />
             <Inspector />
           </div>
           <Timeline />
@@ -84,6 +88,7 @@ export default function App() {
       <CanvasDialog />
       <AppDialog />
       <AboutDialog />
+      <StyleEditorSheet />
       <NoticeToast />
     </TooltipProvider>
   );

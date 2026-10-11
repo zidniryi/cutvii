@@ -9,6 +9,7 @@ import { useSelectionStore } from "@/store/selection";
 import { useUiStore } from "@/store/ui";
 import { expectValid, IDS, makeProject } from "@/test/makeProject";
 import { addClip } from "./edit";
+import { useTextStyleStore } from "@/store/textStyles";
 import { aiKindOf, aiTarget, openAiTools } from "./ai";
 import { findStyle, matchesStyle } from "./textStyles";
 import { undo } from "./editor";
@@ -241,15 +242,19 @@ describe("subtitles from the AI tab", () => {
   it("makes the subtitles in the style chosen in the AI tab, Default unless another is picked", async () => {
     models[1].installed = true;
     rust();
-    useUiStore.setState({ subtitleStyle: null });
+    useTextStyleStore.getState().reset();
     const panel = open();
-    const styles = within(await panel.findByRole("radiogroup", { name: "Subtitle style" }));
-    expect(styles.getAllByRole("radio")).toHaveLength(12); // Default and the eleven styles
-    expect(styles.getByRole("radio", { name: "Default" })).toBeChecked();
+    const styles = within(await panel.findByRole("group", { name: "Styles" }));
+    expect(panel.getByRole("button", { name: "Default" })).toHaveAttribute("aria-pressed", "true");
 
-    fireEvent.click(styles.getByRole("radio", { name: "Lyric Fade" }));
-    expect(styles.getByRole("radio", { name: "Lyric Fade" })).toBeChecked();
-    expect(useUiStore.getState().subtitleStyle).toBe("lyric-fade"); // remembered for the next clip too
+    // Lyric Fade is not among the first six: it is chosen from "Show more"
+    fireEvent.click(styles.getByRole("button", { name: /Show more/ }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "All styles" })).getByRole("button", { name: "Lyric Fade" }),
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(styles.getByRole("button", { name: "Lyric Fade" })).toHaveAttribute("aria-pressed", "true");
+    expect(useTextStyleStore.getState().subtitleStyleId).toBe("lyric-fade"); // remembered
     fireEvent.click(panel.getByRole("button", { name: "Generate subtitles" }));
     expect(await panel.findByRole("status")).toHaveTextContent(/Added 2 subtitles/);
 
@@ -269,7 +274,7 @@ describe("subtitles from the AI tab", () => {
     expect(useProjectStore.getState().project.assets.filter((a) => a.text)).toHaveLength(0);
 
     // back to Default: the plain subtitle look, no fade
-    fireEvent.click(styles.getByRole("radio", { name: "Default" }));
+    fireEvent.click(panel.getByRole("button", { name: "Default" }));
     fireEvent.click(panel.getByRole("button", { name: "Generate subtitles" }));
     await waitFor(() =>
       expect(useProjectStore.getState().project.assets.filter((a) => a.text)).toHaveLength(2),

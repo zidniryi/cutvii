@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { Captions, Check, Download, Eraser, Layers, ScanFace, Sparkles, Trash2 } from "lucide-react";
 import { confirmDialog } from "@/lib/dialog";
-import { thumbnailUrl } from "@/lib/media";
 import { cn } from "@/lib/utils";
 import type { TimelineClip } from "@/project/model";
 import { SPEECH_LANGUAGES, useAiStore, type SpeechModel } from "@/store/ai";
-import { useStylePreviewStore } from "@/store/stylePreviews";
-import { useUiStore } from "@/store/ui";
+import { DEFAULT_STYLE, subtitleStyleOf, useTextStyleStore } from "@/store/textStyles";
 import { generateSubtitles } from "@/timeline/subtitles";
-import { findStyle, STYLE_PRESETS } from "@/timeline/textStyles";
+import { StyleEditor } from "@/components/text/StyleEditor";
+import { StyleList } from "@/components/text/StyleList";
+import { StylePreview } from "@/components/text/StylePreview";
 
 const fieldClass =
   "h-9 w-full rounded-md border bg-surface-2 px-2 text-sm pointer-coarse:h-11 focus-visible:outline-accent";
@@ -70,51 +70,6 @@ const COMING: { icon: typeof Eraser; title: string; text: string }[] = [
   },
 ];
 
-/** One choice of subtitle style: its sample picture (or just its name) and whether it is the chosen one. */
-function StyleTile({
-  name,
-  preview,
-  selected,
-  disabled,
-  onSelect,
-}: {
-  name: string;
-  preview?: string;
-  selected: boolean;
-  disabled: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={selected}
-      aria-label={name}
-      title={name}
-      disabled={disabled}
-      onClick={onSelect}
-      className={cn(
-        "overflow-hidden rounded-md border text-left disabled:opacity-60",
-        selected ? "border-accent ring-1 ring-accent" : "border-border hover:border-text-muted",
-      )}
-    >
-      <span className="flex h-9 items-center justify-center bg-[#3a3f47]">
-        {preview ? (
-          <img
-            src={thumbnailUrl(preview)}
-            alt=""
-            draggable={false}
-            className="h-full w-full object-contain"
-          />
-        ) : (
-          <span className="text-[11px] font-semibold text-white">Aa</span>
-        )}
-      </span>
-      <span className="block truncate px-1 py-0.5 text-[10px] text-text-muted">{name}</span>
-    </button>
-  );
-}
-
 function ModelTile({
   model,
   selected,
@@ -169,11 +124,11 @@ export function AiPanel({ clip }: { clip: TimelineClip }) {
   const [note, setNote] = useState<{ kind: "ok" | "problem"; text: string } | null>(null);
   useEffect(() => useAiStore.getState().ensure(), []);
   // the style for the subtitles is remembered while the app is open, whichever clip is selected
-  const styleId = useUiStore((s) => s.subtitleStyle);
-  const setStyleId = useUiStore.getState().setSubtitleStyle;
-  const style = styleId ? findStyle(styleId) : undefined;
-  const stylePreviews = useStylePreviewStore((s) => s.previews);
-  useEffect(() => useStylePreviewStore.getState().ensure(), []);
+  const ownStyles = useTextStyleStore((s) => s.mine);
+  const subtitleStyleId = useTextStyleStore((s) => s.subtitleStyleId);
+  const subtitleCustom = useTextStyleStore((s) => s.subtitleCustom);
+  const subtitle = subtitleStyleOf({ mine: ownStyles, subtitleStyleId, subtitleCustom });
+  const [customising, setCustomising] = useState(false);
 
   // default to a model that is already here, otherwise the middle one
   const model =
@@ -222,7 +177,12 @@ export function AiPanel({ clip }: { clip: TimelineClip }) {
     if (!model) return;
     setNote(null);
     setStage("Listening…");
-    const result = await generateSubtitles(clip.id, model.id, language || null, setStage, style);
+    // exactly what the sample in step 3 shows
+    const look =
+      subtitle.id === DEFAULT_STYLE && !subtitle.customised
+        ? undefined
+        : { style: subtitle.style, fade: subtitle.fade };
+    const result = await generateSubtitles(clip.id, model.id, language || null, setStage, look);
     setStage(null);
     setNote(
       result.ok
@@ -341,28 +301,74 @@ export function AiPanel({ clip }: { clip: TimelineClip }) {
             </div>
 
             <div>
-              <Step n={3} title="Subtitle style" done={styleId !== null} />
-              <div role="radiogroup" aria-label="Subtitle style" className="grid grid-cols-3 gap-1">
-                <StyleTile
-                  name="Default"
-                  selected={style === undefined}
-                  disabled={busy}
-                  onSelect={() => setStyleId(null)}
-                />
-                {STYLE_PRESETS.map((preset) => (
-                  <StyleTile
-                    key={preset.id}
-                    name={preset.name}
-                    preview={stylePreviews[preset.id]}
-                    selected={style?.id === preset.id}
-                    disabled={busy}
-                    onSelect={() => setStyleId(preset.id)}
+              <Step n={3} title="Subtitle style" done />
+              <div className="space-y-2">
+                <div role="group" aria-label="Subtitle look" className="space-y-1">
+                  <StylePreview
+                    style={subtitle.style}
+                    label={subtitle.name}
+                    className="h-16 w-full rounded-md"
                   />
-                ))}
+                  <p className="text-text-muted">
+                    {subtitle.name}
+                    {subtitle.customised ? " (customized)" : ""}: the subtitles will look like this.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  <button
+                    type="button"
+                    aria-pressed={subtitle.id === DEFAULT_STYLE}
+                    disabled={busy}
+                    onClick={() => useTextStyleStore.getState().setSubtitleStyle(null)}
+                    className={cn(
+                      "h-9 rounded-md border px-3 disabled:opacity-60 pointer-coarse:h-11",
+                      subtitle.id === DEFAULT_STYLE
+                        ? "border-accent bg-accent-soft text-text"
+                        : "bg-surface-2 text-text-muted hover:text-text",
+                    )}
+                  >
+                    Default
+                  </button>
+                  <button
+                    type="button"
+                    aria-expanded={customising}
+                    disabled={busy}
+                    onClick={() => setCustomising((open) => !open)}
+                    className="h-9 rounded-md border bg-surface-2 px-3 text-text-muted hover:text-text disabled:opacity-60 pointer-coarse:h-11"
+                  >
+                    Customize
+                  </button>
+                  {subtitle.customised && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => useTextStyleStore.getState().setSubtitleCustom(subtitle.id, null)}
+                      className="h-9 rounded-md border bg-surface-2 px-3 text-text-muted hover:text-text disabled:opacity-60 pointer-coarse:h-11"
+                    >
+                      Reset changes
+                    </button>
+                  )}
+                </div>
+                {customising && !busy && (
+                  <div className="rounded-md border p-2">
+                    <StyleEditor
+                      value={
+                        subtitle.fade
+                          ? { style: subtitle.style, fade: subtitle.fade }
+                          : { style: subtitle.style }
+                      }
+                      label={subtitle.name}
+                      onChange={(next) => useTextStyleStore.getState().setSubtitleCustom(subtitle.id, next)}
+                    />
+                  </div>
+                )}
+                <StyleList
+                  disabled={busy}
+                  isSelected={(preset) => preset.id === subtitle.id}
+                  onSelect={(preset) => useTextStyleStore.getState().setSubtitleStyle(preset.id)}
+                  hint="Changes made here are kept for subtitles only; the style itself stays as it is."
+                />
               </div>
-              <p className="mt-1 text-text-muted">
-                Every subtitle stays an ordinary text clip, so its style can be changed later.
-              </p>
             </div>
 
             <div>

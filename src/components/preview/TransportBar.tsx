@@ -4,6 +4,8 @@ import {
   ChevronRight,
   Ellipsis,
   Gauge,
+  Maximize,
+  Minimize,
   Pause,
   Play,
   Repeat,
@@ -17,6 +19,7 @@ import { SeekBar } from "@/components/preview/SeekBar";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { formatTimecode } from "@/lib/timecode";
 import { cn } from "@/lib/utils";
+import { useUiStore } from "@/store/ui";
 import { goToEnd, goToStart, PREVIEW_SPEEDS, stepFrames, togglePlayback } from "@/playback/controller";
 import { usePlaybackStore } from "@/store/playback";
 import { useProjectStore } from "@/store/project";
@@ -150,6 +153,19 @@ function LoopToggle() {
   );
 }
 
+/** Let the preview fill the window, and bring it back. Escape also leaves. */
+function FullScreenToggle() {
+  const full = useUiStore((s) => s.previewFull);
+  return (
+    <IconButton
+      label={full ? "Exit full screen" : "Full screen"}
+      icon={full ? <Minimize /> : <Maximize />}
+      aria-pressed={full}
+      onClick={() => useUiStore.getState().setPreviewFull(!full)}
+    />
+  );
+}
+
 /** Secondary controls: inline on wide screens, inside "More" on narrow ones. */
 function Secondary() {
   return (
@@ -157,6 +173,7 @@ function Secondary() {
       <VolumeControl />
       <LoopToggle />
       <SpeedMenu />
+      <FullScreenToggle />
     </>
   );
 }

@@ -20,6 +20,7 @@ import { TransportBar } from "@/components/preview/TransportBar";
 import { CropOverlay } from "@/components/preview/CropOverlay";
 import { useTextDrag } from "@/components/preview/useTextDrag";
 import { useSelectionStore } from "@/store/selection";
+import { cn } from "@/lib/utils";
 import { useUiStore } from "@/store/ui";
 import { ensureReversePreviews } from "@/playback/reversePreview";
 import { usePlaybackStore } from "@/store/playback";
@@ -54,6 +55,15 @@ const percent = (shareOfStage: number) => Number((shareOfStage * 100).toFixed(2)
 export function Preview() {
   const project = useProjectStore((s) => s.project);
   const playing = usePlaybackStore((s) => s.playing);
+  const full = useUiStore((s) => s.previewFull);
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") useUiStore.getState().setPreviewFull(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [full]);
   const mediaErrors = usePlaybackStore((s) => s.mediaErrors);
   const elements = useRef(new Map<string, MediaEl>());
   // Reversed clips play from a reversed copy that Rust prepares in the background.
@@ -199,7 +209,11 @@ export function Preview() {
   return (
     <section
       aria-label="Preview"
-      className="flex min-h-0 min-w-0 flex-col bg-bg lg:col-start-2 lg:row-start-1"
+      data-full={full || undefined}
+      className={cn(
+        "flex min-h-0 min-w-0 flex-col bg-bg",
+        full ? "fixed inset-0 z-50" : "lg:col-start-2 lg:row-start-1",
+      )}
     >
       <div className="min-h-0 flex-1 p-3" style={{ containerType: "size" }}>
         <div className="flex h-full w-full items-center justify-center">

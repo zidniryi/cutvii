@@ -779,7 +779,9 @@ impl TextStyle {
     }
 }
 
-/// A ready-made text style from `presets/text-styles.json` (the same file the UI reads).
+/// A ready-made text style from `presets/text-styles.json` (the file the UI reads). The app itself only
+/// draws styles the UI sends; this is how the tests check that the bundled file is valid for Rust too.
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StylePreset {
@@ -791,8 +793,10 @@ pub struct StylePreset {
     pub fade: f64,
 }
 
+#[cfg(test)]
 pub const STYLE_PRESETS_JSON: &str = include_str!("../../../presets/text-styles.json");
 /// The longest fade a preset may ask for.
+#[cfg(test)]
 pub const MAX_PRESET_FADE: f64 = 5.0;
 /// Size of a style's sample picture in the gallery (shown at half this size).
 pub const STYLE_PREVIEW_SIZE: (u32, u32) = (480, 200);
@@ -816,6 +820,7 @@ fn sample_spec(content: String) -> TextSpec {
 }
 
 /// The bundled style presets, checked: unique ids, names, and every style drawable.
+#[cfg(test)]
 pub fn style_presets() -> AppResult<Vec<StylePreset>> {
     let presets: Vec<StylePreset> = serde_json::from_str(STYLE_PRESETS_JSON)
         .map_err(|e| AppError::InvalidInput(format!("text styles file: {e}")))?;
@@ -841,12 +846,21 @@ pub fn style_presets() -> AppResult<Vec<StylePreset>> {
     Ok(presets)
 }
 
-/// The gallery picture of a style inside `dir`: two sample lines drawn in it, made once and reused.
-pub fn ensure_style_preview(dir: &Path, preset: &StylePreset) -> AppResult<PathBuf> {
+/// The longest label a style preview may carry.
+pub const MAX_STYLE_LABEL: usize = 40;
+
+/// The sample picture of a style inside `dir`: its label and a second line drawn in it, made once and
+/// reused. Every place that shows a style (gallery, editor, subtitle step) uses this one picture, and it
+/// comes from the same rasterizer as the text itself.
+pub fn ensure_style_preview(dir: &Path, style: &TextStyle, label: &str) -> AppResult<PathBuf> {
+    let label = label.trim();
+    if label.is_empty() || label.chars().count() > MAX_STYLE_LABEL {
+        return Err(AppError::InvalidInput(
+            "the style needs a short name".into(),
+        ));
+    }
     let (width, height) = STYLE_PREVIEW_SIZE;
-    let spec = preset
-        .style
-        .on(&sample_spec(format!("{}\nlooks like this", preset.name)));
+    let spec = style.on(&sample_spec(format!("{label}\nlooks like this")));
     let out = dir.join(format!("{}.png", text_key(&spec, width, height)));
     if !out.is_file() {
         write_text_png(&spec, width, height, &out)?;
@@ -1212,26 +1226,19 @@ mod tests {
     }
 
     #[test]
-    fn all_eleven_style_presets_are_valid_and_each_draws_its_own_look() {
+    fn all_style_presets_are_valid_and_each_draws_its_own_look() {
         shipped_fonts();
         let presets = style_presets().unwrap();
         let ids: Vec<&str> = presets.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids.len(), 21, "eleven first styles and ten more");
+        assert_eq!(&ids[..3], ["clean-caption", "two-tone", "outline-pop"]);
         assert_eq!(
-            ids,
-            [
-                "clean-caption",
-                "two-tone",
-                "outline-pop",
-                "boxed",
-                "highlighter",
-                "hot-take",
-                "storybook",
-                "lyric-fade",
-                "neon-glow",
-                "sticker-label",
-                "minimal"
-            ]
+            ids.iter().collect::<HashSet<_>>().len(),
+            21,
+            "every id is its own"
         );
+        let names: HashSet<&str> = presets.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names.len(), 21, "and so is every name");
         let installed: Vec<String> = list_fonts().into_iter().map(|f| f.family).collect();
         let dir = std::env::temp_dir().join(format!("cutvii-styles-{}", std::process::id()));
         let mut pictures = Vec::new();
@@ -1259,7 +1266,7 @@ mod tests {
                 preset.id
             );
             pictures.push(picture);
-            let preview = ensure_style_preview(&dir, preset).unwrap();
+            let preview = ensure_style_preview(&dir, &preset.style, &preset.name).unwrap();
             assert!(preview.is_file());
         }
         assert_eq!(
@@ -1268,6 +1275,28 @@ mod tests {
             "one gallery picture per style"
         );
         assert!(presets.iter().any(|p| p.fade > 0.0), "Lyric Fade fades");
+        // a style of the user's own is drawn by the same code; a name is needed for the sample
+        let mine = TextStyle {
+            color: "#00FF88".into(),
+            ..presets[0].style.clone()
+        };
+        let own = ensure_style_preview(&dir, &mine, "My style").unwrap();
+        assert!(own.is_file());
+        assert_eq!(
+            ensure_style_preview(&dir, &mine, "My style").unwrap(),
+            own,
+            "made once"
+        );
+        assert!(ensure_style_preview(&dir, &mine, "  ").is_err());
+        assert!(ensure_style_preview(&dir, &mine, &"x".repeat(41)).is_err());
+        let wrong = TextStyle {
+            color: "green".into(),
+            ..mine.clone()
+        };
+        assert!(
+            ensure_style_preview(&dir, &wrong, "Bad").is_err(),
+            "an invalid style is refused"
+        );
         fs::remove_dir_all(&dir).ok();
     }
 

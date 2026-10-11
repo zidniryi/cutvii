@@ -39,6 +39,8 @@ interface ProjectState {
   redo: () => void;
   addAsset: (asset: MediaAsset) => AddAssetResult;
   removeAsset: (assetId: string) => void;
+  /** Remove several media (and the clips using them) as ONE undoable step. */
+  removeAssets: (assetIds: string[]) => void;
 }
 
 const initialProject = createProject();
@@ -102,6 +104,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       get().execute({ label: "Import media", apply: () => ({ ok: true, project: result.project }) });
     return result;
   },
+
+  removeAssets: (assetIds) =>
+    void get().execute({
+      label: assetIds.length === 1 ? "Remove media" : `Remove ${assetIds.length} media`,
+      apply: (p) => ({ ok: true, project: assetIds.reduce(removeAsset, p) }),
+    }),
 
   removeAsset: (assetId) =>
     void get().execute({

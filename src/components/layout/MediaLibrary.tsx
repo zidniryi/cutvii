@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CircleAlert,
   FileWarning,
@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { IconButton } from "@/components/IconButton";
+import { LeftTabs } from "@/components/text/LeftTabs";
 import { EmptyState, Panel } from "@/components/Panel";
 import { importIntoProject, type ImportSummary } from "@/lib/importFlow";
 import { assetName, thumbnailUrl } from "@/lib/media";
@@ -24,7 +25,8 @@ import type { MediaAsset } from "@/project/model";
 import { useImportsStore, type ImportJob } from "@/store/imports";
 import { useProjectStore } from "@/store/project";
 import { beginAssetDrag } from "@/hooks/useAssetDrag";
-import { addAssetToTimeline, report } from "@/timeline/editor";
+import { useSelectionStore } from "@/store/selection";
+import { addAssetToTimeline, removeSelectedMedia, report } from "@/timeline/editor";
 import { useUiStore } from "@/store/ui";
 
 const TYPE_LABEL = { video: "Video", audio: "Audio", image: "Image" } as const;
@@ -45,10 +47,15 @@ function noticeLines(n: Notice): string[] {
 function AssetRow({
   asset,
   missing,
+  selected,
+  onSelect,
   onRemove,
 }: {
   asset: MediaAsset;
   missing: boolean;
+  selected: boolean;
+  /** A click on the card (not on one of its buttons): plain, Ctrl/Cmd or Shift. */
+  onSelect: (mode: "replace" | "toggle" | "range") => void;
   onRemove: () => void;
 }) {
   const Icon = TYPE_ICON[asset.type];
@@ -62,9 +69,18 @@ function AssetRow({
   return (
     <li
       data-testid="media-card"
+      data-selected={selected || undefined}
       onPointerDown={(e) => beginAssetDrag(e, asset)}
-      className="flex cursor-grab touch-none items-center gap-2 rounded-md bg-surface-2 p-1.5 select-none"
+      onClick={(e) => {
+        if ((e.target as HTMLElement).closest("button, input, a")) return; // the card's own buttons
+        onSelect(e.shiftKey ? "range" : e.metaKey || e.ctrlKey ? "toggle" : "replace");
+      }}
+      className={cn(
+        "flex cursor-grab touch-none items-center gap-2 rounded-md bg-surface-2 p-1.5 select-none",
+        selected && "bg-accent-soft ring-2 ring-accent",
+      )}
     >
+      {selected && <span className="sr-only">Selected</span>}
       <div className="flex h-9 w-14 shrink-0 items-center justify-center overflow-hidden rounded-sm bg-black text-text-muted">
         {asset.thumbnailPath ? (
           <img src={thumbnailUrl(asset.thumbnailPath)} alt="" className="h-full w-full object-cover" />
@@ -150,6 +166,7 @@ function PlaceholderCard({ job, onDismiss }: { job: ImportJob; onDismiss: () => 
 
 export function MediaLibrary() {
   const active = useUiStore((s) => s.sidePanel === "library");
+  const wide = useUiStore((s) => s.leftPanel === "library");
   const assets = useProjectStore((s) => s.project.assets);
   const removeAsset = useProjectStore((s) => s.removeAsset);
   const jobs = useImportsStore((s) => s.jobs);
@@ -165,6 +182,13 @@ export function MediaLibrary() {
     const q = query.trim().toLowerCase();
     return q ? assets.filter((a) => assetName(a).toLowerCase().includes(q)) : assets;
   }, [assets, query]);
+
+  // Selection: click, Ctrl/Cmd-click, Shift-click; Ctrl/Cmd + A and Delete act on what is listed here.
+  const selectedIds = useSelectionStore((s) => s.selectedAssetIds);
+  const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
+  useEffect(() => {
+    useSelectionStore.getState().setLibraryOrder(visible.map((a) => a.id));
+  }, [visible]);
 
   async function onImport() {
     setImporting(true);
@@ -186,15 +210,19 @@ export function MediaLibrary() {
       title="Media"
       className={cn(
         active ? "flex" : "hidden",
-        "relative min-h-0 border-r lg:col-start-1 lg:row-start-1 lg:flex",
+        wide ? "lg:flex" : "lg:hidden",
+        "relative min-h-0 border-r lg:col-start-1 lg:row-start-1",
       )}
       actions={
-        <IconButton
-          label="Import media"
-          icon={importing ? <Loader2 className="animate-spin" /> : <Plus />}
-          disabled={importing}
-          onClick={onImport}
-        />
+        <div className="flex items-center gap-1">
+          <LeftTabs />
+          <IconButton
+            label="Import media"
+            icon={importing ? <Loader2 className="animate-spin" /> : <Plus />}
+            disabled={importing}
+            onClick={onImport}
+          />
+        </div>
       }
     >
       <div className="relative m-2">
@@ -238,6 +266,32 @@ export function MediaLibrary() {
         </ul>
       )}
 
+      {selectedIds.length > 0 && (
+        <div
+          role="toolbar"
+          aria-label="Selected media"
+          className="mx-2 mb-2 flex items-center gap-2 rounded-md border border-accent/40 bg-accent-soft px-2 py-1 text-xs"
+        >
+          <span className="min-w-0 flex-1 truncate">{selectedIds.length} selected</span>
+          <button
+            type="button"
+            onClick={removeSelectedMedia}
+            className="flex h-7 items-center gap-1 rounded-md px-2 text-danger hover:bg-danger/10 pointer-coarse:h-11 [&_svg]:size-3.5"
+          >
+            <Trash2 />
+            Remove
+            <kbd className="text-text-muted">Del</kbd>
+          </button>
+          <button
+            type="button"
+            onClick={() => useSelectionStore.getState().setAssetSelection([])}
+            className="h-7 rounded-md px-2 text-text-muted hover:text-text pointer-coarse:h-11"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
       {assets.length === 0 ? (
         jobs.length === 0 && (
           <EmptyState
@@ -251,7 +305,14 @@ export function MediaLibrary() {
       ) : (
         <ul aria-label="Media files" className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2 pt-0">
           {visible.map((a) => (
-            <AssetRow key={a.id} asset={a} missing={missing.has(a.path)} onRemove={() => removeAsset(a.id)} />
+            <AssetRow
+              key={a.id}
+              asset={a}
+              missing={missing.has(a.path)}
+              selected={selected.has(a.id)}
+              onSelect={(mode) => useSelectionStore.getState().selectAsset(a.id, mode)}
+              onRemove={() => removeAsset(a.id)}
+            />
           ))}
         </ul>
       )}

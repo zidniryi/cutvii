@@ -18,6 +18,8 @@ export function useFocusTrap(ref: RefObject<HTMLElement | null>, initial?: RefOb
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Tab") return;
+      // another dialog opened on top of this one and has the focus now
+      if (root.closest('[aria-hidden="true"]')) return;
       const list = items();
       if (list.length === 0) return e.preventDefault();
       const first = list[0];

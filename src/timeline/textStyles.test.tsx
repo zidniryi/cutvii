@@ -8,6 +8,7 @@ import { usePlaybackStore } from "@/store/playback";
 import { useProjectStore } from "@/store/project";
 import { useSelectionStore } from "@/store/selection";
 import { useStylePreviewStore } from "@/store/stylePreviews";
+import { useTextStyleStore } from "@/store/textStyles";
 import { useUiStore } from "@/store/ui";
 import { expectValid, IDS, makeProject } from "@/test/makeProject";
 import { addClip, splitClip } from "./edit";
@@ -52,8 +53,11 @@ const specOf = (id = "title") =>
 function rust() {
   vi.mocked(invoke).mockReset();
   vi.mocked(invoke).mockImplementation((async (cmd: string, args?: { spec: TextSpec }) => {
-    if (cmd === "text_style_previews")
-      return STYLE_PRESETS.slice(0, 3).map((p) => ({ id: p.id, preview: `/cache/styles/${p.id}.png` }));
+    if (cmd === "text_style_preview") {
+      const label = (args as unknown as { label: string }).label;
+      if (label === "Boxed") throw new Error("no picture"); // one style whose picture cannot be made
+      return `/cache/styles/${label}.png`;
+    }
     if (cmd === "text_fonts") return [{ family: "Noto Sans", bundled: true }];
     if (cmd === "render_text")
       return `/data/text/${args?.spec.font ?? "default"}-${args?.spec.content.length}.png`;
@@ -65,26 +69,17 @@ function load() {
   usePlaybackStore.setState({ playhead: 3, playing: false });
   useSelectionStore.getState().select("title");
   useUiStore.setState({ notice: null, inspectorTab: {} });
-  useStylePreviewStore.setState({ previews: {}, loaded: false });
+  useStylePreviewStore.setState({ previews: {}, asked: {} });
+  useTextStyleStore.getState().reset();
   rust();
 }
 
 describe("text style presets", () => {
-  it("are the eleven bundled styles, each valid and with its own name", () => {
-    expect(STYLE_PRESETS.map((p) => p.id)).toEqual([
-      "clean-caption",
-      "two-tone",
-      "outline-pop",
-      "boxed",
-      "highlighter",
-      "hot-take",
-      "storybook",
-      "lyric-fade",
-      "neon-glow",
-      "sticker-label",
-      "minimal",
-    ]);
-    expect(new Set(STYLE_PRESETS.map((p) => p.name)).size).toBe(11);
+  it("are the twenty-one bundled styles, each valid and with its own id and name", () => {
+    expect(STYLE_PRESETS).toHaveLength(21);
+    expect(STYLE_PRESETS.slice(0, 3).map((p) => p.id)).toEqual(["clean-caption", "two-tone", "outline-pop"]);
+    expect(new Set(STYLE_PRESETS.map((p) => p.id)).size).toBe(21);
+    expect(new Set(STYLE_PRESETS.map((p) => p.name)).size).toBe(21);
     expect(STYLE_PRESETS.every((p) => typeof p.style.font === "string")).toBe(true);
     // the three box shapes, a highlighted line, capitals and a fade are all in use
     expect(preset("boxed").style.box?.shape).toBe("rect");
@@ -201,47 +196,29 @@ describe("the Styles gallery", () => {
   beforeEach(load);
   const gallery = () => within(screen.getByRole("group", { name: "Styles" }));
 
-  it("shows all eleven styles with their pictures, and marks the one in use", async () => {
+  it("shows six styles with their pictures, and marks the one in use", async () => {
     render(<Inspector />);
-    const tiles = () => gallery().getAllByRole("button", { pressed: false });
-    expect(tiles().map((t) => t.getAttribute("aria-label"))).toEqual(STYLE_PRESETS.map((p) => p.name));
+    const cards = () =>
+      Array.from(gallery().getByRole("button", { name: "Two-Tone" }).closest(".grid")!.children).map((c) =>
+        c.getAttribute("data-style-id"),
+      );
+    expect(cards()).toEqual(STYLE_PRESETS.slice(0, 6).map((p) => p.id));
     await waitFor(() =>
       expect(gallery().getByRole("button", { name: "Two-Tone" }).querySelector("img")).toHaveAttribute(
         "src",
-        "asset://localhost/cache/styles/two-tone.png",
+        "asset://localhost/cache/styles/Two-Tone.png",
       ),
     );
-    // a style whose picture is not there yet still has a tile
-    expect(gallery().getByRole("button", { name: "Minimal" })).toHaveTextContent("Aa");
+    // a style whose picture could not be made still has a card
+    expect(gallery().getByRole("button", { name: "Boxed" })).toHaveTextContent("Aa");
 
     fireEvent.click(gallery().getByRole("button", { name: "Highlighter" }));
     await waitFor(() => expect(matchesStyle(specOf(), preset("highlighter").style)).toBe(true));
     expect(gallery().getByRole("button", { name: "Highlighter" })).toHaveAttribute("aria-pressed", "true");
     expect(gallery().getAllByRole("button", { pressed: true })).toHaveLength(1);
+    expect(cards()[0]).toBe("highlighter"); // and it moved to the front
     expect(specOf().content).toBe("Hello\nworld");
     expect(useProjectStore.getState().past).toHaveLength(1);
-  });
-
-  it("finds a style by name and can add a new text in it", async () => {
-    render(<Inspector />);
-    const search = gallery().getByRole("textbox", { name: "Search styles" });
-    fireEvent.change(search, { target: { value: "  neon" } });
-    expect(
-      gallery()
-        .getAllByRole("button", { pressed: false })
-        .map((t) => t.getAttribute("aria-label")),
-    ).toEqual(["Neon Glow"]);
-    fireEvent.change(search, { target: { value: "zzz" } });
-    expect(gallery().getByText(/No style matches “zzz”/)).toBeInTheDocument();
-
-    fireEvent.change(search, { target: { value: "sticker" } });
-    const before = useProjectStore.getState().project.assets.length;
-    fireEvent.click(gallery().getByRole("button", { name: "Add a new Sticker Label text" }));
-    await waitFor(() => expect(useProjectStore.getState().project.assets).toHaveLength(before + 1));
-    expect(
-      matchesStyle(useProjectStore.getState().project.assets.at(-1)!.text!, preset("sticker-label").style),
-    ).toBe(true);
-    expect(specOf("title")).toEqual(plain); // the selected text was not touched
   });
 
   it("lets the fade be set by hand in the Text section", async () => {

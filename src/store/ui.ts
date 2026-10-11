@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { ColorAdjust } from "@/project/model";
 
-export type SidePanel = "library" | "inspector";
+export type SidePanel = "library" | "text" | "inspector";
 export type InspectorTab = "video" | "audio" | "speed" | "info" | "text" | "ai" | "color";
 export type ClipKind = "video" | "audio" | "image";
 
@@ -18,6 +18,11 @@ interface UiState {
   /** Which side panel is visible on narrow screens (wide screens show both). */
   sidePanel: SidePanel;
   setSidePanel: (panel: SidePanel) => void;
+  /** The preview (with its transport bar) fills the whole window. */
+  previewFull: boolean;
+  setPreviewFull: (full: boolean) => void;
+  /** What the left panel shows on wide screens: the media, or the text styles. */
+  leftPanel: "library" | "text";
   /** Short, transient message about the last edit that did not work (e.g. "would overlap"). */
   notice: string | null;
   setNotice: (notice: string | null) => void;
@@ -49,9 +54,6 @@ interface UiState {
   /** The clip shown without its colour changes while "Before" is held. */
   colorBefore: string | null;
   setColorBefore: (clipId: string | null) => void;
-  /** The text style chosen for generated subtitles (a preset id), or null for the plain subtitle look. */
-  subtitleStyle: string | null;
-  setSubtitleStyle: (id: string | null) => void;
   /** A save is being written (drives the status text; also stops a second save from starting). */
   saving: boolean;
   setSaving: (saving: boolean) => void;
@@ -63,7 +65,11 @@ interface UiState {
 
 export const useUiStore = create<UiState>((set, get) => ({
   sidePanel: "library",
-  setSidePanel: (sidePanel) => set({ sidePanel }),
+  setSidePanel: (sidePanel) =>
+    set(sidePanel === "inspector" ? { sidePanel } : { sidePanel, leftPanel: sidePanel }),
+  leftPanel: "library",
+  previewFull: false,
+  setPreviewFull: (previewFull) => set({ previewFull }),
   notice: null,
   setNotice: (notice) => set({ notice }),
   newProjectOpen: false,
@@ -86,8 +92,6 @@ export const useUiStore = create<UiState>((set, get) => ({
   setColorDraft: (colorDraft) => set({ colorDraft }),
   colorBefore: null,
   setColorBefore: (colorBefore) => set({ colorBefore }),
-  subtitleStyle: null,
-  setSubtitleStyle: (subtitleStyle) => set({ subtitleStyle }),
   saving: false,
   setSaving: (saving) => set({ saving }),
   dialog: null,

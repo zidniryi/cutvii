@@ -48,6 +48,30 @@ export function selectAllClips() {
   useSelectionStore.getState().setSelection(project().tracks.flatMap((t) => t.clips.map((c) => c.id)));
 }
 
+/** Ctrl/Cmd + A: everything in the part of the editor being used: the media listed, or the clips. */
+export function selectAll() {
+  const sel = useSelectionStore.getState();
+  if (sel.area === "library") sel.setAssetSelection(sel.libraryOrder);
+  else selectAllClips();
+}
+
+/** Remove the media selected in the library, with the clips that use them, as one undoable step. */
+export function removeSelectedMedia() {
+  const sel = useSelectionStore.getState();
+  const existing = new Set(project().assets.map((a) => a.id));
+  const ids = sel.selectedAssetIds.filter((id) => existing.has(id));
+  if (ids.length === 0) return;
+  useProjectStore.getState().removeAssets(ids);
+  sel.setAssetSelection([]);
+  pruneSelection();
+}
+
+/** Delete / Backspace: the selected media when the library is being used, otherwise the selected clips. */
+export function deleteSelection() {
+  if (useSelectionStore.getState().area === "library") removeSelectedMedia();
+  else deleteSelected();
+}
+
 export function undo() {
   useProjectStore.getState().undo();
   pruneSelection();

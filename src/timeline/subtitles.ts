@@ -6,7 +6,8 @@ import { useProjectStore } from "@/store/project";
 import { clipDuration, clipSpeed, findClip } from "./clips";
 import { addClip, addTrack, type EditResult } from "./edit";
 import { setTextFade, TEXT_FONT_LIMITS } from "./text";
-import { withStyle, type StylePreset } from "./textStyles";
+import type { TextStyle } from "@/project/model";
+import { withStyle } from "./textStyles";
 
 /** One stretch of speech; times are seconds from the start of the clip's used source range. */
 export interface SpeechSegment {
@@ -122,7 +123,7 @@ export async function generateSubtitles(
   language: string | null,
   onStage: (stage: string) => void = () => {},
   /** A text style for the subtitles; without one they get the plain subtitle look. */
-  style?: StylePreset,
+  style?: { style: TextStyle; fade?: number },
 ): Promise<SubtitleResult> {
   const before = useProjectStore.getState().project;
   const found = findClip(before, clipId);
