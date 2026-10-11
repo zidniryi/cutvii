@@ -28,7 +28,7 @@
         "img-src": "'self' asset: http://asset.localhost data:",
         "media-src": "'self' asset: http://asset.localhost",
         "font-src": "'self' data:",
-        "connect-src": "ipc: http://ipc.localhost",
+        "connect-src": "ipc: http://ipc.localhost asset: http://asset.localhost",
         "object-src": "'none'",
         "base-uri": "'self'",
         "frame-src": "'none'"
@@ -38,7 +38,8 @@
         "scope": [
           "$APPCACHE/thumbnails/**",
           "$APPCACHE/reverse/**",
-          "$APPCACHE/previews/**"
+          "$APPCACHE/previews/**",
+          "$APPCACHE/waveforms/**"
         ]
       },
       "devCsp": null

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { MonitorPlay } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
-import { fileName, mediaUrl } from "@/lib/media";
+import { assetName, mediaUrl } from "@/lib/media";
 import { setMediaClock, startClock } from "@/playback/controller";
 import {
   layerKey,
@@ -155,7 +155,7 @@ export function Preview() {
   const ratio = width / height;
   const activeErrors = layers
     .filter((l) => l.role === "active" && mediaErrors[l.asset.id])
-    .map((l) => `${fileName(l.asset.path)} ${mediaErrors[l.asset.id]}`);
+    .map((l) => `${assetName(l.asset)} ${mediaErrors[l.asset.id]}`);
   const anyActive = layers.some((l) => l.role === "active");
   const empty = projectDuration(project) === 0;
 
@@ -285,6 +285,22 @@ function LayerView({
     />
   );
 
+  if (asset.type === "image" && asset.text) {
+    // A text picture is the size of the canvas and transparent: it sits over the layers below, with no
+    // background of its own (the export overlays the same file).
+    if (!visible) return null;
+    return (
+      <img
+        src={src}
+        alt=""
+        data-testid="text-layer"
+        onLoad={() => setMediaError(asset.id, null)}
+        onError={() => setMediaError(asset.id, mediaErrorMessage(4))}
+        className="pointer-events-none absolute inset-0 h-full w-full object-contain"
+        style={{ zIndex: track.order }}
+      />
+    );
+  }
   if (asset.type === "image") {
     // Images need no sync; only the visible one is shown.
     if (!visible) return null;

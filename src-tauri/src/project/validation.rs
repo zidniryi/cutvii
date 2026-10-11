@@ -79,6 +79,14 @@ pub fn validate(project: &Project) -> Result<(), Vec<String>> {
                 "assets.{i}.fpsNum/fpsDen: must both be positive whole numbers, or both absent"
             ));
         }
+        if let Some(text) = &a.text {
+            if a.media_type != MediaType::Image {
+                err(format!("assets.{i}.text: only an image asset can be text"));
+            }
+            if let Err(e) = text.validate() {
+                err(format!("assets.{i}.text: {e}"));
+            }
+        }
         if a.duration.is_some_and(|d| d < 0.0) {
             err(format!("assets.{i}.duration: must not be negative"));
         }
@@ -200,7 +208,7 @@ mod tests {
     use super::*;
 
     fn fixture() -> Project {
-        serde_json::from_str(include_str!("../../../fixtures/project-v4.json"))
+        serde_json::from_str(include_str!("../../../fixtures/project-v5.json"))
             .expect("fixture parses")
     }
 
@@ -215,7 +223,7 @@ mod tests {
     #[test]
     fn unknown_fields_are_rejected() {
         let mut v: serde_json::Value =
-            serde_json::from_str(include_str!("../../../fixtures/project-v4.json")).unwrap();
+            serde_json::from_str(include_str!("../../../fixtures/project-v5.json")).unwrap();
         v["extra"] = 1.into();
         assert!(serde_json::from_value::<Project>(v).is_err());
     }

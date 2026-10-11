@@ -1,7 +1,7 @@
 import { useId, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import { Panel } from "@/components/Panel";
-import { fileName } from "@/lib/media";
+import { assetName, fileName } from "@/lib/media";
 import { formatTimecode } from "@/lib/timecode";
 import { cn } from "@/lib/utils";
 import { useProjectStore } from "@/store/project";
@@ -341,6 +341,7 @@ export const TABS_FOR: Record<ClipKind, InspectorTab[]> = {
   audio: ["audio", "speed", "info"],
   image: ["video", "info"], // stills have no sound and no speed
 };
+const TEXT_TABS: InspectorTab[] = ["info"];
 const TAB_LABEL: Record<InspectorTab, string> = {
   video: "Video",
   audio: "Audio",
@@ -396,7 +397,7 @@ function BackgroundRow({
   /** The picture has no transparency (video): in Blur mode nothing behind the blurred copy can show. */
   opaque: boolean;
 }) {
-  const images = useProjectStore((s) => s.project.assets).filter((a) => a.type === "image");
+  const images = useProjectStore((s) => s.project.assets).filter((a) => a.type === "image" && !a.text);
   const missingPaths = useProjectStore((s) => s.missingPaths);
   const current = backgroundOf(clip);
   const [colorDraft, setColorDraft] = useState<string | null>(null);
@@ -610,7 +611,13 @@ function InfoTab({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset; 
       )}
       {asset.duration !== undefined && <Row label="File length">{formatDuration(asset.duration)}</Row>}
       <div className="col-span-2">
-        <Row label="File">{asset.path}</Row>
+        {asset.text ? (
+          <Row label="Text">
+            <span className="whitespace-pre-wrap">{asset.text.content}</span>
+          </Row>
+        ) : (
+          <Row label="File">{asset.path}</Row>
+        )}
       </div>
     </dl>
   );
@@ -619,7 +626,8 @@ function InfoTab({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset; 
 /** Tabs for one clip. The chosen tab is remembered per kind of clip. */
 function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset; fps: number }) {
   const kind: ClipKind = asset.type;
-  const tabs = TABS_FOR[kind];
+  // a text picture has no fit, background, sound or speed: only its facts (the text editor comes next)
+  const tabs = asset.text ? TEXT_TABS : TABS_FOR[kind];
   const remembered = useUiStore((s) => s.inspectorTab[kind]);
   const setTab = useUiStore((s) => s.setInspectorTab);
   const active = remembered && tabs.includes(remembered) ? remembered : tabs[0];
@@ -855,7 +863,7 @@ export function Inspector() {
       <div className="shrink-0 space-y-2 border-b p-3" data-testid="inspector-header">
         <div>
           <p className="truncate text-sm font-medium" title={asset.path}>
-            {fileName(asset.path)}
+            {assetName(asset)}
           </p>
           <p className="text-xs text-text-muted">
             {asset.type[0].toUpperCase() + asset.type.slice(1)} · {track.name}

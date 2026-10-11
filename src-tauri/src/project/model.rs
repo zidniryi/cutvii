@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::media::MediaType;
+use crate::media::text::TextSpec;
 
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -46,6 +47,10 @@ pub struct MediaAsset {
     pub fps_num: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fps_den: Option<u32>,
+    /// Present on a text picture: an image asset drawn by CutVii from these properties. `path` is the
+    /// drawn picture (made again when it is missing), with transparency kept over the tracks below.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<TextSpec>,
 }
 
 /// How a video or image clip is scaled to the canvas. Absent means `Fill`.

@@ -1,5 +1,5 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { fileName } from "@/lib/media";
+import { assetName } from "@/lib/media";
 import type { MediaAsset } from "@/project/model";
 import { useDragDropStore } from "@/store/dragDrop";
 import { useProjectStore } from "@/store/project";
@@ -18,7 +18,7 @@ export function beginAssetDrag(e: ReactPointerEvent, asset: MediaAsset) {
   if ((e.target as HTMLElement).closest("button, input, a")) return; // the card's own buttons keep working
   const startX = e.clientX;
   const startY = e.clientY;
-  const label = fileName(asset.path);
+  const label = assetName(asset);
   let last = { x: startX, y: startY };
   let moved = false;
   let raf = 0;

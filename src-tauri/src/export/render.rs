@@ -662,7 +662,7 @@ mod tests {
     }
     fn project(assets: Vec<Value>, tracks: Vec<Value>) -> Project {
         serde_json::from_value(json!({
-            "id": "p", "name": "t", "schemaVersion": 4,
+            "id": "p", "name": "t", "schemaVersion": 5,
             "createdAt": "2026-01-01T00:00:00.000Z", "modifiedAt": "2026-01-01T00:00:00.000Z",
             "settings": {"width": 640, "height": 360, "fps": 30, "backgroundColor": "#202020"},
             "assets": assets, "tracks": tracks
@@ -896,6 +896,66 @@ mod tests {
             near(px, (32, 32, 32), 14),
             "transparent still over background: {px:?}"
         );
+    }
+
+    #[test]
+    fn text_is_drawn_over_the_video_below_it() {
+        let Some(e) = env("text") else { return };
+        let red = e.red();
+        let spec = crate::media::text::TextSpec {
+            content: "HHHH".into(),
+            font_size: 150.0,
+            color: "#FFFFFF".into(),
+            bold: true,
+            align: Default::default(),
+            x: 0.5,
+            y: 0.5,
+        };
+        let picture = crate::media::text::ensure_text_picture(&e.dir, &spec, 640, 360).unwrap();
+        let mut text = asset("text", &picture.to_string_lossy(), "image", None);
+        text["text"] = serde_json::to_value(&spec).unwrap();
+        let p = project(
+            vec![asset("red", &red, "video", Some(4.0)), text],
+            vec![
+                track(
+                    "v1",
+                    "video",
+                    0,
+                    false,
+                    false,
+                    vec![clip("c1", "red", "v1", 0.0, 0.0, 3.0, 1.0)],
+                ),
+                track(
+                    "v2",
+                    "video",
+                    1,
+                    false,
+                    false,
+                    vec![clip("c2", "text", "v2", 1.0, 0.0, 1.0, 1.0)],
+                ),
+            ],
+        );
+        let out = e.dir.join("text.mp4");
+        let (r, _) = e.export(&p, &opts(Quality::Draft), &out);
+        r.unwrap();
+        assert!(e.decodes_cleanly(&out));
+
+        // while the text shows: the video is still there around it, and the letters are white on top
+        let corner = e.region(&out, 1.5, "80:60:0:0");
+        assert!(
+            near(corner, (255, 0, 0), 60),
+            "video beside the text: {corner:?}"
+        );
+        let middle = e.region(&out, 1.5, "400:90:120:135");
+        assert!(
+            middle.0 > 200 && middle.1 > 60 && middle.2 > 60,
+            "white letters over red: {middle:?}"
+        );
+        // before and after the text clip: only the video
+        for t in [0.5, 2.5] {
+            let middle = e.region(&out, t, "400:90:120:135");
+            assert!(near(middle, (255, 0, 0), 60), "no text at {t}: {middle:?}");
+        }
     }
 
     #[test]

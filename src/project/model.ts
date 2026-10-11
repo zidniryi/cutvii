@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-/** Bump when the on-disk shape changes, and add a migration in `src-tauri/src/project/migrate.rs`. v2: clip speed. v3: fitMode. v4: fitBackground. */
-export const SCHEMA_VERSION = 4;
+/** Bump when the on-disk shape changes, and add a migration in `src-tauri/src/project/migrate.rs`. v2: clip speed. v3: fitMode. v4: fitBackground. v5: text assets. */
+export const SCHEMA_VERSION = 5;
 
 /** Tolerance (seconds) when comparing a clip's sourceOut with the asset duration. */
 const DURATION_EPSILON = 1e-3;
@@ -75,6 +75,28 @@ export const ProjectSettingsSchema = z
     }
   });
 
+/**
+ * Text and titles. The same limits are enforced in Rust (`src-tauri/src/media/text.rs`), which draws the text
+ * onto a transparent picture the size of the canvas.
+ */
+export const TextSpecSchema = z
+  .object({
+    content: z
+      .string()
+      .max(2000, "Text can be 2000 characters at most")
+      .refine((s) => s.trim().length > 0, "Text must not be empty"),
+    /** Height of the font in canvas pixels. */
+    fontSize: z.number().min(8, "Font size must be 8 to 2000").max(2000, "Font size must be 8 to 2000"),
+    color: z.string().regex(/^#[0-9a-fA-F]{6}$/, "must be a #RRGGBB color"),
+    bold: z.boolean().optional(),
+    /** Absent means "center". */
+    align: z.enum(["left", "center", "right"]).optional(),
+    /** Centre of the text block as a share of the canvas (0.5, 0.5 = the middle). */
+    x: z.number().min(0).max(1),
+    y: z.number().min(0).max(1),
+  })
+  .strict();
+
 export const MediaAssetSchema = z
   .object({
     id: Id,
@@ -85,8 +107,14 @@ export const MediaAssetSchema = z
     height: z.number().int().positive().optional(),
     thumbnailPath: z.string().min(1).optional(),
     ...rationalParts,
+    /** A text picture drawn by CutVii from these properties; `path` is the drawn picture. Images only. */
+    text: TextSpecSchema.optional(),
   })
   .strict()
+  .refine((a) => a.text === undefined || a.type === "image", {
+    message: "only an image asset can be text",
+    path: ["text"],
+  })
   .refine((a) => (a.fpsNum === undefined) === (a.fpsDen === undefined), {
     message: "fpsNum and fpsDen must be given together",
     path: ["fpsNum"],
@@ -217,6 +245,7 @@ export const ProjectSchema = z
     });
   });
 
+export type TextSpec = z.infer<typeof TextSpecSchema>;
 export type FitBackground = z.infer<typeof FitBackgroundSchema>;
 export type FitMode = NonNullable<z.infer<typeof TimelineClipSchema>["fitMode"]>;
 export type MediaType = z.infer<typeof MediaTypeSchema>;

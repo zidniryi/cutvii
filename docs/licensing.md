@@ -63,7 +63,7 @@ Direct dependencies: `react`, `react-dom`, `zustand`, `zod`, `lucide-react`, `@b
 `class-variance-authority`, `clsx`, `tailwind-merge`, `tw-animate-css`, `@tauri-apps/api`.
 Tailwind and the Vite plugin are build tools only (they pull in `lightningcss`, MPL-2.0, which is not shipped).
 
-### Rust (421 crates in the build graph)
+### Rust (448 crates in the build graph)
 
 Almost entirely permissive: MIT, Apache-2.0, `MIT OR Apache-2.0`, Unicode-3.0, Zlib, Unlicense, BSD-3-Clause.
 No GPL/LGPL/AGPL crates.
@@ -76,4 +76,8 @@ No GPL/LGPL/AGPL crates.
 
 - The app icon (`design/app-icon.png`) and in-app logo are original artwork for this project; no third-party logo or
   mascot is used. The default Tauri icon set was replaced.
-- Fonts: system font stack only, nothing bundled.
+- Fonts: the UI uses the system font stack. Text and titles are drawn with **Noto Sans** Regular and Bold
+  (`src-tauri/assets/fonts/`, Copyright 2022 The Noto Project Authors), compiled into the app under the
+  **SIL Open Font License 1.1** (`src-tauri/assets/fonts/OFL.txt`). The OFL allows bundling and redistribution;
+  ship the licence text with any distributed build and do not sell the fonts on their own. Text drawing uses
+  `cosmic-text` (MIT OR Apache-2.0) and `png` (MIT OR Apache-2.0).

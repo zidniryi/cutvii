@@ -31,6 +31,8 @@ pub fn run() {
             commands::clip_tools::prepare_reverse_preview,
             commands::clip_tools::extract_freeze_frame,
             commands::clip_tools::prepare_image_preview,
+            commands::clip_tools::prepare_waveform,
+            commands::clip_tools::render_text,
             commands::media::import_media,
             commands::media::relink_media,
             commands::media::pick_image,

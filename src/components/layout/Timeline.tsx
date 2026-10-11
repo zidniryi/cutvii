@@ -6,6 +6,7 @@ import {
   Maximize2,
   Scissors,
   Trash2,
+  Type,
   Volume2,
   VolumeX,
   ZoomIn,
@@ -16,7 +17,7 @@ import { ContextMenu, type MenuState } from "@/components/timeline/ContextMenu";
 import { Ruler } from "@/components/timeline/Ruler";
 import { IconButton } from "@/components/IconButton";
 import { Panel } from "@/components/Panel";
-import { fileName } from "@/lib/media";
+import { assetName } from "@/lib/media";
 import { cn } from "@/lib/utils";
 import { useDragDropStore } from "@/store/dragDrop";
 import { usePlaybackStore } from "@/store/playback";
@@ -24,7 +25,7 @@ import { useProjectStore } from "@/store/project";
 import { useSelectionStore } from "@/store/selection";
 import { useTimelineViewStore } from "@/store/timelineView";
 import { useUiStore } from "@/store/ui";
-import { projectDuration } from "@/timeline/clips";
+import { clipDuration, projectDuration } from "@/timeline/clips";
 import { copySelected, cutSelected } from "@/timeline/clipboard";
 import { freezeFrameAtPlayhead } from "@/timeline/freeze";
 import { deleteSelected, report, splitAtPlayhead, toggleTrackFlag } from "@/timeline/editor";
@@ -37,6 +38,8 @@ import {
   visibleClips,
   xToTime,
 } from "@/timeline/geometry";
+import { addTextAtPlayhead } from "@/timeline/text";
+import { waveWindow } from "@/timeline/waveform";
 import { canZoomIn, canZoomOut, zoomPercent } from "@/timeline/zoom";
 import { zoomStep, zoomToFit } from "@/timeline/zoomController";
 import { useTimelineDrag } from "@/timeline/useTimelineDrag";
@@ -169,6 +172,7 @@ export function Timeline() {
               {notice}
             </span>
           )}
+          <IconButton label="Add text at playhead" icon={<Type />} onClick={() => void addTextAtPlayhead()} />
           <IconButton
             label="Split at playhead (S)"
             icon={<Scissors />}
@@ -280,15 +284,28 @@ export function Timeline() {
                 >
                   {visibleClips(track.clips, from, to).map((clip) => {
                     const asset = assets.get(clip.assetId);
+                    const hasWave = asset && asset.type !== "image" && !missing.has(asset.path);
+                    const wave = hasWave
+                      ? waveWindow(
+                          timeToX(clip.timelineStart, pps),
+                          timeToX(clipDuration(clip), pps),
+                          viewport.left - BUFFER_PX,
+                          viewport.left + vw + BUFFER_PX,
+                        )
+                      : null;
                     return (
                       <ClipView
                         key={clip.id}
                         clip={clip}
-                        name={asset ? fileName(asset.path) : "Missing media"}
+                        name={asset ? assetName(asset) : "Missing media"}
                         type={asset?.type ?? "video"}
                         pps={pps}
                         selected={selected.has(clip.id)}
                         missing={asset ? missing.has(asset.path) : true}
+                        wavePath={wave ? asset?.path : undefined}
+                        waveFrom={wave?.from}
+                        waveTo={wave?.to}
+                        muted={track.muted}
                         onBodyPointerDown={onBodyPointerDown}
                         onTrimPointerDown={onTrimPointerDown}
                         onContextMenu={onContextMenu}

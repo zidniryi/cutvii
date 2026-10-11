@@ -9,8 +9,11 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::errors::{AppError, AppResult};
+use crate::media::MediaBackend;
 use crate::media::ffmpeg::FfmpegBackend;
 use crate::media::import::{ImportedMedia, cache_key, import_one};
+use crate::media::text::{TextSpec, ensure_text_picture};
+use crate::media::waveform::{FORMAT_VERSION, write_waveform};
 
 pub const REVERSE_PROGRESS_EVENT: &str = "reverse-progress";
 
@@ -165,6 +168,60 @@ pub async fn prepare_image_preview(app: AppHandle, path: String) -> AppResult<St
     .await
     .map_err(|e| AppError::InvalidInput(format!("image preview task failed: {e}")))??;
     Ok(result.to_string_lossy().into_owned())
+}
+
+/// Build (or reuse) the waveform peaks of an imported file and return the cached file's path, or `None`
+/// when the file has no audio. The webview loads the peaks through the asset protocol.
+#[tauri::command]
+pub async fn prepare_waveform(app: AppHandle, path: String) -> AppResult<Option<String>> {
+    let src = allowed_source(&app, &path)?;
+    let dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| AppError::InvalidInput(format!("no cache directory: {e}")))?
+        .join("waveforms");
+    let out = dir.join(format!(
+        "{}.wf",
+        derived_key(&src, &format!("waveform-v{FORMAT_VERSION}"))?
+    ));
+    if out.is_file() {
+        return Ok(Some(out.to_string_lossy().into_owned()));
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let backend = FfmpegBackend::locate()?;
+        if !backend.has_audio(&src)? {
+            return Ok(None);
+        }
+        write_waveform(backend.audio_peaks(&src)?, &out)?;
+        Ok(Some(out.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(|e| AppError::InvalidInput(format!("waveform task failed: {e}")))?
+}
+
+/// Draw (or reuse) the picture of a text block on a `width` x `height` canvas and return its path. The
+/// picture lives in the app data folder and is made preview-readable; the same file is used by the export.
+#[tauri::command]
+pub async fn render_text(
+    app: AppHandle,
+    spec: TextSpec,
+    width: u32,
+    height: u32,
+) -> AppResult<String> {
+    let data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::InvalidInput(format!("no data directory: {e}")))?;
+    let scope = app.asset_protocol_scope();
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = ensure_text_picture(&data, &spec, width, height)?;
+        scope.allow_file(&out).map_err(|e| {
+            AppError::InvalidInput(format!("could not enable preview for the text: {e}"))
+        })?;
+        Ok(out.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| AppError::InvalidInput(format!("text task failed: {e}")))?
 }
 
 #[cfg(test)]

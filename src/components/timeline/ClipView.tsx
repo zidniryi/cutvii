@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { Film, Image as ImageIcon, Music } from "lucide-react";
+import { ClipWaveform } from "@/components/timeline/ClipWaveform";
 import type { MediaType, TimelineClip } from "@/project/model";
 import { clipDuration } from "@/timeline/clips";
 import { timeToX } from "@/timeline/geometry";
@@ -20,6 +21,12 @@ interface Props {
   selected: boolean;
   /** Source file not found: drawn dashed/dim so it is obvious before playback fails. */
   missing?: boolean;
+  /** File whose audio is drawn in the clip, with the slice (px from the clip's left edge) in view. */
+  wavePath?: string;
+  waveFrom?: number;
+  waveTo?: number;
+  /** The clip's track is muted. */
+  muted?: boolean;
   onBodyPointerDown: (e: React.PointerEvent, clip: TimelineClip) => void;
   onTrimPointerDown: (e: React.PointerEvent, clip: TimelineClip, edge: "start" | "end") => void;
   onContextMenu: (e: React.MouseEvent, clip: TimelineClip) => void;
@@ -34,6 +41,10 @@ export const ClipView = memo(function ClipView({
   pps,
   selected,
   missing = false,
+  wavePath,
+  waveFrom = 0,
+  waveTo = 0,
+  muted = false,
   onBodyPointerDown,
   onTrimPointerDown,
   onContextMenu,
@@ -76,8 +87,11 @@ export const ClipView = memo(function ClipView({
           onTrimPointerDown(e, clip, "start");
         }}
       />
-      <Icon className="size-3.5 shrink-0 opacity-80" />
-      <span className="truncate">{name}</span>
+      {wavePath && waveTo > waveFrom && (
+        <ClipWaveform path={wavePath} clip={clip} pps={pps} from={waveFrom} to={waveTo} muted={muted} />
+      )}
+      <Icon className="relative size-3.5 shrink-0 opacity-80" />
+      <span className="relative truncate">{name}</span>
       <div
         data-testid="trim-end"
         className={cn(handle, "right-0")}

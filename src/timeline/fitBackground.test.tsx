@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import fixtureV3 from "../../fixtures/project-v3.json";
-import fixtureV4 from "../../fixtures/project-v4.json";
+import fixtureV4 from "../../fixtures/project-v5.json";
 import App from "@/App";
 import { createProject } from "@/project/factory";
 import { SCHEMA_VERSION, type Project } from "@/project/model";
@@ -61,8 +61,8 @@ beforeEach(() => {
 });
 
 describe("fitBackground: model and rules", () => {
-  it("defaults to black with blur 30, and is schema version 4", () => {
-    expect(SCHEMA_VERSION).toBe(4);
+  it("defaults to black with blur 30, and is schema version 5", () => {
+    expect(SCHEMA_VERSION).toBe(5);
     expect(backgroundOf({})).toEqual({ kind: "black", blur: 30 });
     expect(backgroundColor({ kind: "black" })).toBe("#000000");
     expect(backgroundColor({ kind: "color", color: "#123456" })).toBe("#123456");

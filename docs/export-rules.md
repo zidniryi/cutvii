@@ -12,6 +12,10 @@ Source of truth: `src-tauri/src/export/` (`plan.rs` builds the plan and FFmpeg f
   with bars in the background colour; **blur-bg** shows the whole picture over a blurred, covering copy of itself
   (blur sigma = 3 % of the canvas height). The preview uses the same geometry (`src/timeline/fit.ts`).
 - Stills are looped for the clip length; transparency is flattened onto the background.
+- **Text** is the exception to both rules above: a text picture keeps its transparency and is laid over whatever
+  the tracks below show, with no background of its own (`fitMode` and `fitBackground` do not apply to it). It is
+  scaled to fit the export size and centred. The preview shows the same file the export overlays, and shows every
+  text layer down to the first video or image under it.
 - Gaps show the background colour.
 - `hidden` tracks give no picture. `x`, `y`, `scale`, `opacity` are not applied yet (not in the preview either).
 

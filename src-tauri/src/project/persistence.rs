@@ -8,6 +8,7 @@ use super::migrate::migrate_to_current;
 use super::model::Project;
 use super::validation::validate;
 use crate::errors::{AppError, AppResult};
+use crate::media::text::ensure_text_picture;
 
 pub const FILE_EXTENSION: &str = "cutvii";
 /// Refuse absurdly large files instead of loading them into memory.
@@ -87,6 +88,23 @@ pub fn missing_paths(project: &Project) -> Vec<String> {
         .filter(|a| !Path::new(&a.path).is_file())
         .map(|a| a.path.clone())
         .collect()
+}
+
+/// Text pictures are drawn by CutVii, so a missing one (data folder cleared, project moved to another
+/// machine) is not missing media: it is drawn again into `data_dir` and the asset points at the new file.
+pub fn restore_text_pictures(project: &mut Project, data_dir: &Path) {
+    let (width, height) = (project.settings.width, project.settings.height);
+    for asset in &mut project.assets {
+        let Some(spec) = &asset.text else { continue };
+        if Path::new(&asset.path).is_file() {
+            continue;
+        }
+        if let Ok(picture) = ensure_text_picture(data_dir, spec, width, height) {
+            asset.path = picture.to_string_lossy().into_owned();
+            asset.width = Some(width);
+            asset.height = Some(height);
+        }
+    }
 }
 
 /// Cached thumbnails can disappear (cache cleared); drop dangling references so the UI falls back to an icon.
@@ -178,6 +196,60 @@ mod tests {
                 .to_string()
                 .contains("bogus")
         );
+    }
+
+    #[test]
+    fn missing_text_pictures_are_drawn_again_instead_of_reported_missing() {
+        let dir = temp_dir("text");
+        let mut p = parse_project_json(FIXTURE).unwrap();
+        p.assets[2].text = Some(crate::media::text::TextSpec {
+            content: "Title".into(),
+            font_size: 64.0,
+            color: "#FFFFFF".into(),
+            bold: false,
+            align: Default::default(),
+            x: 0.5,
+            y: 0.5,
+        });
+        p.assets[2].path = "/another/machine/text/abc.png".into();
+        assert!(validate(&p).is_ok());
+        assert!(missing_paths(&p).contains(&p.assets[2].path));
+
+        restore_text_pictures(&mut p, &dir);
+        let picture = PathBuf::from(&p.assets[2].path);
+        assert!(picture.starts_with(dir.join("text")) && picture.is_file());
+        assert_eq!(
+            (p.assets[2].width, p.assets[2].height),
+            (Some(p.settings.width), Some(p.settings.height))
+        );
+        assert!(!missing_paths(&p).contains(&p.assets[2].path));
+        // other missing media is untouched, and an existing picture is kept as it is
+        assert_eq!(p.assets[1].path, "/media/music.mp3");
+        let before = p.clone();
+        restore_text_pictures(&mut p, &dir.join("elsewhere"));
+        assert_eq!(p, before);
+
+        // text survives a save and reopen; it is only allowed on images, with valid properties
+        let file = dir.join("p.cutvii");
+        write_project_atomic(&file, &p).unwrap();
+        assert_eq!(read_project(&file).unwrap(), p);
+        let mut bad = p.clone();
+        bad.assets[0].text = bad.assets[2].text.clone();
+        assert!(
+            validate(&bad)
+                .unwrap_err()
+                .join(";")
+                .contains("only an image asset can be text")
+        );
+        let mut bad = p.clone();
+        bad.assets[2].text.as_mut().unwrap().font_size = 1.0;
+        assert!(
+            validate(&bad)
+                .unwrap_err()
+                .join(";")
+                .contains("assets.2.text")
+        );
+        fs::remove_dir_all(dir).ok();
     }
 
     #[test]

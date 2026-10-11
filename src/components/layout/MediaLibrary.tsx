@@ -16,7 +16,7 @@ import {
 import { IconButton } from "@/components/IconButton";
 import { EmptyState, Panel } from "@/components/Panel";
 import { importIntoProject, type ImportSummary } from "@/lib/importFlow";
-import { fileName, thumbnailUrl } from "@/lib/media";
+import { assetName, thumbnailUrl } from "@/lib/media";
 import { formatDuration } from "@/lib/timecode";
 import { cn } from "@/lib/utils";
 import { relinkFlow } from "@/project/fileActions";
@@ -52,8 +52,11 @@ function AssetRow({
   onRemove: () => void;
 }) {
   const Icon = TYPE_ICON[asset.type];
-  const name = fileName(asset.path);
-  const meta = [TYPE_LABEL[asset.type], asset.duration !== undefined ? formatDuration(asset.duration) : null]
+  const name = assetName(asset);
+  const meta = [
+    asset.text ? "Text" : TYPE_LABEL[asset.type],
+    asset.duration !== undefined ? formatDuration(asset.duration) : null,
+  ]
     .filter(Boolean)
     .join(" · ");
   return (
@@ -160,7 +163,7 @@ export function MediaLibrary() {
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return q ? assets.filter((a) => fileName(a.path).toLowerCase().includes(q)) : assets;
+    return q ? assets.filter((a) => assetName(a).toLowerCase().includes(q)) : assets;
   }, [assets, query]);
 
   async function onImport() {

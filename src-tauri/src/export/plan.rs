@@ -39,6 +39,8 @@ pub struct PlannedClip {
     pub bg_image: Option<PathBuf>,
     /// Blur amount 0..=100 for `blur-bg` (30 = a radius of 3 % of the canvas height).
     pub blur_amount: f64,
+    /// A text picture: drawn over the tracks below with its transparency kept, never on a background.
+    pub transparent: bool,
     /// Contributes picture (on a visible video track, not an audio asset).
     pub video: bool,
     /// Contributes sound (track not muted, asset has audio).
@@ -201,6 +203,7 @@ pub fn build_plan(
                     .as_ref()
                     .and_then(|b| b.blur)
                     .unwrap_or(DEFAULT_BLUR_AMOUNT),
+                transparent: asset.text.is_some(),
                 video,
                 audio,
             });
@@ -320,7 +323,8 @@ pub fn build_filter_graph(plan: &ExportPlan) -> FilterGraph {
     if !plan.format.is_audio() {
         let mut next = plan.clips.len();
         for (i, clip) in plan.clips.iter().enumerate().filter(|(_, c)| c.video) {
-            let needs_base = clip.media_type == MediaType::Image || clip.fit == FitMode::Fit;
+            let needs_base = !clip.transparent
+                && (clip.media_type == MediaType::Image || clip.fit == FitMode::Fit);
             if let (true, Some(image)) = (needs_base, &clip.bg_image) {
                 input_args.extend(
                     ["-loop", "1", "-framerate"]
@@ -380,6 +384,10 @@ pub fn build_filter_graph(plan: &ExportPlan) -> FilterGraph {
             let finish = format!("format=yuv420p,setsar=1,{shift}[c{i}]");
 
             match (still, clip.fit) {
+                // text: the whole picture, centred, with its transparency kept so the tracks below show
+                _ if clip.transparent => parts.push(format!(
+                    "{source},{contain},pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black@0,setsar=1,{shift}[c{i}]"
+                )),
                 // video, whole picture, plain colour bars: a pad is enough
                 (false, FitMode::Fit) if bg_inputs[i].is_none() => parts.push(format!(
                     "{source},{contain},pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color={clip_bg},setsar=1,format=yuv420p,{shift}[c{i}]"
@@ -476,7 +484,7 @@ mod tests {
 
     pub fn project(assets: serde_json::Value, tracks: serde_json::Value) -> Project {
         serde_json::from_value(json!({
-            "id": "p", "name": "t", "schemaVersion": 4,
+            "id": "p", "name": "t", "schemaVersion": 5,
             "createdAt": "2026-01-01T00:00:00.000Z", "modifiedAt": "2026-01-01T00:00:00.000Z",
             "settings": {"width": 1280, "height": 720, "fps": 30, "backgroundColor": "#102030"},
             "assets": assets, "tracks": tracks
@@ -685,6 +693,55 @@ mod tests {
         assert!(s.contains(
             "[a0][a1][a2]amix=inputs=3:normalize=0:duration=first:dropout_transition=0[aout]"
         ));
+    }
+
+    #[test]
+    fn text_pictures_keep_their_transparency_over_the_tracks_below() {
+        let mut p = sample();
+        p.assets[1].text = Some(crate::media::text::TextSpec {
+            content: "Title".into(),
+            font_size: 48.0,
+            color: "#FFFFFF".into(),
+            bold: false,
+            align: Default::default(),
+            x: 0.5,
+            y: 0.5,
+        });
+        // even with an image background chosen, a text picture gets no base under it
+        p.assets.push(
+            serde_json::from_value(json!({"id": "bg", "path": "/m/bg.png", "type": "image"}))
+                .unwrap(),
+        );
+        p.tracks[1].clips[0].fit_background = Some(crate::project::FitBackground {
+            kind: BackgroundKind::Image,
+            asset_id: Some("bg".into()),
+            ..Default::default()
+        });
+        let mut facts = sample_facts();
+        facts.insert(
+            "/m/bg.png".into(),
+            AssetFacts {
+                exists: true,
+                has_audio: false,
+            },
+        );
+        let plan = build_plan(&p, &opts(), &facts).unwrap();
+        assert!(plan.clips[1].transparent && !plan.clips[0].transparent);
+        let g = build_filter_graph(&plan);
+        assert!(
+            g.graph.contains(
+                "[1:v]format=rgba,scale=640:360:force_original_aspect_ratio=decrease,\
+                 pad=640:360:(ow-iw)/2:(oh-ih)/2:color=black@0,setsar=1,setpts=PTS-STARTPTS+3.000000/TB[c1]"
+            ),
+            "{}",
+            g.graph
+        );
+        assert!(!g.graph.contains("[g1]"), "no background under text");
+        assert!(!g.input_args.join(" ").contains("/m/bg.png"));
+        assert!(
+            g.graph
+                .contains("[v1][c1]overlay=eof_action=pass:repeatlast=0[v2]")
+        );
     }
 
     #[test]

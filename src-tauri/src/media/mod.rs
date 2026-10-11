@@ -10,7 +10,9 @@ pub mod ffmpeg;
 pub mod import;
 pub mod probe;
 pub mod reverse;
+pub mod text;
 pub mod tools;
+pub mod waveform;
 
 use crate::errors::AppResult;
 use crate::export::ExportReport;
@@ -65,6 +67,8 @@ pub trait MediaBackend: Send + Sync {
     ) -> AppResult<()>;
     /// Whether the file contains at least one audio stream.
     fn has_audio(&self, path: &Path) -> AppResult<bool>;
+    /// Loudness peaks of the first audio stream (0..=255, `waveform::BASE_PEAKS_PER_SECOND` per second).
+    fn audio_peaks(&self, path: &Path) -> AppResult<Vec<u8>>;
     /// Render `request`. `progress` receives 0.0..=1.0; set `cancel` to stop early (the output is untouched).
     fn render(
         &self,

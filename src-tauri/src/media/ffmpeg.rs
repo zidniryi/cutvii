@@ -8,6 +8,7 @@ use super::probe::{
 };
 use super::reverse::{ReverseProfile, SourceShape, extract_frame, reverse_range};
 use super::tools::{FFMPEG_ENV, FFPROBE_ENV, command, locate_tool};
+use super::waveform::read_peaks;
 use super::{MediaBackend, MediaInfo, RenderRequest};
 use crate::errors::{AppError, AppResult};
 use crate::export::ExportFormat;
@@ -316,6 +317,11 @@ impl MediaBackend for FfmpegBackend {
             )));
         }
         Ok(parse_stream_summary(&String::from_utf8_lossy(&out.stdout))?.has_audio)
+    }
+
+    fn audio_peaks(&self, path: &Path) -> AppResult<Vec<u8>> {
+        require_file(path)?;
+        read_peaks(&self.ffmpeg, path)
     }
 
     fn render(

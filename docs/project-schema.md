@@ -1,4 +1,4 @@
-# CutVii project file (schemaVersion 4)
+# CutVii project file (schemaVersion 5)
 
 Plain JSON. Source of truth: `src/project/model.ts` (Zod) and `src-tauri/src/project/` (serde + `validate`).
 Both are tested against `fixtures/project-v1.json`; change the fixture and both test suites together.
@@ -12,7 +12,19 @@ Both are tested against `fixtures/project-v1.json`; change the fixture and both 
 | `tracks[]`                 | `id`, `name`, `type` (`video`/`audio`), `order`, `muted`, `hidden`, `clips[]`.                                                                                                                                                                                                                                                                                                                                                      |
 | `clips[]`                  | `id`, `assetId`, `trackId`, `timelineStart`, `sourceIn`, `sourceOut` (seconds), `volume` (0–2), `x`, `y`, `scale` (>0), `opacity` (0–1); optional `fitBackground` (`kind`: `black`/`color`/`image`, `color`, `assetId`, `blur` 0–100), `fitMode` (`fill` default, `fit`, `blur-bg`; video and stills), `reversed`, `speed` (0.1–10, default 1), `keepPitch` (default true). Timeline length = (`sourceOut` − `sourceIn`) / `speed`. |
 
+## Text (schemaVersion 5)
+
+A text clip is an ordinary clip whose asset is an `image` with an extra `text` object: `content` (1–2000
+characters, line breaks kept), `fontSize` (8–2000, in canvas pixels), `color` (`#RRGGBB`), optional `bold`,
+optional `align` (`left` / `center` default / `right`), and `x`, `y` (centre of the text block as a share of the
+canvas, 0–1). The asset's `path` is the picture CutVii drew from those properties: a transparent PNG the size of
+the canvas, kept in the app data folder. If that file is gone when the project is opened (another machine, data
+folder cleared) it is drawn again and is not reported as missing media. Migration from v4 changes nothing but the
+version number.
+
 ## Rules enforced on load
+
+- `text` is only allowed on `image` assets, and its values must be inside the limits above.
 
 - Unknown fields are rejected.
 - Ids are unique per kind; `clip.trackId` equals its containing track; `clip.assetId` exists.

@@ -162,8 +162,8 @@ Android is done only after Phase 8 is verified on a real device or emulator.
 This file is the original spec plus sections 6j and 12. The user pasted newer spec sections (6c–6n) in chat only;
 they are **not** in this file. If a section is missing here, ask the user to paste it again rather than guessing.
 
-**Last green run (macOS):** Vitest 343 passed (39 files), Cargo 74 passed, typecheck/lint/prettier/clippy/rustfmt
-clean. Project schema is **v4** (`fixtures/project-v1..v4.json`, Rust migration chain in `project/migrate.rs`).
+**Last green run (macOS):** Vitest 361 passed (41 files), Cargo 88 passed, typecheck/lint/prettier/clippy/rustfmt
+clean. Project schema is **v5** (`fixtures/project-v1..v5.json`, Rust migration chain in `project/migrate.rs`).
 
 ### Done
 - Phases 0–7a: foundation, project + media import, timeline editing, preview, save/open, export, polish.
@@ -176,26 +176,48 @@ clean. Project schema is **v4** (`fixtures/project-v1..v4.json`, Rust migration 
   "Apply to all clips"). Preview and export both apply them.
 - Preview transport bar (seek, volume, loop, preview speed); media-master clock with audio leading.
 - Inspector tabs (Video / Audio / Speed / Info).
+- Timeline waveforms (6m, built from the one-line summary; the full 6m text was never pasted): peaks in Rust
+  (`media/waveform.rs`, 4 levels, cached in `$APPCACHE/waveforms` by path/size/mtime), `prepare_waveform`
+  command, frontend queue (limit 2) for visible clips, canvas per clip drawn as 2px bars every 3px (the user
+  asked for bars, not a filled shape; trim/speed/reverse/volume, muted = faint), flat line while loading. Peaks
+  are fetched over the asset protocol (`connect-src` now allows `asset:`). Seen working on 2026-10-11 in a macOS
+  debug build with the real CSP (three generated files loaded by a temporary hook, since removed).
+- Text 6e-1 spike: approved **option A** (Rust draws text to a transparent canvas-sized PNG; preview shows it,
+  export overlays the same file). Reason: this FFmpeg has no `drawtext`/`subtitles` filter.
+- Text step 1 of 3 (backend only, no UI): `media/text.rs` (`TextSpec` = content, fontSize, color, bold, align,
+  x, y; `cosmic-text` + bundled Noto Sans, OFL), `render_text` command caching PNGs in `$APPDATA/text`.
+- Text step 2 of 3: schema v5 (`MediaAsset.text` on image assets, no-op migration), "Add text at playhead"
+  button in the timeline toolbar (`src/timeline/text.ts`; top video track if free, else a new track above),
+  text keeps its transparency in preview (`layersAt` shows every text layer down to the first opaque picture)
+  and in export (`PlannedClip.transparent`), missing text pictures are redrawn on open, inspector shows only
+  Info for text clips.
 - Export: MP4, plus audio-only M4A / MP3 / WAV; "Show in folder"; File menu (New/Open/Save), About tagline.
 
 ### Not done (queue, in the user's approved order unless they say otherwise)
-1. Timeline waveforms (6m): multi-level peaks in Rust via FFmpeg, cache by (path, size, mtime), background queue
-   (limit 2) for visible clips, canvas drawing, respects trim/speed/reverse/volume/mute, flat placeholder.
-2. Text & titles: spike 6e-1 first and **wait for approval**, then 6e-2, 6e-3. No large buffers over IPC.
-3. Crop & reframe 6f-1, 6f-2.
-4. Inspector roadmap (section 6j): transform, audio fades/detach, codec info, colour, etc.
-5. Upscale 6c-1..3: **needs the user's go-ahead first**. PyTorch CPU-only in a virtual environment outside the
+1. Text & titles, remaining (the 6e text was never pasted; this split is Claude's):
+   - Step 3: inspector editor (content, size, colour, bold, align, position), debounced re-render. Must also:
+     give a split text clip its own asset before editing (split halves share one asset), and redraw text
+     pictures when the canvas size changes (today they are only scaled to fit).
+   - Open questions the user has not answered: bundling a font was Claude's choice; outline/shadow are not built.
+2. Crop & reframe 6f-1, 6f-2.
+3. Inspector roadmap (section 6j): transform, audio fades/detach, codec info, colour, etc.
+4. Upscale 6c-1..3: **needs the user's go-ahead first**. PyTorch CPU-only in a virtual environment outside the
    project; check free disk space first. Never bundle models; download only after explicit consent.
-6. Auto subtitles 6g (Whisper): after text. Model download only with consent; never bundle; never download
+5. Auto subtitles 6g (Whisper): after text. Model download only with consent; never bundle; never download
    models in automated tests.
-7. Audio clean-up & ducking 6i-1..3.
-8. Phase 7b leftovers: launch the packaged `.app`, check CSP and icon at runtime. Phase 8 Android.
+6. Audio clean-up & ducking 6i-1..3.
+7. Phase 7b leftovers: launch the packaged `.app`, check CSP and icon at runtime. Phase 8 Android.
 
 ### Never verified live (tests pass, nobody has looked at it in the running app)
 - Finder drag-and-drop after the `on_window_event` fix; music stutter after the audio-leads fix (user was asked,
   no answer yet).
 - Pinch / ctrl-wheel zoom, ⌘X/C/V, speed / reverse / freeze UI, fit modes and backgrounds on screen, transport
   bar, inspector tabs, MP3 export from the dialog.
+- Timeline waveforms on trimmed, sped-up, reversed or muted clips, and while scrolling/zooming a long clip
+  (only whole, untouched clips were looked at).
+- Text over video in the preview: the text itself was seen in a macOS debug build, but the window was hidden
+  behind other windows, where WebKit paints no video, so text *over a video frame* was not seen. The export of
+  text over video is covered by a real FFmpeg test.
 - Packaged `.app` never launched. Windows and Linux never built or run.
 
 ### Working notes

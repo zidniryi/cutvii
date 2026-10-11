@@ -54,6 +54,15 @@ pub async fn open_project(
             .await
             .map_err(|e| AppError::InvalidInput(format!("open failed: {e}")))??;
 
+    // text pictures that are gone are drawn again before anything is reported missing
+    if let Ok(data) = app.path().app_data_dir() {
+        project = tauri::async_runtime::spawn_blocking(move || {
+            persistence::restore_text_pictures(&mut project, &data);
+            project
+        })
+        .await
+        .map_err(|e| AppError::InvalidInput(format!("open failed: {e}")))?;
+    }
     let missing_paths = persistence::missing_paths(&project);
     persistence::drop_stale_thumbnails(&mut project);
 

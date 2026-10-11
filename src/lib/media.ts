@@ -1,5 +1,5 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import type { MediaType } from "@/project/model";
+import type { MediaAsset, MediaType } from "@/project/model";
 
 /** Shape returned by the Rust `import_media` command (optional fields are omitted, never null). */
 export interface ImportedMedia {
@@ -41,4 +41,9 @@ export function mediaUrl(path: string): string {
 
 export function fileName(path: string): string {
   return path.split(/[\\/]/).pop() || path;
+}
+
+/** What to call an asset in the UI: the file name, or the first line of a text picture's text. */
+export function assetName(asset: Pick<MediaAsset, "path" | "text">): string {
+  return asset.text ? asset.text.content.trim().split("\n")[0] : fileName(asset.path);
 }

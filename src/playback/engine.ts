@@ -20,7 +20,10 @@ export interface Layer {
   track: TimelineTrack;
   asset: MediaAsset;
   role: "active" | "upcoming";
-  /** Exactly one active, non-hidden video/image layer is visible: the one on the highest track. */
+  /**
+   * Visible picture layers, from the top track down: every text picture (they are transparent) and the first
+   * video or image under them. Whatever lies below that one is covered.
+   */
   visible: boolean;
 }
 
@@ -39,12 +42,16 @@ export function layersAt(project: Project, t: number, horizon = PRELOAD_SECONDS)
     }
   }
 
-  const top = layers
-    .filter(
-      (l) => l.role === "active" && l.track.type === "video" && !l.track.hidden && l.asset.type !== "audio",
-    )
-    .at(-1); // layers are in ascending track order, so the last one is on top
-  return layers.map((l) => (l === top ? { ...l, visible: true } : l));
+  const pictures = layers.filter(
+    (l) => l.role === "active" && l.track.type === "video" && !l.track.hidden && l.asset.type !== "audio",
+  );
+  // layers are in ascending track order, so walk from the end (the top) down to the first opaque picture
+  const shown = new Set<Layer>();
+  for (let i = pictures.length - 1; i >= 0; i--) {
+    shown.add(pictures[i]);
+    if (!pictures[i].asset.text) break;
+  }
+  return layers.map((l) => (shown.has(l) ? { ...l, visible: true } : l));
 }
 
 /** Position inside the source file for timeline time t, clamped to the clip's used range. */
