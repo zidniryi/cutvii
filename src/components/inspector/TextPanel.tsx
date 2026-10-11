@@ -1,5 +1,5 @@
 import { ClipPosition } from "@/components/text/PositionControl";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AlignCenter, AlignLeft, AlignRight, Bold } from "lucide-react";
 import { FontPicker } from "@/components/inspector/FontPicker";
 import type { TextSpec } from "@/project/model";
@@ -33,10 +33,13 @@ export function TextPanel({
   spec,
   /** Seconds the clip fades in and out over (0 for none). */
   fade = 0,
+  styles,
 }: {
   clipId: string;
   spec: TextSpec;
   fade?: number;
+  /** The styles gallery, shown right under the words. */
+  styles?: ReactNode;
 }) {
   const [fadeDraft, setFadeDraft] = useState<string | null>(null);
   function commitFade() {
@@ -133,6 +136,7 @@ export function TextPanel({
           {problem}
         </p>
       )}
+      {styles}
 
       <div>
         <p className="mb-1 text-xs text-text-muted">Font</p>

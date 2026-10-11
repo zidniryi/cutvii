@@ -757,14 +757,12 @@ function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset;
           />
         )}
         {active === "text" && asset.text && (
-          <StyleGallery key={`${clip.id}-styles`} clipId={clip.id} spec={asset.text} />
-        )}
-        {active === "text" && asset.text && (
           <TextPanel
             key={`${clip.id}-text`}
             clipId={clip.id}
             spec={asset.text}
             fade={Math.max(clip.fadeIn ?? 0, clip.fadeOut ?? 0)}
+            styles={<StyleGallery clipId={clip.id} spec={asset.text} />}
           />
         )}
         {active === "text" && asset.text && (
