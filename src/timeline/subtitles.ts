@@ -5,7 +5,8 @@ import { useAiStore } from "@/store/ai";
 import { useProjectStore } from "@/store/project";
 import { clipDuration, clipSpeed, findClip } from "./clips";
 import { addClip, addTrack, type EditResult } from "./edit";
-import { TEXT_FONT_LIMITS } from "./text";
+import { setTextFade, TEXT_FONT_LIMITS } from "./text";
+import { withStyle, type StylePreset } from "./textStyles";
 
 /** One stretch of speech; times are seconds from the start of the clip's used source range. */
 export interface SpeechSegment {
@@ -67,6 +68,8 @@ export interface DrawnSubtitle extends Subtitle {
   picture: string;
   assetId: string;
   clipId: string;
+  /** Seconds each subtitle fades in and out over, when its style calls for it. */
+  fade?: number;
 }
 
 /** Put drawn subtitles on a new video track above everything. One undoable step. */
@@ -94,6 +97,12 @@ export function addSubtitleClips(project: Project, items: DrawnSubtitle[], track
     });
     if (!added.ok) return added;
     next = added.project;
+    if (item.fade) {
+      // never longer than the subtitle itself can show: a short line fades for at most a third of it
+      const faded = setTextFade(next, item.clipId, Math.min(item.fade, item.duration / 3));
+      if (!faded.ok) return faded;
+      next = faded.project;
+    }
   }
   return { ok: true, project: next };
 }
@@ -112,6 +121,8 @@ export async function generateSubtitles(
   model: string,
   language: string | null,
   onStage: (stage: string) => void = () => {},
+  /** A text style for the subtitles; without one they get the plain subtitle look. */
+  style?: StylePreset,
 ): Promise<SubtitleResult> {
   const before = useProjectStore.getState().project;
   const found = findClip(before, clipId);
@@ -147,9 +158,17 @@ export async function generateSubtitles(
   try {
     for (const [i, subtitle] of subtitles.entries()) {
       onStage(`Drawing subtitle ${i + 1} of ${subtitles.length}`);
-      const spec = subtitleSpec(subtitle.text, height);
+      const plain = subtitleSpec(subtitle.text, height);
+      const spec = style ? withStyle(plain, style.style) : plain;
       const picture = await invoke<string>("render_text", { spec, width, height });
-      drawn.push({ ...subtitle, spec, picture, assetId: crypto.randomUUID(), clipId: crypto.randomUUID() });
+      drawn.push({
+        ...subtitle,
+        spec,
+        picture,
+        assetId: crypto.randomUUID(),
+        clipId: crypto.randomUUID(),
+        fade: style?.fade,
+      });
     }
   } catch (e) {
     return { ok: false, reason: `Could not draw the subtitles: ${message(e)}` };

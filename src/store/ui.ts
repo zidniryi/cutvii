@@ -49,6 +49,9 @@ interface UiState {
   /** The clip shown without its colour changes while "Before" is held. */
   colorBefore: string | null;
   setColorBefore: (clipId: string | null) => void;
+  /** The text style chosen for generated subtitles (a preset id), or null for the plain subtitle look. */
+  subtitleStyle: string | null;
+  setSubtitleStyle: (id: string | null) => void;
   /** A save is being written (drives the status text; also stops a second save from starting). */
   saving: boolean;
   setSaving: (saving: boolean) => void;
@@ -83,6 +86,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   setColorDraft: (colorDraft) => set({ colorDraft }),
   colorBefore: null,
   setColorBefore: (colorBefore) => set({ colorBefore }),
+  subtitleStyle: null,
+  setSubtitleStyle: (subtitleStyle) => set({ subtitleStyle }),
   saving: false,
   setSaving: (saving) => set({ saving }),
   dialog: null,

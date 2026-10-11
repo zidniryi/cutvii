@@ -10,6 +10,7 @@ import { useUiStore } from "@/store/ui";
 import { expectValid, IDS, makeProject } from "@/test/makeProject";
 import { addClip } from "./edit";
 import { aiKindOf, aiTarget, openAiTools } from "./ai";
+import { findStyle, matchesStyle } from "./textStyles";
 import { undo } from "./editor";
 import {
   addSubtitleClips,
@@ -235,6 +236,66 @@ describe("subtitles from the AI tab", () => {
     undo();
     expect(useProjectStore.getState().project.tracks).toHaveLength(3);
     expect(useAiStore.getState().listening).toBeNull();
+  });
+
+  it("makes the subtitles in the style chosen in the AI tab, Default unless another is picked", async () => {
+    models[1].installed = true;
+    rust();
+    useUiStore.setState({ subtitleStyle: null });
+    const panel = open();
+    const styles = within(await panel.findByRole("radiogroup", { name: "Subtitle style" }));
+    expect(styles.getAllByRole("radio")).toHaveLength(12); // Default and the eleven styles
+    expect(styles.getByRole("radio", { name: "Default" })).toBeChecked();
+
+    fireEvent.click(styles.getByRole("radio", { name: "Lyric Fade" }));
+    expect(styles.getByRole("radio", { name: "Lyric Fade" })).toBeChecked();
+    expect(useUiStore.getState().subtitleStyle).toBe("lyric-fade"); // remembered for the next clip too
+    fireEvent.click(panel.getByRole("button", { name: "Generate subtitles" }));
+    expect(await panel.findByRole("status")).toHaveTextContent(/Added 2 subtitles/);
+
+    const after = useProjectStore.getState().project;
+    expectValid(after);
+    const lyric = findStyle("lyric-fade")!;
+    const texts = after.assets.filter((a) => a.text).map((a) => a.text!);
+    expect(texts).toHaveLength(2);
+    for (const text of texts) {
+      expect(matchesStyle(text, lyric.style)).toBe(true);
+      expect(text).toMatchObject({ y: 0.88, fontSize: 49 }); // still placed and sized as subtitles
+    }
+    // the style's fade comes along, and one undo takes everything back
+    expect(after.tracks.at(-1)!.clips.every((c) => c.fadeIn === 0.5 && c.fadeOut === 0.5)).toBe(true);
+    expect(useProjectStore.getState().past).toHaveLength(1);
+    undo();
+    expect(useProjectStore.getState().project.assets.filter((a) => a.text)).toHaveLength(0);
+
+    // back to Default: the plain subtitle look, no fade
+    fireEvent.click(styles.getByRole("radio", { name: "Default" }));
+    fireEvent.click(panel.getByRole("button", { name: "Generate subtitles" }));
+    await waitFor(() =>
+      expect(useProjectStore.getState().project.assets.filter((a) => a.text)).toHaveLength(2),
+    );
+    const plain = useProjectStore.getState().project;
+    expect(plain.assets.find((a) => a.text)!.text).toEqual(subtitleSpec("Hello there.", 1080));
+    expect(plain.tracks.at(-1)!.clips.some((c) => "fadeIn" in c)).toBe(false);
+  });
+
+  it("shortens a style's fade on a subtitle too brief to hold it", () => {
+    const p = project();
+    const item: DrawnSubtitle = {
+      start: 2,
+      duration: 0.6,
+      text: "Hi",
+      spec: subtitleSpec("Hi", 1080),
+      picture: "/data/text/hi.png",
+      assetId: "t",
+      clipId: "s",
+      fade: 0.5,
+    };
+    const r = addSubtitleClips(p, [item], "subs");
+    if (!r.ok) throw new Error(r.error.message);
+    const clip = r.project.tracks.find((t) => t.id === "subs")!.clips[0];
+    expect(clip.fadeIn).toBeCloseTo(0.2);
+    expectValid(r.project);
   });
 
   it("changes nothing when no speech is found, recognition fails, or it is stopped", async () => {
