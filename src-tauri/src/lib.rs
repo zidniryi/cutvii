@@ -14,6 +14,7 @@ pub fn run() {
         .manage(commands::export::ExportJob::default())
         .manage(commands::export::LastExport::default())
         .manage(commands::drop::DropState::default())
+        .manage(commands::ai::AiJob::default())
         .setup(|app| {
             commands::clip_tools::load_fonts(app.handle());
             Ok(())
@@ -37,6 +38,11 @@ pub fn run() {
             commands::clip_tools::prepare_image_preview,
             commands::clip_tools::prepare_waveform,
             commands::clip_tools::render_text,
+            commands::ai::whisper_models,
+            commands::ai::download_whisper_model,
+            commands::ai::cancel_ai_job,
+            commands::ai::delete_whisper_model,
+            commands::ai::transcribe_media,
             commands::clip_tools::media_details,
             commands::clip_tools::reveal_media,
             commands::clip_tools::text_fonts,

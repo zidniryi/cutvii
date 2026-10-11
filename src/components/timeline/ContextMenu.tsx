@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { ClipboardCopy, Copy, Scissors, Snowflake, Trash2 } from "lucide-react";
+import { ClipboardCopy, Copy, Scissors, Snowflake, Sparkles, Trash2 } from "lucide-react";
 
 export interface MenuState {
   x: number;
@@ -14,10 +14,12 @@ interface Props {
   onCut: () => void;
   onCopy: () => void;
   onFreeze: () => void;
+  /** Present when the clip can use the AI tools (it has sound). */
+  onAi?: () => void;
   onClose: () => void;
 }
 
-export function ContextMenu({ menu, onSplit, onDelete, onCut, onCopy, onFreeze, onClose }: Props) {
+export function ContextMenu({ menu, onSplit, onDelete, onCut, onCopy, onFreeze, onAi, onClose }: Props) {
   useEffect(() => {
     const onDown = (e: PointerEvent) => {
       if (!(e.target as HTMLElement | null)?.closest("[data-context-menu]")) onClose();
@@ -59,6 +61,11 @@ export function ContextMenu({ menu, onSplit, onDelete, onCut, onCopy, onFreeze, 
         <Copy className="size-4" /> Copy
         <kbd className="ml-auto text-xs text-text-muted">Ctrl/⌘ C</kbd>
       </button>
+      {onAi && (
+        <button role="menuitem" className={item} onClick={onAi}>
+          <Sparkles className="size-4 text-accent" /> Subtitles with AI…
+        </button>
+      )}
       <button role="menuitem" className={item} onClick={onDelete}>
         <Trash2 className="size-4" /> Delete
         <kbd className="ml-auto text-xs text-text-muted">Del</kbd>

@@ -105,3 +105,15 @@ No GPL/LGPL/AGPL crates.
 - Fonts a user imports (`.ttf`, `.otf`, `.ttc`) are copied into the app data folder on their machine and are never
   redistributed by CutVii; the user is responsible for having the right to use them.
 - Text drawing uses `cosmic-text` (MIT OR Apache-2.0) and `png` (MIT OR Apache-2.0).
+
+### Speech recognition (auto subtitles)
+
+- The engine is **whisper.cpp** (MIT), compiled into the app through the `whisper-rs` crate (Unlicense). Building
+  it needs `cmake` and a C++ compiler on the build machine. On macOS it uses the GPU through Metal.
+- **No speech model is bundled.** A model (Tiny about 75 MB, Base about 142 MB, Small about 466 MB; OpenAI's
+  Whisper weights, MIT, in the whisper.cpp project's ggml format) is downloaded only when the user asks for it and
+  confirms a dialog that states the size and the source (`huggingface.co/ggerganov/whisper.cpp`). The file is
+  checked against the published size and SHA-256 before it is used, kept in the app data folder, and can be
+  removed from the AI tab.
+- This download is the **only network request CutVii makes** (`ureq`, MIT OR Apache-2.0; `sha2`, MIT OR
+  Apache-2.0). Recognition runs entirely on the user's machine; media and text are never sent anywhere.

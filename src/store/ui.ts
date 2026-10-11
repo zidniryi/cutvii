@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 export type SidePanel = "library" | "inspector";
-export type InspectorTab = "video" | "audio" | "speed" | "info" | "text";
+export type InspectorTab = "video" | "audio" | "speed" | "info" | "text" | "ai";
 export type ClipKind = "video" | "audio" | "image";
 
 export interface DialogState {
@@ -30,6 +30,9 @@ interface UiState {
   /** Last inspector tab the user chose, per kind of clip (UI state only). */
   inspectorTab: Partial<Record<ClipKind, InspectorTab>>;
   setInspectorTab: (kind: ClipKind, tab: InspectorTab) => void;
+  /** Ask the inspector to move keyboard focus to a tab and show it from the top. `n` makes each ask unique. */
+  inspectorFocus: { tab: InspectorTab; n: number } | null;
+  focusInspectorTab: (tab: InspectorTab) => void;
   /** The clip whose crop box is being adjusted in the preview, if any. */
   cropEdit: { clipId: string } | null;
   setCropEdit: (cropEdit: { clipId: string } | null) => void;
@@ -58,6 +61,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   setCanvasNotice: (canvasNotice) => set({ canvasNotice }),
   inspectorTab: {},
   setInspectorTab: (kind, tab) => set((s) => ({ inspectorTab: { ...s.inspectorTab, [kind]: tab } })),
+  inspectorFocus: null,
+  focusInspectorTab: (tab) => set((s) => ({ inspectorFocus: { tab, n: (s.inspectorFocus?.n ?? 0) + 1 } })),
   cropEdit: null,
   setCropEdit: (cropEdit) => set({ cropEdit }),
   cropLock: null,

@@ -184,7 +184,7 @@ describe("clip sound in the preview and the inspector", () => {
     expect(stored("video").muted).toBe(true);
     expect(useSelectionStore.getState().selectedClipIds).toEqual([sound.id]);
     // the new clip is treated as audio: no picture tab, and nothing left to detach
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Audio", "Speed", "Info"]);
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Audio", "AI", "Speed", "Info"]);
     expect(screen.queryByRole("button", { name: "Detach audio" })).not.toBeInTheDocument();
 
     undo(); // one step takes the whole detach back

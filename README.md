@@ -1,7 +1,8 @@
 # CutVii
 
 An open-source, cross-platform desktop video editor: **import → edit on a multi-track timeline → preview → export MP4**.
-Local-first and offline: no account, no analytics, your media is never modified or uploaded.
+Local-first and offline: no account, no analytics, your media is never modified or uploaded. The one thing
+CutVii can download, and only when you ask and confirm, is a speech model for auto subtitles.
 
 > Status: desktop MVP (Phases 1–7). Developed and tested on macOS (Apple Silicon). Windows and Linux are built in
 > CI but have not been run by hand yet. Android is planned (Phase 8).

@@ -1,5 +1,6 @@
-import { useId, useState } from "react";
-import { AlertTriangle } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
+import { AlertTriangle, Sparkles } from "lucide-react";
+import { AiPanel } from "@/components/inspector/AiPanel";
 import { CropPanel } from "@/components/inspector/CropPanel";
 import { MediaInfo } from "@/components/inspector/MediaInfo";
 import { SoundPanel } from "@/components/inspector/SoundPanel";
@@ -342,8 +343,8 @@ function SpeedPanel({
 
 /** Tabs that have working controls for each kind of clip, in display order. The first one is the default. */
 export const TABS_FOR: Record<ClipKind, InspectorTab[]> = {
-  video: ["video", "audio", "speed", "info"],
-  audio: ["audio", "speed", "info"],
+  video: ["video", "audio", "ai", "speed", "info"],
+  audio: ["audio", "ai", "speed", "info"],
   image: ["video", "info"], // stills have no sound and no speed
 };
 const TEXT_TABS: InspectorTab[] = ["text", "info"];
@@ -353,6 +354,7 @@ const TAB_LABEL: Record<InspectorTab, string> = {
   speed: "Speed",
   info: "Info",
   text: "Text",
+  ai: "AI",
 };
 
 function FitChips({ clip }: { clip: TimelineClip }) {
@@ -643,6 +645,18 @@ function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset;
   const setTab = useUiStore((s) => s.setInspectorTab);
   const active = remembered && tabs.includes(remembered) ? remembered : tabs[0];
   const uid = useId();
+  const panelRef = useRef<HTMLDivElement>(null);
+  // a tab always opens at its top, not wherever the previous tab had been scrolled to
+  useEffect(() => {
+    if (panelRef.current) panelRef.current.scrollTop = 0;
+  }, [active, clip.id]);
+  // something outside (the AI button, the clip menu) asked for a tab: put the keyboard focus on it
+  const focusRequest = useUiStore((s) => s.inspectorFocus);
+  useEffect(() => {
+    if (!focusRequest || focusRequest.tab !== active) return;
+    document.getElementById(`${uid}-tab-${active}`)?.focus();
+    if (panelRef.current) panelRef.current.scrollTop = 0;
+  }, [focusRequest, active, uid]);
 
   function onKeyDown(e: React.KeyboardEvent) {
     const i = tabs.indexOf(active);
@@ -682,16 +696,20 @@ function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset;
             tabIndex={active === t ? 0 : -1}
             onClick={() => setTab(kind, t)}
             className={cn(
-              "h-11 flex-1 border-b-2 text-xs",
+              "flex h-11 flex-1 items-center justify-center gap-1 border-b-2 text-xs [&_svg]:size-3.5",
               active === t ? "border-accent text-text" : "border-transparent text-text-muted hover:text-text",
+              // the AI tab keeps a touch of the accent so it is easy to find
+              t === "ai" && "[&_svg]:text-accent",
             )}
           >
+            {t === "ai" && <Sparkles aria-hidden />}
             {TAB_LABEL[t]}
           </button>
         ))}
       </div>
       <div
         id={`${uid}-panel`}
+        ref={panelRef}
         role="tabpanel"
         aria-labelledby={`${uid}-tab-${active}`}
         tabIndex={0}
@@ -741,6 +759,7 @@ function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset;
         {active === "text" && asset.text && (
           <TransformPanel key={`${clip.id}-transform`} clip={clip} position={false} />
         )}
+        {active === "ai" && <AiPanel key={`${clip.id}-ai`} clip={clip} />}
         {active === "info" && <InfoTab clip={clip} asset={asset} fps={fps} />}
       </div>
     </>

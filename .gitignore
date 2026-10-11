@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Working notes for Claude Code sessions: kept on this machine, not in the repository
+CLAUDE.md

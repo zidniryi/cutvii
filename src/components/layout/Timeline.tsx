@@ -5,6 +5,7 @@ import {
   Magnet,
   Maximize2,
   Scissors,
+  Sparkles,
   Trash2,
   Type,
   Volume2,
@@ -26,6 +27,7 @@ import { useSelectionStore } from "@/store/selection";
 import { useTimelineViewStore } from "@/store/timelineView";
 import { useUiStore } from "@/store/ui";
 import { clipDuration, projectDuration } from "@/timeline/clips";
+import { aiKindOf, openAiTools } from "@/timeline/ai";
 import { copySelected, cutSelected } from "@/timeline/clipboard";
 import { freezeFrameAtPlayhead } from "@/timeline/freeze";
 import { deleteSelected, report, splitAtPlayhead, toggleTrackFlag } from "@/timeline/editor";
@@ -172,6 +174,16 @@ export function Timeline() {
               {notice}
             </span>
           )}
+          <button
+            type="button"
+            aria-label="AI tools"
+            title="AI tools for the selected clip (auto subtitles)"
+            onClick={() => openAiTools()}
+            className="mr-1 flex h-8 items-center gap-1.5 rounded-md border border-accent/50 bg-accent-soft px-2.5 text-xs font-medium text-text hover:border-accent focus-visible:outline-accent pointer-coarse:h-11 [&_svg]:size-3.5 [&_svg]:text-accent"
+          >
+            <Sparkles />
+            AI
+          </button>
           <IconButton label="Add text at playhead" icon={<Type />} onClick={() => void addTextAtPlayhead()} />
           <IconButton
             label="Split at playhead (S)"
@@ -384,6 +396,14 @@ export function Timeline() {
             closeMenu();
             deleteSelected();
           }}
+          onAi={
+            aiKindOf(project, menu.clipId)
+              ? () => {
+                  closeMenu();
+                  openAiTools(menu.clipId);
+                }
+              : undefined
+          }
         />
       )}
     </Panel>

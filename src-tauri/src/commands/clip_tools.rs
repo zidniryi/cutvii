@@ -37,7 +37,7 @@ pub fn derived_key(path: &Path, params: &str) -> AppResult<String> {
 }
 
 /// Only files the user imported or opened may be processed.
-fn allowed_source(app: &AppHandle, path: &str) -> AppResult<PathBuf> {
+pub(crate) fn allowed_source(app: &AppHandle, path: &str) -> AppResult<PathBuf> {
     let p = PathBuf::from(path);
     if !p.is_file() {
         return Err(AppError::InvalidInput("the source file is missing".into()));

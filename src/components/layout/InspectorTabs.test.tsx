@@ -44,20 +44,20 @@ beforeEach(() => {
 describe("Inspector tabs", () => {
   it("offers only the tabs that have controls for that kind of clip", () => {
     expect(TABS_FOR).toEqual({
-      video: ["video", "audio", "speed", "info"],
-      audio: ["audio", "speed", "info"],
+      video: ["video", "audio", "ai", "speed", "info"],
+      audio: ["audio", "ai", "speed", "info"],
       image: ["video", "info"],
     });
 
     place(IDS.vid);
     const { unmount } = render(<Inspector />);
-    expect(tabNames()).toEqual(["Video", "Audio", "Speed", "Info"]);
+    expect(tabNames()).toEqual(["Video", "Audio", "AI", "Speed", "Info"]);
     unmount();
 
     act(() => useSelectionStore.getState().clear());
     place(IDS.aud);
     const second = render(<Inspector />);
-    expect(tabNames()).toEqual(["Audio", "Speed", "Info"]);
+    expect(tabNames()).toEqual(["Audio", "AI", "Speed", "Info"]);
     second.unmount();
 
     act(() => useSelectionStore.getState().clear());

@@ -13,6 +13,7 @@ pub mod reverse;
 pub mod text;
 pub mod tools;
 pub mod waveform;
+pub mod whisper;
 
 use crate::errors::AppResult;
 use crate::export::ExportReport;
