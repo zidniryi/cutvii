@@ -128,6 +128,11 @@ pub fn validate(project: &Project) -> Result<(), Vec<String>> {
             if !(0.0..=MAX_VOLUME).contains(&clip.volume) {
                 err(format!("{at}.volume: must be between 0 and {MAX_VOLUME}"));
             }
+            if clip.crop.is_some_and(|c| !c.is_valid()) {
+                err(format!(
+                    "{at}.crop: each side must be between 0 and {MAX_CROP}, and at least a tenth of the picture must remain"
+                ));
+            }
             if let Some(bg) = &clip.fit_background {
                 if bg
                     .blur
@@ -208,7 +213,7 @@ mod tests {
     use super::*;
 
     fn fixture() -> Project {
-        serde_json::from_str(include_str!("../../../fixtures/project-v5.json"))
+        serde_json::from_str(include_str!("../../../fixtures/project-v6.json"))
             .expect("fixture parses")
     }
 
@@ -223,7 +228,7 @@ mod tests {
     #[test]
     fn unknown_fields_are_rejected() {
         let mut v: serde_json::Value =
-            serde_json::from_str(include_str!("../../../fixtures/project-v5.json")).unwrap();
+            serde_json::from_str(include_str!("../../../fixtures/project-v6.json")).unwrap();
         v["extra"] = 1.into();
         assert!(serde_json::from_value::<Project>(v).is_err());
     }

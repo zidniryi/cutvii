@@ -1,4 +1,4 @@
-# CutVii project file (schemaVersion 5)
+# CutVii project file (schemaVersion 6)
 
 Plain JSON. Source of truth: `src/project/model.ts` (Zod) and `src-tauri/src/project/` (serde + `validate`).
 Both are tested against `fixtures/project-v1.json`; change the fixture and both test suites together.
@@ -11,6 +11,13 @@ Both are tested against `fixtures/project-v1.json`; change the fixture and both 
 | `assets[]`                 | `id`, `path`, `type` (`video`/`audio`/`image`), optional `duration` (s), `width`, `height`, `thumbnailPath`.                                                                                                                                                                                                                                                                                                                        |
 | `tracks[]`                 | `id`, `name`, `type` (`video`/`audio`), `order`, `muted`, `hidden`, `clips[]`.                                                                                                                                                                                                                                                                                                                                                      |
 | `clips[]`                  | `id`, `assetId`, `trackId`, `timelineStart`, `sourceIn`, `sourceOut` (seconds), `volume` (0–2), `x`, `y`, `scale` (>0), `opacity` (0–1); optional `fitBackground` (`kind`: `black`/`color`/`image`, `color`, `assetId`, `blur` 0–100), `fitMode` (`fill` default, `fit`, `blur-bg`; video and stills), `reversed`, `speed` (0.1–10, default 1), `keepPitch` (default true). Timeline length = (`sourceOut` − `sourceIn`) / `speed`. |
+
+## Crop (schemaVersion 6)
+
+A clip may carry `crop`: `left`, `top`, `right`, `bottom`, each the share (0–0.9) of the source picture cut away
+on that side. Both sides of an axis together may remove at most 0.9, so a tenth always remains. Absent means no
+crop; an all-zero crop is never stored. It applies to video and image clips, not to sound or text. Migration from
+v5 changes nothing but the version number.
 
 ## Text (schemaVersion 5)
 

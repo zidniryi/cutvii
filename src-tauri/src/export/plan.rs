@@ -5,7 +5,9 @@ use std::path::PathBuf;
 
 use super::{ExportFormat, ExportOptions, Quality};
 use crate::media::MediaType;
-use crate::project::{BackgroundKind, DEFAULT_BLUR_AMOUNT, FitMode, Project, TrackType, validate};
+use crate::project::{
+    BackgroundKind, Crop, DEFAULT_BLUR_AMOUNT, FitMode, Project, TrackType, validate,
+};
 
 /// What we need to know about a source file that the project itself does not record.
 #[derive(Debug, Clone, Copy)]
@@ -39,6 +41,8 @@ pub struct PlannedClip {
     pub bg_image: Option<PathBuf>,
     /// Blur amount 0..=100 for `blur-bg` (30 = a radius of 3 % of the canvas height).
     pub blur_amount: f64,
+    /// Shares of the source picture cut away before it is scaled to the canvas (never set for text).
+    pub crop: Option<Crop>,
     /// A text picture: drawn over the tracks below with its transparency kept, never on a background.
     pub transparent: bool,
     /// Contributes picture (on a visible video track, not an audio asset).
@@ -203,6 +207,7 @@ pub fn build_plan(
                     .as_ref()
                     .and_then(|b| b.blur)
                     .unwrap_or(DEFAULT_BLUR_AMOUNT),
+                crop: c.crop.filter(|k| !k.is_none() && asset.text.is_none()),
                 transparent: asset.text.is_some(),
                 video,
                 audio,
@@ -371,6 +376,17 @@ pub fn build_filter_graph(plan: &ExportPlan) -> FilterGraph {
             } else {
                 format!("[{i}:v]fps={fps}")
             };
+            // crop first, on the source picture: everything after it sees only the part that is kept
+            let source = match clip.crop {
+                Some(k) => format!(
+                    "{source},crop=iw*{:.6}:ih*{:.6}:iw*{:.6}:ih*{:.6}",
+                    1.0 - k.left - k.right,
+                    1.0 - k.top - k.bottom,
+                    k.left,
+                    k.top
+                ),
+                None => source,
+            };
             let cover = format!("scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}");
             let contain = format!("scale={w}:{h}:force_original_aspect_ratio=decrease");
             // The base under the picture: the chosen image (covering the canvas) or the chosen colour.
@@ -484,7 +500,7 @@ mod tests {
 
     pub fn project(assets: serde_json::Value, tracks: serde_json::Value) -> Project {
         serde_json::from_value(json!({
-            "id": "p", "name": "t", "schemaVersion": 5,
+            "id": "p", "name": "t", "schemaVersion": 6,
             "createdAt": "2026-01-01T00:00:00.000Z", "modifiedAt": "2026-01-01T00:00:00.000Z",
             "settings": {"width": 1280, "height": 720, "fps": 30, "backgroundColor": "#102030"},
             "assets": assets, "tracks": tracks
@@ -742,6 +758,66 @@ mod tests {
             g.graph
                 .contains("[v1][c1]overlay=eof_action=pass:repeatlast=0[v2]")
         );
+    }
+
+    #[test]
+    fn crop_is_applied_to_the_source_before_scaling() {
+        let mut p = sample();
+        p.tracks[0].clips[0].crop = Some(Crop {
+            left: 0.25,
+            top: 0.1,
+            right: 0.25,
+            bottom: 0.0,
+        });
+        p.tracks[1].clips[0].crop = Some(Crop {
+            left: 0.0,
+            top: 0.0,
+            right: 0.5,
+            bottom: 0.5,
+        });
+        let g = build_filter_graph(&build_plan(&p, &opts(), &sample_facts()).unwrap()).graph;
+        assert!(
+            g.contains(
+                "[0:v]fps=30,crop=iw*0.500000:ih*0.900000:iw*0.250000:ih*0.100000,scale=640:360"
+            ),
+            "{g}"
+        );
+        assert!(
+            g.contains("[1:v]format=rgba,crop=iw*0.500000:ih*0.500000:iw*0.000000:ih*0.000000,scale=640:360"),
+            "{g}"
+        );
+        // an all-zero crop is no crop
+        p.tracks[0].clips[0].crop = Some(Crop::default());
+        p.tracks[1].clips[0].crop = None;
+        let plan = build_plan(&p, &opts(), &sample_facts()).unwrap();
+        assert!(plan.clips.iter().all(|c| c.crop.is_none()));
+        assert!(!build_filter_graph(&plan).graph.contains("crop=iw"));
+        // out of range, or nothing left of the picture
+        for bad in [
+            Crop {
+                left: -0.1,
+                ..Default::default()
+            },
+            Crop {
+                top: 0.95,
+                ..Default::default()
+            },
+            Crop {
+                left: 0.5,
+                right: 0.5,
+                ..Default::default()
+            },
+            Crop {
+                bottom: f64::NAN,
+                ..Default::default()
+            },
+        ] {
+            p.tracks[0].clips[0].crop = Some(bad);
+            let e = build_plan(&p, &opts(), &sample_facts())
+                .unwrap_err()
+                .join(";");
+            assert!(e.contains("crop"), "{bad:?}: {e}");
+        }
     }
 
     #[test]

@@ -162,7 +162,7 @@ Android is done only after Phase 8 is verified on a real device or emulator.
 This file is the original spec plus sections 6j and 12. The user pasted newer spec sections (6c–6n) in chat only;
 they are **not** in this file. If a section is missing here, ask the user to paste it again rather than guessing.
 
-**Last green run (macOS):** Vitest 361 passed (41 files), Cargo 88 passed, typecheck/lint/prettier/clippy/rustfmt
+**Last green run (macOS):** Vitest 369 passed (41 files), Cargo 88 passed, typecheck/lint/prettier/clippy/rustfmt
 clean. Project schema is **v5** (`fixtures/project-v1..v5.json`, Rust migration chain in `project/migrate.rs`).
 
 ### Done
@@ -191,14 +191,19 @@ clean. Project schema is **v5** (`fixtures/project-v1..v5.json`, Rust migration 
   text keeps its transparency in preview (`layersAt` shows every text layer down to the first opaque picture)
   and in export (`PlannedClip.transparent`), missing text pictures are redrawn on open, inspector shows only
   Info for text clips.
+- Text step 3 of 3: inspector **Text** tab (`components/inspector/TextPanel.tsx`): content (redrawn 400 ms
+  after typing stops), size, colour, bold, alignment, position across/down sliders. `editText` redraws in Rust
+  and swaps the picture in as one undo step; a split text gets its own asset on first edit; `watchTextPictures`
+  (started in `App`) redraws text when the canvas size changes. The user confirmed text over video in the live
+  app on 2026-10-11 (screenshot).
+- Drag text in the preview to move it (`components/preview/useTextDrag.ts`): the hit area is an estimate
+  (`textHitBox`, about 0.62 x font size per character), the picture is shifted with a CSS transform while
+  dragging and redrawn on release through `editText` (one undo step).
 - Export: MP4, plus audio-only M4A / MP3 / WAV; "Show in folder"; File menu (New/Open/Save), About tagline.
 
 ### Not done (queue, in the user's approved order unless they say otherwise)
-1. Text & titles, remaining (the 6e text was never pasted; this split is Claude's):
-   - Step 3: inspector editor (content, size, colour, bold, align, position), debounced re-render. Must also:
-     give a split text clip its own asset before editing (split halves share one asset), and redraw text
-     pictures when the canvas size changes (today they are only scaled to fit).
-   - Open questions the user has not answered: bundling a font was Claude's choice; outline/shadow are not built.
+1. Text & titles, possible follow-ups (not requested yet): outline / shadow / background box, more fonts, a
+   selection outline and resize handles in the preview, a text default duration other than 5 s.
 2. Crop & reframe 6f-1, 6f-2.
 3. Inspector roadmap (section 6j): transform, audio fades/detach, codec info, colour, etc.
 4. Upscale 6c-1..3: **needs the user's go-ahead first**. PyTorch CPU-only in a virtual environment outside the
@@ -215,9 +220,8 @@ clean. Project schema is **v5** (`fixtures/project-v1..v5.json`, Rust migration 
   bar, inspector tabs, MP3 export from the dialog.
 - Timeline waveforms on trimmed, sped-up, reversed or muted clips, and while scrolling/zooming a long clip
   (only whole, untouched clips were looked at).
-- Text over video in the preview: the text itself was seen in a macOS debug build, but the window was hidden
-  behind other windows, where WebKit paints no video, so text *over a video frame* was not seen. The export of
-  text over video is covered by a real FFmpeg test.
+- The inspector Text tab and dragging text in the preview (tests pass; not looked at in the running app by
+  Claude).
 - Packaged `.app` never launched. Windows and Linux never built or run.
 
 ### Working notes

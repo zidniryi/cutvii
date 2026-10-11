@@ -17,6 +17,7 @@ import {
   type Layer,
 } from "@/playback/engine";
 import { TransportBar } from "@/components/preview/TransportBar";
+import { useTextDrag } from "@/components/preview/useTextDrag";
 import { ensureReversePreviews } from "@/playback/reversePreview";
 import { usePlaybackStore } from "@/store/playback";
 import { reverseKey, useReverseStore, type ReversePreview } from "@/store/reverse";
@@ -26,14 +27,21 @@ import {
   backgroundColor as fitBackgroundColor,
   backgroundOf,
   blurFraction,
+  croppedSize,
+  cropInnerStyle,
+  cropOf,
   DEFAULT_FIT_MODE,
+  isCropped,
   fitLayout,
   rectStyle,
   type Rect,
 } from "@/timeline/fit";
 import { useImagePreviewStore } from "@/store/imagePreviews";
+import type { Crop } from "@/project/model";
 
 type MediaEl = HTMLVideoElement | HTMLAudioElement;
+/** A share as a percentage without float noise (0.2 -> 20, not 19.999999999999996). */
+const percent = (shareOfStage: number) => Number((shareOfStage * 100).toFixed(2));
 
 export function Preview() {
   const project = useProjectStore((s) => s.project);
@@ -153,6 +161,7 @@ export function Preview() {
 
   const { width, height, backgroundColor } = project.settings;
   const ratio = width / height;
+  const textDrag = useTextDrag(layers, project.settings);
   const activeErrors = layers
     .filter((l) => l.role === "active" && mediaErrors[l.asset.id])
     .map((l) => `${assetName(l.asset)} ${mediaErrors[l.asset.id]}`);
@@ -168,12 +177,14 @@ export function Preview() {
         <div className="flex h-full w-full items-center justify-center">
           <div
             data-testid="preview-stage"
-            className="relative overflow-hidden rounded-md border"
+            className="relative touch-none overflow-hidden rounded-md border"
+            {...textDrag.handlers}
             style={{
               aspectRatio: ratio,
               width: `min(100cqw, calc(100cqh * ${ratio}))`,
               backgroundColor,
               containerType: "size",
+              cursor: textDrag.cursor,
             }}
           >
             {layers.map((layer) => (
@@ -184,6 +195,7 @@ export function Preview() {
                 reverse={reverseOf(layer)}
                 canvas={{ width, height }}
                 backgroundImage={backgroundImageOf(layer)}
+                shift={textDrag.shiftOf(layer.clip.id)}
                 register={(el) => {
                   if (el) elements.current.set(layer.clip.id, el);
                   else elements.current.delete(layer.clip.id);
@@ -243,6 +255,7 @@ function LayerView({
   reverse,
   canvas,
   backgroundImage,
+  shift,
 }: {
   layer: Layer;
   register: (el: MediaEl | null) => void;
@@ -250,6 +263,8 @@ function LayerView({
   canvas: { width: number; height: number };
   /** File to show behind the picture when the clip's background is an image (already a preview copy). */
   backgroundImage?: string;
+  /** A text being dragged: how far its picture is shifted, in shares of the stage. */
+  shift?: { dx: number; dy: number } | null;
 }) {
   const { asset, track, visible } = layer;
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -270,7 +285,27 @@ function LayerView({
   }
   const mode = layer.clip.fitMode ?? DEFAULT_FIT_MODE;
   // Same geometry as the export: computed from the real picture size, never the native pixel size.
-  const layout = fitLayout(asset.width ?? 0, asset.height ?? 0, canvas.width, canvas.height, mode);
+  // A cropped clip is laid out by what is left of its picture, exactly as the export scales it after cropping.
+  const crop = cropOf(layer.clip);
+  const kept = croppedSize(asset.width ?? 0, asset.height ?? 0, crop);
+  const layout = fitLayout(kept.width, kept.height, canvas.width, canvas.height, mode);
+  /** Put a picture at `rect`. Cropped: a clipping frame goes there and the picture is enlarged inside it. */
+  const framed = (
+    rect: Rect,
+    extra: React.CSSProperties,
+    picture: (style: React.CSSProperties) => React.ReactNode,
+  ) =>
+    isCropped(crop) ? (
+      <div
+        data-role="crop-frame"
+        className="absolute overflow-hidden"
+        style={{ ...rectStyle(rect), ...extra }}
+      >
+        {picture(cropInnerStyle(crop))}
+      </div>
+    ) : (
+      picture({ ...rectStyle(rect), ...extra })
+    );
   // Behind the picture: the clip's background colour or image (same choice the export uses).
   const background = backgroundOf(layer.clip);
   const fraction = blurFraction(background.blur);
@@ -296,8 +331,12 @@ function LayerView({
         data-testid="text-layer"
         onLoad={() => setMediaError(asset.id, null)}
         onError={() => setMediaError(asset.id, mediaErrorMessage(4))}
+        draggable={false}
         className="pointer-events-none absolute inset-0 h-full w-full object-contain"
-        style={{ zIndex: track.order }}
+        style={{
+          zIndex: track.order,
+          transform: shift ? `translate(${percent(shift.dx)}%, ${percent(shift.dy)}%)` : undefined,
+        }}
       />
     );
   }
@@ -312,24 +351,21 @@ function LayerView({
         style={{ zIndex: track.order, backgroundColor: fitBackgroundColor(background) }}
       >
         {backdropImage}
-        {layout.backdrop && (
+        {layout.backdrop &&
+          framed(layout.backdrop, blur, (style) => (
+            <img src={src} alt="" aria-hidden className="absolute max-w-none" style={style} />
+          ))}
+        {framed(layout.picture, {}, (style) => (
           <img
             src={src}
             alt=""
-            aria-hidden
+            data-role="picture"
+            onLoad={() => setMediaError(asset.id, null)}
+            onError={() => setMediaError(asset.id, mediaErrorMessage(4))}
             className="absolute max-w-none"
-            style={{ ...rectStyle(layout.backdrop), ...blur }}
+            style={style}
           />
-        )}
-        <img
-          src={src}
-          alt=""
-          data-role="picture"
-          onLoad={() => setMediaError(asset.id, null)}
-          onError={() => setMediaError(asset.id, mediaErrorMessage(4))}
-          className="absolute max-w-none"
-          style={rectStyle(layout.picture)}
-        />
+        ))}
       </div>
     );
   }
@@ -346,19 +382,23 @@ function LayerView({
       }}
     >
       {visible && backdropImage}
-      {layout.backdrop && visible && <VideoBackdrop source={videoRef} rect={layout.backdrop} style={blur} />}
-      <video
-        ref={(el) => {
-          videoRef.current = el;
-          register(el);
-        }}
-        {...common}
-        aria-hidden
-        playsInline
-        data-role="picture"
-        className="absolute max-w-none object-fill"
-        style={rectStyle(layout.picture)}
-      />
+      {layout.backdrop && visible && (
+        <VideoBackdrop source={videoRef} rect={layout.backdrop} style={blur} crop={crop} />
+      )}
+      {framed(layout.picture, {}, (style) => (
+        <video
+          ref={(el) => {
+            videoRef.current = el;
+            register(el);
+          }}
+          {...common}
+          aria-hidden
+          playsInline
+          data-role="picture"
+          className="absolute max-w-none object-fill"
+          style={style}
+        />
+      ))}
     </div>
   );
 }
@@ -371,10 +411,13 @@ function VideoBackdrop({
   source,
   rect,
   style,
+  crop,
 }: {
   source: React.RefObject<HTMLVideoElement | null>;
   rect: Rect;
   style: React.CSSProperties;
+  /** Only the kept part of the frame is copied. */
+  crop: Crop;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
@@ -385,19 +428,30 @@ function VideoBackdrop({
       const ctx = canvas?.getContext?.("2d");
       if (video && canvas && ctx && video.videoWidth > 0) {
         // a small copy is plenty: it is blurred anyway
+        const part = croppedSize(video.videoWidth, video.videoHeight, crop);
         const w = 160;
-        const h = Math.max(2, Math.round((w * video.videoHeight) / video.videoWidth));
+        const h = Math.max(2, Math.round((w * part.height) / part.width));
         if (canvas.width !== w || canvas.height !== h) {
           canvas.width = w;
           canvas.height = h;
         }
-        ctx.drawImage(video, 0, 0, w, h);
+        ctx.drawImage(
+          video,
+          video.videoWidth * crop.left,
+          video.videoHeight * crop.top,
+          part.width,
+          part.height,
+          0,
+          0,
+          w,
+          h,
+        );
       }
       raf = requestAnimationFrame(draw);
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [source]);
+  }, [source, crop]);
   return (
     <canvas
       ref={canvasRef}

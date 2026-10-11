@@ -8,9 +8,17 @@
  * - Timeline length == (sourceOut - sourceIn) / speed. Speed is per clip (default 1); stills have none.
  * - add/move/split reject invalid requests; trim clamps to the nearest valid edge (drag-friendly).
  */
-import type { FitBackground, FitMode, Project, TimelineClip, TimelineTrack } from "@/project/model";
+import {
+  CropSchema,
+  type Crop,
+  type FitBackground,
+  type FitMode,
+  type Project,
+  type TimelineClip,
+  type TimelineTrack,
+} from "@/project/model";
 import { clipDuration, clipEnd, clipSpeed, EPS, findClip, minClipDuration } from "./clips";
-import { DEFAULT_FIT_MODE } from "./fit";
+import { DEFAULT_FIT_MODE, isCropped } from "./fit";
 
 export const DEFAULT_IMAGE_DURATION = 5;
 
@@ -303,6 +311,45 @@ export function setClipFit(project: Project, clipId: string, fitMode: FitMode): 
       project.tracks.map((t) =>
         t.id === found.track.id
           ? { ...t, clips: t.clips.map((c) => (c.id === clipId ? { ...c, fitMode } : c)) }
+          : t,
+      ),
+    ),
+  );
+}
+
+/** Cut away the edges of a clip's picture (`null` or all zeros removes the crop). Not for sound or text. */
+export function setClipCrop(project: Project, clipId: string, crop: Crop | null): EditResult {
+  const found = findClip(project, clipId);
+  if (!found) return fail("unknown-clip", `Unknown clip ${clipId}`);
+  const asset = project.assets.find((a) => a.id === found.clip.assetId);
+  if (!asset || asset.type === "audio" || asset.text) {
+    return fail("incompatible-track", "Only video and image clips can be cropped");
+  }
+  const wanted = crop && isCropped(crop) ? crop : undefined;
+  if (wanted && !CropSchema.safeParse(wanted).success) {
+    return fail("out-of-range", "At least a tenth of the picture must remain");
+  }
+  const current = found.clip.crop;
+  const same = wanted
+    ? current !== undefined &&
+      (["left", "top", "right", "bottom"] as const).every((k) => current[k] === wanted[k])
+    : current === undefined;
+  if (same) return ok(project);
+  return ok(
+    withTracks(
+      project,
+      project.tracks.map((t) =>
+        t.id === found.track.id
+          ? {
+              ...t,
+              clips: t.clips.map((c) => {
+                if (c.id !== clipId) return c;
+                const next = { ...c };
+                if (wanted) next.crop = wanted;
+                else delete next.crop;
+                return next;
+              }),
+            }
           : t,
       ),
     ),

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { Inspector } from "@/components/layout/Inspector";
 import { Preview } from "@/components/layout/Preview";
@@ -13,7 +13,19 @@ import { useUiStore } from "@/store/ui";
 import { expectValid, IDS, makeProject } from "@/test/makeProject";
 import { addClip } from "./edit";
 import { undo } from "./editor";
-import { addTextAtPlayhead, addTextClip, defaultTextSpec, textTrackFor } from "./text";
+import { splitClip } from "./edit";
+import {
+  addTextAtPlayhead,
+  addTextClip,
+  applyTextEdit,
+  defaultTextSpec,
+  editText,
+  textHitBox,
+  textTrackFor,
+  watchTextPictures,
+} from "./text";
+import { TYPING_DELAY_MS } from "@/components/inspector/TextPanel";
+import { withCanvas } from "@/project/canvas";
 
 const spec: TextSpec = {
   content: "Hello\nworld",
@@ -46,8 +58,8 @@ const visible = (p: Project, t: number) =>
     .map((l) => l.clip.id);
 
 describe("text in the project file", () => {
-  it("is schema version 5: an image asset may carry text, nothing else may", () => {
-    expect(SCHEMA_VERSION).toBe(5);
+  it("is schema version 6: an image asset may carry text, nothing else may", () => {
+    expect(SCHEMA_VERSION).toBe(6);
     const p = withText(2);
     expectValid(p);
     expect(p.assets.at(-1)).toMatchObject({
@@ -177,10 +189,11 @@ describe("Add text", () => {
     expect(clip).toMatchObject({ assetId: asset.id, timelineStart: 1.5 });
     expect(useSelectionStore.getState().selectedClipIds).toEqual([clip.id]);
 
-    // the inspector shows what works for text: no fit, background, sound or speed controls
-    render(<Inspector />);
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Info"]);
-    expect(screen.getByText("Text", { selector: "span" })).toBeInTheDocument();
+    // the inspector shows what works for text: its editor and facts, no fit, background, sound or speed
+    const view = render(<Inspector />);
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Text", "Info"]);
+    expect(screen.getByRole("textbox", { name: "Text" })).toHaveValue("Text");
+    view.unmount();
 
     undo();
     const undone = useProjectStore.getState().project;
@@ -194,5 +207,232 @@ describe("Add text", () => {
     await addTextAtPlayhead();
     await waitFor(() => expect(useUiStore.getState().notice).toMatch(/Could not add text: .*canvas size/));
     expect(useProjectStore.getState().project).toBe(before);
+  });
+});
+
+describe("editing text", () => {
+  const textOf = (clipId = "title") => {
+    const p = useProjectStore.getState().project;
+    const clip = p.tracks.flatMap((t) => t.clips).find((c) => c.id === clipId)!;
+    return p.assets.find((a) => a.id === clip.assetId)!;
+  };
+  /** Rust is asked to draw; the picture name tells which text it was. */
+  const drawn = () =>
+    vi
+      .mocked(invoke)
+      .mockImplementation(
+        (async (_cmd: string, args: { spec: TextSpec; width: number }) =>
+          `/data/text/${args.spec.content}-${args.spec.fontSize}-${args.spec.color}-${args.width}.png`) as never,
+      );
+
+  beforeEach(() => {
+    useProjectStore.getState().loadProject(withText(2), "/p.cutvii", []);
+    useSelectionStore.getState().select("title");
+    vi.mocked(invoke).mockReset();
+    drawn();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("redraws the text and swaps the picture in as one undoable step", async () => {
+    expect(await editText("title", { content: "Intro", fontSize: 120 })).toBeNull();
+    expect(invoke).toHaveBeenCalledWith("render_text", {
+      spec: { ...spec, content: "Intro", fontSize: 120 },
+      width: 1920,
+      height: 1080,
+    });
+    expect(textOf()).toMatchObject({
+      id: "text",
+      path: "/data/text/Intro-120-#FFFFFF-1920.png",
+      text: { content: "Intro", fontSize: 120, bold: true },
+    });
+    expectValid(useProjectStore.getState().project);
+    undo();
+    expect(textOf()).toMatchObject({ path: PICTURE, text: spec });
+  });
+
+  it("rejects invalid values without drawing or changing anything", async () => {
+    const before = useProjectStore.getState().project;
+    expect(await editText("title", { content: "   " })).toMatch(/must not be empty/);
+    expect(await editText("title", { fontSize: 3 })).toMatch(/8 to 2000/);
+    expect(await editText("title", { x: 2 })).not.toBeNull();
+    expect(await editText("gone", { content: "x" })).toMatch(/no longer/);
+    expect(invoke).not.toHaveBeenCalled();
+    expect(useProjectStore.getState().project).toBe(before);
+
+    vi.mocked(invoke).mockRejectedValue("invalid input: boom");
+    expect(await editText("title", { content: "New" })).toMatch(/Could not draw the text: .*boom/);
+    expect(useProjectStore.getState().project).toBe(before);
+  });
+
+  it("builds quick edits on each other and applies only the newest picture", async () => {
+    const release: ((v: string) => void)[] = [];
+    vi.mocked(invoke).mockImplementation(() => new Promise<string>((r) => release.push(r)) as never);
+    const first = editText("title", { content: "A" });
+    const second = editText("title", { color: "#FF0000" }); // before the first picture is back
+    release[0]("/data/text/first.png");
+    release[1]("/data/text/second.png");
+    await Promise.all([first, second]);
+    expect(textOf()).toMatchObject({
+      path: "/data/text/second.png",
+      text: { content: "A", color: "#FF0000" },
+    });
+    expect(useProjectStore.getState().past).toHaveLength(0 + 1);
+  });
+
+  it("gives one half of a split text its own copy, so the other half keeps its words", () => {
+    const split = splitClip(withText(2), "title", 4, "second-half");
+    if (!split.ok) throw new Error(split.error.message);
+    const r = applyTextEdit(split.project, {
+      clipId: "second-half",
+      picture: "/data/text/new.png",
+      spec: { ...spec, content: "Part two" },
+      newAssetId: "text-copy",
+    });
+    if (!r.ok) throw new Error(r.error.message);
+    expectValid(r.project);
+    const clips = r.project.tracks.flatMap((t) => t.clips);
+    expect(clips.find((c) => c.id === "title")!.assetId).toBe("text");
+    expect(clips.find((c) => c.id === "second-half")!.assetId).toBe("text-copy");
+    expect(r.project.assets.find((a) => a.id === "text")).toMatchObject({ path: PICTURE, text: spec });
+    expect(r.project.assets.find((a) => a.id === "text-copy")).toMatchObject({
+      path: "/data/text/new.png",
+      text: { content: "Part two" },
+    });
+  });
+
+  it("edits from the inspector: typing waits, the other fields apply at once", async () => {
+    render(<Inspector />);
+    const box = screen.getByRole("textbox", { name: "Text" });
+    expect(box).toHaveValue("Hello\nworld");
+
+    vi.useFakeTimers();
+    fireEvent.change(box, { target: { value: "Hi" } });
+    fireEvent.change(box, { target: { value: "Hi there" } });
+    expect(invoke).not.toHaveBeenCalled(); // still typing
+    await act(() => vi.advanceTimersByTimeAsync(TYPING_DELAY_MS + 10));
+    vi.useRealTimers();
+    await waitFor(() => expect(textOf().text?.content).toBe("Hi there"));
+    expect(invoke).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(box, { target: { value: " " } });
+    fireEvent.blur(box);
+    expect(screen.getByRole("alert")).toHaveTextContent("Text must not be empty");
+    expect(textOf().text?.content).toBe("Hi there");
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(box).toHaveValue("Hi there");
+
+    const size = screen.getByRole("spinbutton", { name: "Size (px)" });
+    fireEvent.change(size, { target: { value: "5000" } });
+    fireEvent.keyDown(size, { key: "Enter" });
+    await waitFor(() => expect(textOf().text?.fontSize).toBe(2000)); // clamped
+
+    const hex = screen.getByRole("textbox", { name: "Text colour (hex)" });
+    fireEvent.change(hex, { target: { value: "#e5733a" } });
+    fireEvent.blur(hex);
+    await waitFor(() => expect(textOf().text?.color).toBe("#E5733A"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Bold" }));
+    await waitFor(() => expect(textOf().text?.bold).toBe(false));
+    fireEvent.click(screen.getByRole("radio", { name: "Align right" }));
+    await waitFor(() => expect(textOf().text?.align).toBe("right"));
+
+    const down = screen.getByRole("slider", { name: /Position down/ });
+    fireEvent.change(down, { target: { value: "85" } });
+    expect(textOf().text?.y).toBe(0.5); // moves on release
+    fireEvent.pointerUp(down);
+    await waitFor(() => expect(textOf().text?.y).toBe(0.85));
+    expectValid(useProjectStore.getState().project);
+  });
+
+  it("redraws text pictures when the canvas size changes, and again after an undo", async () => {
+    const stop = watchTextPictures();
+    expect(invoke).not.toHaveBeenCalled(); // already the size of the canvas
+    useProjectStore.getState().execute({
+      label: "Change canvas",
+      apply: (p) => ({ ok: true, project: withCanvas(p, { width: 1080, height: 1920, fps: 30 }) }),
+    });
+    await waitFor(() => expect(textOf()).toMatchObject({ width: 1080, height: 1920 }));
+    expect(textOf().path).toBe("/data/text/Hello\nworld-64-#FFFFFF-1080.png");
+    expect(useProjectStore.getState().past).toHaveLength(1); // not an undo step of its own
+
+    undo();
+    expect(textOf()).toMatchObject({ width: 1920, height: 1080, path: PICTURE });
+    stop();
+  });
+});
+
+describe("moving text in the preview", () => {
+  const short: TextSpec = { content: "Hello", fontSize: 108, color: "#FFFFFF", x: 0.5, y: 0.5 };
+
+  it("estimates where the text sits from its size, lines and alignment", () => {
+    const box = textHitBox(short, 1920, 1080);
+    expect((box.left + box.right) / 2).toBeCloseTo(0.5);
+    expect((box.top + box.bottom) / 2).toBeCloseTo(0.5);
+    expect(box.right - box.left).toBeCloseTo((5 * 108 * 0.62) / 1920 + 0.04);
+    expect(box.bottom - box.top).toBeCloseTo((108 * 1.25) / 1080 + 0.04);
+
+    const left = textHitBox({ ...short, align: "left" }, 1920, 1080);
+    expect(left.left).toBeCloseTo(0.05 - 0.02); // the 90% box starts at 5%
+    const right = textHitBox({ ...short, align: "right", x: 0.5 }, 1920, 1080);
+    expect(right.right).toBeCloseTo(0.95 + 0.02);
+    const two = textHitBox({ ...short, content: "Hello\nworld" }, 1920, 1080);
+    expect(two.bottom - two.top).toBeCloseTo((2 * 108 * 1.25) / 1080 + 0.04);
+    const long = textHitBox({ ...short, content: "x".repeat(100) }, 1920, 1080);
+    expect(long.right - long.left).toBeCloseTo(0.9 + 0.04); // wraps, never wider than the box
+    expect(long.bottom - long.top).toBeGreaterThan(two.bottom - two.top);
+  });
+
+  it("drags the text with the pointer and saves the new position on release", async () => {
+    useProjectStore.getState().loadProject(withText(2), "/p.cutvii", []);
+    usePlaybackStore.setState({ playhead: 3, playing: false });
+    useSelectionStore.getState().clear();
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockResolvedValue("/data/text/moved.png");
+    render(<Preview />);
+    const stage = screen.getByTestId("preview-stage");
+    stage.getBoundingClientRect = () =>
+      ({ left: 100, top: 50, width: 800, height: 450, right: 900, bottom: 500 }) as DOMRect;
+    const text = () => screen.getByTestId("text-layer");
+    const stored = () => useProjectStore.getState().project.assets.find((a) => a.id === "text")!;
+
+    // pressing beside the text does nothing
+    fireEvent.pointerDown(stage, { button: 0, clientX: 120, clientY: 60 });
+    fireEvent.pointerMove(stage, { clientX: 300, clientY: 200 });
+    fireEvent.pointerUp(stage);
+    expect(text().style.transform).toBe("");
+    expect(useSelectionStore.getState().selectedClipIds).toEqual([]);
+
+    // a click on the text selects it without moving it
+    fireEvent.pointerDown(stage, { button: 0, clientX: 500, clientY: 275 });
+    expect(useSelectionStore.getState().selectedClipIds).toEqual(["title"]);
+    fireEvent.pointerUp(stage);
+    expect(invoke).not.toHaveBeenCalled();
+
+    // drag 200px right (25% of 800) and 90px down (20% of 450)
+    fireEvent.pointerDown(stage, { button: 0, clientX: 500, clientY: 275 });
+    fireEvent.pointerMove(stage, { clientX: 700, clientY: 365 });
+    expect(text().style.transform).toBe("translate(25%, 20%)");
+    expect(stage.style.cursor).toBe("grabbing");
+    expect(stored().text).toMatchObject({ x: 0.5, y: 0.5 }); // nothing saved while dragging
+    fireEvent.pointerUp(stage);
+    await waitFor(() => expect(stored().text).toMatchObject({ x: 0.75, y: 0.7 }));
+    expect(invoke).toHaveBeenCalledWith(
+      "render_text",
+      expect.objectContaining({
+        spec: expect.objectContaining({ x: 0.75, y: 0.7, content: "Hello\nworld" }),
+      }),
+    );
+    await waitFor(() => expect(text().style.transform).toBe(""));
+    expect(text()).toHaveAttribute("src", "asset://localhost/data/text/moved.png");
+    expect(useProjectStore.getState().past).toHaveLength(1);
+
+    // dragged past the edge: the centre stops at the edge of the canvas
+    fireEvent.pointerDown(stage, { button: 0, clientX: 700, clientY: 365 });
+    fireEvent.pointerMove(stage, { clientX: 2000, clientY: -500 });
+    expect(text().style.transform).toBe("translate(25%, -70%)");
+    fireEvent.pointerUp(stage);
+    await waitFor(() => expect(stored().text).toMatchObject({ x: 1, y: 0 }));
+    undo();
+    expect(stored().text).toMatchObject({ x: 0.75, y: 0.7 });
   });
 });

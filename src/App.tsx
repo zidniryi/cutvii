@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { installCloseGuard } from "@/lib/closeGuard";
 import { onMenuAction } from "@/lib/menuEvents";
 import { useFileDrop } from "@/hooks/useFileDrop";
+import { watchTextPictures } from "@/timeline/text";
 import { useEditorShortcuts } from "@/timeline/useEditorShortcuts";
 
 const TABS: { id: SidePanel; label: string }[] = [
@@ -50,6 +51,7 @@ function SidePanelTabs() {
 export default function App() {
   useEditorShortcuts();
   useFileDrop();
+  useEffect(() => watchTextPictures(), []);
   useEffect(() => {
     const guard = installCloseGuard();
     const menu = onMenuAction();

@@ -1,5 +1,7 @@
 import { useId, useState } from "react";
 import { AlertTriangle } from "lucide-react";
+import { CropPanel } from "@/components/inspector/CropPanel";
+import { TextPanel } from "@/components/inspector/TextPanel";
 import { Panel } from "@/components/Panel";
 import { assetName, fileName } from "@/lib/media";
 import { formatTimecode } from "@/lib/timecode";
@@ -341,12 +343,13 @@ export const TABS_FOR: Record<ClipKind, InspectorTab[]> = {
   audio: ["audio", "speed", "info"],
   image: ["video", "info"], // stills have no sound and no speed
 };
-const TEXT_TABS: InspectorTab[] = ["info"];
+const TEXT_TABS: InspectorTab[] = ["text", "info"];
 const TAB_LABEL: Record<InspectorTab, string> = {
   video: "Video",
   audio: "Audio",
   speed: "Speed",
   info: "Info",
+  text: "Text",
 };
 
 function FitChips({ clip }: { clip: TimelineClip }) {
@@ -626,7 +629,7 @@ function InfoTab({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset; 
 /** Tabs for one clip. The chosen tab is remembered per kind of clip. */
 function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset; fps: number }) {
   const kind: ClipKind = asset.type;
-  // a text picture has no fit, background, sound or speed: only its facts (the text editor comes next)
+  // a text picture has no fit, background, sound or speed: its own editor instead
   const tabs = asset.text ? TEXT_TABS : TABS_FOR[kind];
   const remembered = useUiStore((s) => s.inspectorTab[kind]);
   const setTab = useUiStore((s) => s.setInspectorTab);
@@ -695,6 +698,7 @@ function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset;
             opaque={asset.type === "video"}
           />
         )}
+        {active === "video" && <CropPanel key={`${clip.id}-crop`} clip={clip} />}
         {active === "audio" && (
           <VolumeField
             key={`${clip.id}-vol`}
@@ -713,6 +717,9 @@ function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset;
             reverseId={reverseKey(asset.path, clip.sourceIn, clip.sourceOut)}
             isVideo={asset.type === "video"}
           />
+        )}
+        {active === "text" && asset.text && (
+          <TextPanel key={`${clip.id}-text`} clipId={clip.id} spec={asset.text} />
         )}
         {active === "info" && <InfoTab clip={clip} asset={asset} fps={fps} />}
       </div>

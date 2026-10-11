@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 export type SidePanel = "library" | "inspector";
-export type InspectorTab = "video" | "audio" | "speed" | "info";
+export type InspectorTab = "video" | "audio" | "speed" | "info" | "text";
 export type ClipKind = "video" | "audio" | "image";
 
 export interface DialogState {

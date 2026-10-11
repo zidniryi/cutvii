@@ -662,7 +662,7 @@ mod tests {
     }
     fn project(assets: Vec<Value>, tracks: Vec<Value>) -> Project {
         serde_json::from_value(json!({
-            "id": "p", "name": "t", "schemaVersion": 5,
+            "id": "p", "name": "t", "schemaVersion": 6,
             "createdAt": "2026-01-01T00:00:00.000Z", "modifiedAt": "2026-01-01T00:00:00.000Z",
             "settings": {"width": 640, "height": 360, "fps": 30, "backgroundColor": "#202020"},
             "assets": assets, "tracks": tracks
@@ -1127,6 +1127,65 @@ mod tests {
         );
         assert!(!near(bar, (32, 32, 32), 40));
         assert!(is_red(e.region(&blur, 0.5, mid_left)) && is_blue(e.region(&blur, 0.5, mid_right)));
+    }
+
+    #[test]
+    fn crop_keeps_only_the_chosen_part_of_the_picture() {
+        let Some(e) = env("crop") else { return };
+        let img = e.two_tone_jpg("wide.jpg"); // 2:1, red | blue
+        let render = |name: &str, crop: crate::project::Crop| {
+            let mut p = still_project(&img, Some("fit"));
+            p.tracks[0].clips[0].crop = Some(crop);
+            let out = e.dir.join(name);
+            e.export(&p, &square(), &out)
+                .0
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            out
+        };
+        let (left, right, top) = ("100:100:30:130", "100:100:230:130", "120:50:10:10");
+
+        // left half cut away: the blue half is square, so it fits the square canvas with no bars
+        let blue = render(
+            "blue.mp4",
+            crate::project::Crop {
+                left: 0.5,
+                ..Default::default()
+            },
+        );
+        for at in [left, right, top] {
+            assert!(
+                is_blue(e.region(&blue, 0.5, at)),
+                "{at}: {:?}",
+                e.region(&blue, 0.5, at)
+            );
+        }
+        // right half cut away: all red
+        let red = render(
+            "red.mp4",
+            crate::project::Crop {
+                right: 0.5,
+                ..Default::default()
+            },
+        );
+        assert!(is_red(e.region(&red, 0.5, left)) && is_red(e.region(&red, 0.5, right)));
+        // top and bottom cut: the picture gets flatter (4:1), so the bars grow and both colours remain
+        let flat = render(
+            "flat.mp4",
+            crate::project::Crop {
+                top: 0.25,
+                bottom: 0.25,
+                ..Default::default()
+            },
+        );
+        assert!(
+            is_red(e.region(&flat, 0.5, "60:40:60:160"))
+                && is_blue(e.region(&flat, 0.5, "60:40:240:160"))
+        );
+        assert!(
+            near(e.region(&flat, 0.5, "100:60:130:60"), (32, 32, 32), 14),
+            "above the flatter picture is background: {:?}",
+            e.region(&flat, 0.5, "100:60:130:60")
+        );
     }
 
     #[test]

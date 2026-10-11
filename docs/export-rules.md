@@ -11,6 +11,9 @@ Source of truth: `src-tauri/src/export/` (`plan.rs` builds the plan and FFmpeg f
   **fill** (default) covers the canvas and crops the overflow equally on both sides; **fit** shows the whole picture
   with bars in the background colour; **blur-bg** shows the whole picture over a blurred, covering copy of itself
   (blur sigma = 3 % of the canvas height). The preview uses the same geometry (`src/timeline/fit.ts`).
+- **Crop** comes first: the chosen shares are cut from the source picture (`crop=iw*…:ih*…`), and everything after
+  it (fit mode, blurred copy, background) sees only what is left. The preview lays the clip out by the cropped
+  size and enlarges the picture inside a clipping frame by the same shares.
 - Stills are looped for the clip length; transparency is flattened onto the background.
 - **Text** is the exception to both rules above: a text picture keeps its transparency and is laid over whatever
   the tracks below show, with no background of its own (`fitMode` and `fitBackground` do not apply to it). It is

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-/** Bump when the on-disk shape changes, and add a migration in `src-tauri/src/project/migrate.rs`. v2: clip speed. v3: fitMode. v4: fitBackground. v5: text assets. */
-export const SCHEMA_VERSION = 5;
+/** Bump when the on-disk shape changes, and add a migration in `src-tauri/src/project/migrate.rs`. v2: clip speed. v3: fitMode. v4: fitBackground. v5: text assets. v6: clip crop. */
+export const SCHEMA_VERSION = 6;
 
 /** Tolerance (seconds) when comparing a clip's sourceOut with the asset duration. */
 const DURATION_EPSILON = 1e-3;
@@ -143,6 +143,18 @@ export const FitBackgroundSchema = z
     path: ["assetId"],
   });
 
+/** The most that can be cropped away along one axis (both sides together). Same in Rust. */
+export const MAX_CROP = 0.9;
+const cropSide = z.number().min(0).max(MAX_CROP);
+
+/** Shares of the source picture removed from each side before it is scaled to the canvas. */
+export const CropSchema = z
+  .object({ left: cropSide, top: cropSide, right: cropSide, bottom: cropSide })
+  .strict()
+  .refine((c) => c.left + c.right <= MAX_CROP + 1e-9 && c.top + c.bottom <= MAX_CROP + 1e-9, {
+    message: "at least a tenth of the picture must remain",
+  });
+
 export const TimelineClipSchema = z
   .object({
     id: Id,
@@ -170,6 +182,8 @@ export const TimelineClipSchema = z
     keepPitch: z.boolean().optional(),
     /** Play the used source range backwards; absent means false. */
     reversed: z.boolean().optional(),
+    /** Edges of the picture cut away; absent means none. */
+    crop: CropSchema.optional(),
   })
   .strict()
   .refine((c) => c.sourceOut > c.sourceIn, {
@@ -245,6 +259,7 @@ export const ProjectSchema = z
     });
   });
 
+export type Crop = z.infer<typeof CropSchema>;
 export type TextSpec = z.infer<typeof TextSpecSchema>;
 export type FitBackground = z.infer<typeof FitBackgroundSchema>;
 export type FitMode = NonNullable<z.infer<typeof TimelineClipSchema>["fitMode"]>;

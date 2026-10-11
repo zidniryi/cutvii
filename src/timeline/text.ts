@@ -1,6 +1,6 @@
 /** Text and titles: a text clip is an image asset whose picture CutVii draws from its `text` properties. */
 import { invoke } from "@tauri-apps/api/core";
-import type { MediaAsset, Project, TextSpec } from "@/project/model";
+import { TextSpecSchema, type MediaAsset, type Project, type TextSpec } from "@/project/model";
 import { usePlaybackStore } from "@/store/playback";
 import { useProjectStore } from "@/store/project";
 import { useSelectionStore } from "@/store/selection";
@@ -92,4 +92,157 @@ export async function addTextAtPlayhead(): Promise<void> {
   });
   if (result.ok) useSelectionStore.getState().select(clipId);
   else useUiStore.getState().setNotice(result.error.message);
+}
+
+/**
+ * Point a text clip at a freshly drawn picture of its edited text. A text shared by several clips (the halves
+ * of a split) is copied first, so editing one clip never changes another.
+ */
+export function applyTextEdit(
+  project: Project,
+  args: { clipId: string; picture: string; spec: TextSpec; newAssetId: string },
+): EditResult {
+  const clip = project.tracks.flatMap((t) => t.clips).find((c) => c.id === args.clipId);
+  const asset = clip && project.assets.find((a) => a.id === clip.assetId);
+  if (!clip || !asset?.text) {
+    return { ok: false, error: { code: "unknown-clip", message: "That text is no longer on the timeline" } };
+  }
+  const { width, height } = project.settings;
+  const edited: MediaAsset = { ...asset, path: args.picture, width, height, text: args.spec };
+  const shared = project.tracks.flatMap((t) => t.clips).filter((c) => c.assetId === asset.id).length > 1;
+  if (!shared) {
+    return {
+      ok: true,
+      project: { ...project, assets: project.assets.map((a) => (a.id === asset.id ? edited : a)) },
+    };
+  }
+  return {
+    ok: true,
+    project: {
+      ...project,
+      assets: [...project.assets, { ...edited, id: args.newAssetId }],
+      tracks: project.tracks.map((t) => ({
+        ...t,
+        clips: t.clips.map((c) => (c.id === clip.id ? { ...c, assetId: args.newAssetId } : c)),
+      })),
+    },
+  };
+}
+
+/** The newest requested text per clip while its picture is still being drawn. */
+const pendingSpecs = new Map<string, { spec: TextSpec; turn: number }>();
+let turns = 0;
+
+/**
+ * Change some properties of a text clip: draw the new picture (in Rust), then swap it in as one undoable
+ * step. Quick successive edits build on each other, and only the newest picture is applied.
+ * Returns a message when the change is not valid, otherwise null.
+ */
+export async function editText(clipId: string, patch: Partial<TextSpec>): Promise<string | null> {
+  const project = useProjectStore.getState().project;
+  const clip = project.tracks.flatMap((t) => t.clips).find((c) => c.id === clipId);
+  const stored = clip && project.assets.find((a) => a.id === clip.assetId)?.text;
+  if (!stored) return "That text is no longer on the timeline";
+
+  const parsed = TextSpecSchema.safeParse({ ...(pendingSpecs.get(clipId)?.spec ?? stored), ...patch });
+  if (!parsed.success) return parsed.error.issues[0]?.message ?? "Invalid text";
+  const spec = parsed.data;
+  const turn = ++turns;
+  pendingSpecs.set(clipId, { spec, turn });
+
+  const { width, height } = project.settings;
+  try {
+    const picture = await invoke<string>("render_text", { spec, width, height });
+    if (pendingSpecs.get(clipId)?.turn !== turn) return null; // a newer edit is on its way
+    const result = useProjectStore.getState().execute({
+      label: "Edit text",
+      apply: (p) => applyTextEdit(p, { clipId, picture, spec, newAssetId: crypto.randomUUID() }),
+    });
+    return result.ok ? null : result.error.message;
+  } catch (e) {
+    const reason = typeof e === "string" ? e : e instanceof Error ? e.message : "unknown error";
+    return `Could not draw the text: ${reason}`;
+  } finally {
+    if (pendingSpecs.get(clipId)?.turn === turn) pendingSpecs.delete(clipId);
+  }
+}
+
+/**
+ * Keep text pictures the size of the canvas: when the canvas changes (or an undo brings back an older
+ * picture), draw them again. Not an undo step of its own; it follows whatever changed the canvas.
+ */
+export function watchTextPictures(): () => void {
+  const busy = new Set<string>(); // also remembers failures, so a picture that cannot be drawn is not retried forever
+  const check = () => {
+    const { project } = useProjectStore.getState();
+    const { width, height } = project.settings;
+    for (const asset of project.assets) {
+      const spec = asset.text;
+      if (!spec || (asset.width === width && asset.height === height)) continue;
+      const key = `${asset.id}:${width}x${height}:${JSON.stringify(spec)}`;
+      if (busy.has(key)) continue;
+      busy.add(key);
+      Promise.resolve(invoke<string>("render_text", { spec, width, height })).then(
+        (picture) => {
+          if (typeof picture !== "string") return;
+          busy.delete(key);
+          useProjectStore.setState((s) => {
+            const now = s.project.settings;
+            if (now.width !== width || now.height !== height) return s;
+            return {
+              project: {
+                ...s.project,
+                assets: s.project.assets.map((a) =>
+                  a.id === asset.id && a.text === spec ? { ...a, path: picture, width, height } : a,
+                ),
+              },
+            };
+          });
+        },
+        () => {
+          /* left as it is: the old picture is still shown, scaled to fit */
+        },
+      );
+    }
+  };
+  check();
+  return useProjectStore.subscribe(check);
+}
+
+/** Rough width of a character as a share of the font size (the real picture is drawn in Rust). */
+const CHAR_WIDTH = 0.62;
+const LINE_HEIGHT = 1.25;
+const WRAP_WIDTH = 0.9;
+const HIT_PADDING = 0.02;
+
+export interface Box {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/**
+ * About where a text sits on the canvas, as shares of its width and height: good enough to tell whether a
+ * pointer is on the text. Follows the same layout rules as the renderer (90% wrap width, alignment).
+ */
+export function textHitBox(spec: TextSpec, canvasWidth: number, canvasHeight: number): Box {
+  const lineWidth = (chars: number) => (chars * spec.fontSize * CHAR_WIDTH) / canvasWidth;
+  const lines = spec.content.split("\n");
+  const width = Math.min(WRAP_WIDTH, Math.max(...lines.map((l) => lineWidth(l.length))));
+  const rows = lines.reduce((n, l) => n + Math.max(1, Math.ceil(lineWidth(l.length) / WRAP_WIDTH)), 0);
+  const height = (rows * spec.fontSize * LINE_HEIGHT) / canvasHeight;
+  const align = spec.align ?? "center";
+  const centre =
+    align === "left"
+      ? spec.x - WRAP_WIDTH / 2 + width / 2
+      : align === "right"
+        ? spec.x + WRAP_WIDTH / 2 - width / 2
+        : spec.x;
+  return {
+    left: centre - width / 2 - HIT_PADDING,
+    right: centre + width / 2 + HIT_PADDING,
+    top: spec.y - height / 2 - HIT_PADDING,
+    bottom: spec.y + height / 2 + HIT_PADDING,
+  };
 }

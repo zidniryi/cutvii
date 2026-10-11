@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::media::MediaType;
 use crate::media::text::TextSpec;
 
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -97,6 +97,35 @@ pub struct TimelineClip {
     /// Play the used source range backwards. Absent means false.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reversed: Option<bool>,
+    /// Part of the picture cut away on each side before it is scaled to the canvas. Absent means none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crop: Option<Crop>,
+}
+
+/// Shares of the source picture (0..=0.9) removed from each side. At least a tenth must remain each way.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Crop {
+    pub left: f64,
+    pub top: f64,
+    pub right: f64,
+    pub bottom: f64,
+}
+
+/// The most that can be cropped away along one axis (both sides together).
+pub const MAX_CROP: f64 = 0.9;
+
+impl Crop {
+    pub fn is_none(&self) -> bool {
+        self.left == 0.0 && self.top == 0.0 && self.right == 0.0 && self.bottom == 0.0
+    }
+    pub fn is_valid(&self) -> bool {
+        [self.left, self.top, self.right, self.bottom]
+            .iter()
+            .all(|v| (0.0..=MAX_CROP).contains(v))
+            && self.left + self.right <= MAX_CROP + 1e-9
+            && self.top + self.bottom <= MAX_CROP + 1e-9
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

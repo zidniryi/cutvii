@@ -4,13 +4,14 @@ import { useUiStore } from "@/store/ui";
 import { usePlaybackStore } from "@/store/playback";
 import { useProjectStore } from "@/store/project";
 import { clipEnd, EPS, minClipDuration } from "./clips";
-import type { FitBackground, FitMode } from "@/project/model";
+import type { Crop, FitBackground, FitMode } from "@/project/model";
 import {
   addClip,
   addTrack,
   applyFitBackgroundToAll,
   deleteClip,
   moveClip,
+  setClipCrop,
   setClipFit,
   setClipFitBackground,
   setClipKeepPitch,
@@ -103,6 +104,10 @@ export function applyBackgroundToAllClips(background: FitBackground): EditResult
 
 export function changeReversed(clipId: string, reversed: boolean): EditResult {
   return run(reversed ? "Reverse clip" : "Play clip forwards", (p) => setClipReversed(p, clipId, reversed));
+}
+
+export function changeCrop(clipId: string, crop: Crop | null): EditResult {
+  return run(crop ? "Crop" : "Reset crop", (p) => setClipCrop(p, clipId, crop));
 }
 
 export function changeFit(clipId: string, fit: FitMode): EditResult {
