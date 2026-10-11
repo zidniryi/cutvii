@@ -123,10 +123,12 @@ export function moveClip(
   if (!target) return fail("unknown-track", `Unknown track ${to.trackId}`);
   const asset = project.assets.find((a) => a.id === clip.assetId);
   if (!asset) return fail("unknown-asset", `Unknown asset ${clip.assetId}`);
-  if (!acceptsAsset(target, asset.type)) {
+  // a video's detached sound lives on an audio track and may only move to another audio track
+  const kind = found.track.type === "audio" ? "audio" : asset.type;
+  if (!acceptsAsset(target, kind)) {
     return fail(
       "incompatible-track",
-      `${article(asset.type)} cannot be placed on ${article(target.type).toLowerCase()} track`,
+      `${article(kind)} cannot be placed on ${article(target.type).toLowerCase()} track`,
     );
   }
   if (!(to.start >= 0)) return fail("out-of-range", "Clip cannot start before 0");

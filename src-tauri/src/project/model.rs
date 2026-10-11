@@ -108,7 +108,19 @@ pub struct TimelineClip {
     pub flip_h: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flip_v: Option<bool>,
+    /// This clip makes no sound (its picture still shows). Absent means false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub muted: Option<bool>,
+    /// Seconds over which the sound rises from silence at the start / falls to silence at the end, measured
+    /// on the timeline. Absent means 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fade_in: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fade_out: Option<f64>,
 }
+
+/// The longest fade that can be stored. A fade longer than its clip is shortened when it is applied.
+pub const MAX_FADE: f64 = 60.0;
 
 /// Limits of the clip transform. `x` and `y` are shares of the canvas (0.1 = a tenth of its width to the
 /// right / of its height down); `scale` 1 is the fitted size.
@@ -214,6 +226,14 @@ impl TimelineClip {
     }
     pub fn speed(&self) -> f64 {
         self.speed.unwrap_or(1.0)
+    }
+    /// The fades as they are applied: the fade-in is at most the clip's length, the fade-out takes what
+    /// is left. The preview uses the same rule.
+    pub fn fades(&self) -> (f64, f64) {
+        let length = self.timeline_duration();
+        let fade_in = self.fade_in.unwrap_or(0.0).clamp(0.0, length);
+        let fade_out = self.fade_out.unwrap_or(0.0).clamp(0.0, length - fade_in);
+        (fade_in, fade_out)
     }
     pub fn keep_pitch(&self) -> bool {
         self.keep_pitch.unwrap_or(true)

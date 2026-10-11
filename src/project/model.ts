@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** Bump when the on-disk shape changes, and add a migration in `src-tauri/src/project/migrate.rs`. v2: clip speed. v3: fitMode. v4: fitBackground. v5: text assets. v6: clip crop, text font, rotation and flip. */
+/** Bump when the on-disk shape changes, and add a migration in `src-tauri/src/project/migrate.rs`. v2: clip speed. v3: fitMode. v4: fitBackground. v5: text assets. v6: clip crop, text font, rotation and flip, clip mute and fades. */
 export const SCHEMA_VERSION = 6;
 
 /** Tolerance (seconds) when comparing a clip's sourceOut with the asset duration. */
@@ -157,6 +157,9 @@ export const CropSchema = z
     message: "at least a tenth of the picture must remain",
   });
 
+/** The longest fade that can be stored (seconds). Same in Rust. A fade longer than its clip is shortened. */
+export const MAX_FADE = 60;
+
 /** Limits of the clip transform. The same numbers are enforced in Rust (`project/model.rs`). */
 export const TRANSFORM_LIMITS = { offset: 2, minScale: 0.05, maxScale: 4, rotation: 180 } as const;
 
@@ -194,6 +197,11 @@ export const TimelineClipSchema = z
     keepPitch: z.boolean().optional(),
     /** Play the used source range backwards; absent means false. */
     reversed: z.boolean().optional(),
+    /** This clip makes no sound (its picture still shows); absent means false. */
+    muted: z.boolean().optional(),
+    /** Seconds of fade at the start / end of the clip's sound, on the timeline; absent means 0. */
+    fadeIn: z.number().min(0).max(MAX_FADE).optional(),
+    fadeOut: z.number().min(0).max(MAX_FADE).optional(),
     /** Edges of the picture cut away; absent means none. */
     crop: CropSchema.optional(),
   })
@@ -258,7 +266,8 @@ export const ProjectSchema = z
         }
         const asset = assets.get(clip.assetId);
         if (!asset) return fail([...at, "assetId"], `unknown asset "${clip.assetId}"`);
-        if (track.type === "audio" && asset.type !== "audio") {
+        // a video on an audio track is its detached sound; a still has none
+        if (track.type === "audio" && asset.type === "image") {
           fail([...at, "assetId"], `${asset.type} asset cannot be placed on an audio track`);
         }
         if (track.type === "video" && asset.type === "audio") {

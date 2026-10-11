@@ -33,6 +33,9 @@ pub struct PlannedClip {
     pub reversed: bool,
     pub start: f64,
     pub volume: f64,
+    /// Seconds of fade at the start and at the end of the clip's sound (already fitted to its length).
+    pub fade_in: f64,
+    pub fade_out: f64,
     /// How the picture is scaled to the canvas (video and stills).
     pub fit: FitMode,
     /// Colour behind the picture where it does not cover the canvas (`#RRGGBB`).
@@ -136,6 +139,7 @@ pub fn build_plan(
                 && !track.hidden
                 && asset.media_type != MediaType::Audio;
             let audio = !track.muted
+                && !c.muted.unwrap_or(false)
                 && match asset.media_type {
                     MediaType::Audio => true,
                     MediaType::Video => fact.is_some_and(|f| f.has_audio),
@@ -201,6 +205,8 @@ pub fn build_plan(
                 reversed,
                 start: c.timeline_start,
                 volume: c.volume,
+                fade_in: c.fades().0,
+                fade_out: c.fades().1,
                 fit: c.fit_mode.unwrap_or_default(),
                 bg_color,
                 bg_image,
@@ -502,9 +508,21 @@ pub fn build_filter_graph(plan: &ExportPlan) -> FilterGraph {
                 AUDIO_RATE as f64 * clip.speed
             )
         };
+        // fades: straight-line ramps in clip time (after the speed change), like the preview's
+        let mut fades = String::new();
+        if clip.fade_in > 1e-6 {
+            fades.push_str(&format!("afade=t=in:st=0:d={:.6},", clip.fade_in));
+        }
+        if clip.fade_out > 1e-6 {
+            fades.push_str(&format!(
+                "afade=t=out:st={:.6}:d={:.6},",
+                clip.duration - clip.fade_out,
+                clip.fade_out
+            ));
+        }
         parts.push(format!(
             "[{i}:a]aresample={AUDIO_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,{tempo}\
-             volume={vol:.4},asetpts=PTS-STARTPTS,adelay={ms}|{ms}[a{n}]",
+             volume={vol:.4},asetpts=PTS-STARTPTS,{fades}adelay={ms}|{ms}[a{n}]",
             vol = clip.volume,
             n = labels.len()
         ));
@@ -920,6 +938,64 @@ mod tests {
                 .unwrap_err()
                 .join(";")
                 .contains("rotation")
+        );
+    }
+
+    #[test]
+    fn clip_mute_fades_and_detached_sound_shape_the_mix() {
+        // sample: video c1 on t1 at 1..5 (source 2..6), still on t2, music on t3 at 0.5..4.5
+        let mut p = sample();
+        p.tracks[0].clips[0].muted = Some(true);
+        let plan = build_plan(&p, &opts(), &sample_facts()).unwrap();
+        assert!(
+            plan.clips[0].video && !plan.clips[0].audio,
+            "a muted clip keeps its picture"
+        );
+
+        // the video's sound, detached onto the audio track: sound only, from the same file
+        p.tracks[2]
+            .clips
+            .push(serde_json::from_value(clip("c4", "v", "t3", 6.0, 2.0, 6.0)).unwrap());
+        let c = &mut p.tracks[2].clips[1];
+        (c.fade_in, c.fade_out) = (Some(1.0), Some(0.5));
+        let plan = build_plan(&p, &opts(), &sample_facts()).unwrap();
+        let detached = plan.clips.last().unwrap();
+        assert!(!detached.video && detached.audio);
+        assert_eq!((detached.fade_in, detached.fade_out), (1.0, 0.5));
+        let g = build_filter_graph(&plan).graph;
+        assert!(
+            g.contains("asetpts=PTS-STARTPTS,afade=t=in:st=0:d=1.000000,afade=t=out:st=3.500000:d=0.500000,adelay=6000|6000"),
+            "{g}"
+        );
+        assert_eq!(
+            g.matches("afade").count(),
+            2,
+            "the other clips have no fades"
+        );
+
+        // fades longer than the clip are fitted: the fade-in first, the fade-out gets the rest
+        let c = &mut p.tracks[2].clips[1];
+        (c.fade_in, c.fade_out) = (Some(3.0), Some(3.0));
+        let plan = build_plan(&p, &opts(), &sample_facts()).unwrap();
+        let fitted = plan.clips.last().unwrap();
+        assert_eq!((fitted.fade_in, fitted.fade_out), (3.0, 1.0));
+
+        // an image has no sound to put on an audio track; a fade must be a sensible length
+        let mut bad = sample();
+        bad.tracks[2].clips[0].asset_id = "i".into();
+        assert!(
+            build_plan(&bad, &opts(), &sample_facts())
+                .unwrap_err()
+                .join(";")
+                .contains("audio track")
+        );
+        let mut bad = sample();
+        bad.tracks[2].clips[0].fade_out = Some(-1.0);
+        assert!(
+            build_plan(&bad, &opts(), &sample_facts())
+                .unwrap_err()
+                .join(";")
+                .contains("fadeOut")
         );
     }
 

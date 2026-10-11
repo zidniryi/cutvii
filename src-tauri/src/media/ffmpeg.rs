@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 
 use super::MediaType;
 use super::probe::{
-    apply_rotation, classify_extension, parse_frame_rotation, parse_probe_json,
-    parse_stream_summary,
+    MediaDetails, apply_rotation, classify_extension, parse_details, parse_frame_rotation,
+    parse_probe_json, parse_stream_summary,
 };
 use super::reverse::{ReverseProfile, SourceShape, extract_frame, reverse_range};
 use super::tools::{FFMPEG_ENV, FFPROBE_ENV, command, locate_tool};
@@ -56,6 +56,33 @@ fn require_file(path: &Path) -> AppResult<()> {
 }
 
 impl FfmpegBackend {
+    /// Codecs, container, bit rate and size on disk of a file, for the inspector. The file is only read.
+    pub fn details(&self, path: &Path) -> AppResult<MediaDetails> {
+        require_file(path)?;
+        let out = command(&self.ffprobe)
+            .args([
+                "-v",
+                "error",
+                "-print_format",
+                "json",
+                "-show_format",
+                "-show_streams",
+                "-i",
+            ])
+            .arg(path)
+            .output()?;
+        if !out.status.success() {
+            return Err(AppError::InvalidInput(format!(
+                "ffprobe could not read file: {}",
+                first_line(&out.stderr)
+            )));
+        }
+        Ok(MediaDetails {
+            size_bytes: fs::metadata(path)?.len(),
+            ..parse_details(&String::from_utf8_lossy(&out.stdout))?
+        })
+    }
+
     /// Size, frame rate and stream kinds of a file (what the reverse pipeline needs to size its chunks).
     pub fn shape(&self, path: &Path) -> AppResult<SourceShape> {
         require_file(path)?;

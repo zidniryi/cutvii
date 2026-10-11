@@ -298,14 +298,15 @@ export function Timeline() {
                         key={clip.id}
                         clip={clip}
                         name={asset ? assetName(asset) : "Missing media"}
-                        type={asset?.type ?? "video"}
+                        // a video's detached sound looks like the audio it is
+                        type={track.type === "audio" ? "audio" : (asset?.type ?? "video")}
                         pps={pps}
                         selected={selected.has(clip.id)}
                         missing={asset ? missing.has(asset.path) : true}
                         wavePath={wave ? asset?.path : undefined}
                         waveFrom={wave?.from}
                         waveTo={wave?.to}
-                        muted={track.muted}
+                        muted={track.muted || (clip.muted ?? false)}
                         onBodyPointerDown={onBodyPointerDown}
                         onTrimPointerDown={onTrimPointerDown}
                         onContextMenu={onContextMenu}

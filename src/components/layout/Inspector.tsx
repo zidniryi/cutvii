@@ -1,6 +1,8 @@
 import { useId, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import { CropPanel } from "@/components/inspector/CropPanel";
+import { MediaInfo } from "@/components/inspector/MediaInfo";
+import { SoundPanel } from "@/components/inspector/SoundPanel";
 import { TextPanel } from "@/components/inspector/TextPanel";
 import { TransformPanel } from "@/components/inspector/TransformPanel";
 import { Panel } from "@/components/Panel";
@@ -597,6 +599,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 }
 
 function InfoTab({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset; fps: number }) {
+  const missing = useProjectStore((s) => s.missingPaths.includes(asset.path));
   return (
     <dl className="grid grid-cols-2 gap-3 text-xs">
       <Row label="Source in">
@@ -614,22 +617,26 @@ function InfoTab({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset; 
         <Row label="Frame rate">{formatFps(asset.fpsNum / asset.fpsDen)} fps</Row>
       )}
       {asset.duration !== undefined && <Row label="File length">{formatDuration(asset.duration)}</Row>}
-      <div className="col-span-2">
-        {asset.text ? (
+      {asset.text ? (
+        <div className="col-span-2">
           <Row label="Text">
             <span className="whitespace-pre-wrap">{asset.text.content}</span>
           </Row>
-        ) : (
-          <Row label="File">{asset.path}</Row>
-        )}
-      </div>
+        </div>
+      ) : (
+        <MediaInfo asset={asset} missing={missing} />
+      )}
     </dl>
   );
 }
 
 /** Tabs for one clip. The chosen tab is remembered per kind of clip. */
 function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset; fps: number }) {
-  const kind: ClipKind = asset.type;
+  const onAudioTrack = useProjectStore(
+    (s) => s.project.tracks.find((t) => t.id === clip.trackId)?.type === "audio",
+  );
+  // a video's detached sound is an audio clip in every way that matters here
+  const kind: ClipKind = onAudioTrack ? "audio" : asset.type;
   // a text picture has no fit, background, sound or speed: its own editor instead
   const tabs = asset.text ? TEXT_TABS : TABS_FOR[kind];
   const remembered = useUiStore((s) => s.inspectorTab[kind]);
@@ -708,6 +715,14 @@ function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset;
             onCommit={(v) => report(changeVolume(clip.id, v))}
           />
         )}
+        {active === "audio" && (
+          <SoundPanel
+            key={`${clip.id}-sound`}
+            clip={clip}
+            asset={asset}
+            detachable={asset.type === "video" && !onAudioTrack}
+          />
+        )}
         {active === "speed" && (
           <SpeedPanel
             key={`${clip.id}-speed`}
@@ -717,7 +732,7 @@ function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset;
             source={sourceDuration(clip)}
             reversed={clip.reversed ?? false}
             reverseId={reverseKey(asset.path, clip.sourceIn, clip.sourceOut)}
-            isVideo={asset.type === "video"}
+            isVideo={asset.type === "video" && !onAudioTrack}
           />
         )}
         {active === "text" && asset.text && (

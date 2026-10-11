@@ -162,7 +162,7 @@ Android is done only after Phase 8 is verified on a real device or emulator.
 This file is the original spec plus sections 6j and 12. The user pasted newer spec sections (6c–6n) in chat only;
 they are **not** in this file. If a section is missing here, ask the user to paste it again rather than guessing.
 
-**Last green run (macOS):** Vitest 399 passed (43 files), Cargo 97 passed, typecheck/lint/prettier/clippy/rustfmt
+**Last green run (macOS):** Vitest 407 passed (44 files), Cargo 99 passed, typecheck/lint/prettier/clippy/rustfmt
 clean. Project schema is **v6** (`fixtures/project-v1..v6.json`, Rust migration chain in `project/migrate.rs`).
 
 ### Done
@@ -226,13 +226,18 @@ clean. Project schema is **v6** (`fixtures/project-v1..v6.json`, Rust migration 
   rgba chain + positioned overlay) and preview (`timeline/transform.ts` CSS; `layersAt` keeps going down past a
   transformed clip). `inspector/TransformPanel.tsx` sliders + flips + Reset, in the Video tab and (without
   position) the Text tab. Scale is uniform, so there is no aspect-lock toggle. Seen in a macOS debug build.
+- Inspector roadmap, Audio (6j): clip `muted`, `fadeIn`, `fadeOut` (added to the uncommitted v6) and Detach
+  audio. `timeline/audio.ts` (fit rule for fades shared with Rust `TimelineClip::fades`, `detachAudio`),
+  `inspector/SoundPanel.tsx` in the Audio tab. A video asset may now sit on an audio track as its detached
+  sound: it is an `<audio>` in the preview, sound-only in the export, audio-coloured on the timeline, and gets
+  the audio tabs. Export fades are `afade`; the preview scales element volume with the playhead.
 - Export: MP4, plus audio-only M4A / MP3 / WAV; "Show in folder"; File menu (New/Open/Save), About tagline.
 
 ### Not done (queue, in the user's approved order unless they say otherwise)
 1. Text & titles, possible follow-ups (not requested yet): outline / shadow / background box, more fonts, a
    selection outline and resize handles in the preview, a text default duration other than 5 s.
-2. Inspector roadmap (section 6j), remaining: audio (mute, fades, detach), clip info (codec, size, show in
-   Finder, replace media), basic colour, then the comfort items. Transform is done.
+2. Inspector roadmap (section 6j), remaining: clip info (codec, size, show in Finder, replace media), basic
+   colour, then the comfort items. Transform and Audio are done.
 3. Upscale 6c-1..3: **needs the user's go-ahead first**. PyTorch CPU-only in a virtual environment outside the
    project; check free disk space first. Never bundle models; download only after explicit consent.
 4. Auto subtitles 6g (Whisper): after text. Model download only with consent; never bundle; never download
@@ -247,6 +252,7 @@ clean. Project schema is **v6** (`fixtures/project-v1..v6.json`, Rust migration 
   bar, inspector tabs, MP3 export from the dialog.
 - Timeline waveforms on trimmed, sped-up, reversed or muted clips, and while scrolling/zooming a long clip
   (only whole, untouched clips were looked at).
+- Clip mute, fades and Detach audio: never heard or seen in the running app (export checked with FFmpeg).
 - The Transform sliders with a real pointer, a transformed *video* in the preview (only stills were looked
   at), and dragging text that has been scaled or rotated (its grab area ignores the transform).
 - Dragging the crop box and its handles with a real pointer, cropping a video (only a still was looked at),

@@ -44,6 +44,9 @@ struct ProbeOutput {
 #[derive(Deserialize)]
 struct Stream {
     codec_type: Option<String>,
+    codec_name: Option<String>,
+    channels: Option<u32>,
+    sample_rate: Option<String>,
     width: Option<u32>,
     height: Option<u32>,
     duration: Option<String>,
@@ -109,6 +112,8 @@ fn is_quarter_turn(v: &Stream) -> bool {
 #[derive(Deserialize)]
 struct Format {
     duration: Option<String>,
+    bit_rate: Option<String>,
+    format_long_name: Option<String>,
 }
 
 fn parse_seconds(s: &Option<String>) -> Option<f64> {
@@ -216,6 +221,57 @@ pub struct StreamSummary {
     pub fps: Option<f64>,
 }
 
+/// Facts about a media file shown in the inspector's Info tab. Nothing here is stored in the project.
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaDetails {
+    /// For example "h264"; absent when the file has no picture.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub video_codec: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_codec: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_channels: Option<u32>,
+    /// Hz.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sample_rate: Option<u32>,
+    /// Bits per second for the whole file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bit_rate: Option<u64>,
+    /// The container as FFprobe names it, for example "QuickTime / MOV".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub container: Option<String>,
+    /// Size of the file on disk, filled in by the caller.
+    pub size_bytes: u64,
+}
+
+/// Codec and container facts from ffprobe output (`-show_format -show_streams`).
+pub fn parse_details(json: &str) -> AppResult<MediaDetails> {
+    let out: ProbeOutput = serde_json::from_str(json)
+        .map_err(|e| AppError::InvalidInput(format!("unreadable ffprobe output: {e}")))?;
+    let first = |kind: &str| {
+        out.streams
+            .iter()
+            .find(|s| s.codec_type.as_deref() == Some(kind))
+    };
+    let audio = first("audio");
+    Ok(MediaDetails {
+        video_codec: first("video").and_then(|s| s.codec_name.clone()),
+        audio_codec: audio.and_then(|s| s.codec_name.clone()),
+        audio_channels: audio.and_then(|s| s.channels),
+        sample_rate: audio
+            .and_then(|s| s.sample_rate.as_deref())
+            .and_then(|r| r.parse().ok()),
+        bit_rate: out
+            .format
+            .as_ref()
+            .and_then(|f| f.bit_rate.as_deref())
+            .and_then(|r| r.parse().ok()),
+        container: out.format.as_ref().and_then(|f| f.format_long_name.clone()),
+        size_bytes: 0,
+    })
+}
+
 /// Type-agnostic view of ffprobe output (used to detect audio streams and to verify exports).
 pub fn parse_stream_summary(json: &str) -> AppResult<StreamSummary> {
     let out: ProbeOutput = serde_json::from_str(json)
@@ -246,6 +302,36 @@ mod tests {
     const VIDEO_JSON: &str = r#"{"streams":[{"codec_type":"video","width":1920,"height":1080,"duration":"12.500000"},{"codec_type":"audio","duration":"12.48"}],"format":{"duration":"12.500000"}}"#;
     const AUDIO_JSON: &str = r#"{"streams":[{"codec_type":"audio","duration":"60.0"}],"format":{"duration":"60.026000"}}"#;
     const IMAGE_JSON: &str = r#"{"streams":[{"codec_type":"video","width":512,"height":256}],"format":{"duration":"0.040000"}}"#;
+
+    #[test]
+    fn details_name_the_codecs_container_and_bit_rate() {
+        let json = r#"{"streams":[
+            {"codec_type":"video","codec_name":"h264","width":1920,"height":1080},
+            {"codec_type":"audio","codec_name":"aac","channels":2,"sample_rate":"48000"}],
+            "format":{"duration":"12.5","bit_rate":"8123456","format_long_name":"QuickTime / MOV"}}"#;
+        assert_eq!(
+            parse_details(json).unwrap(),
+            MediaDetails {
+                video_codec: Some("h264".into()),
+                audio_codec: Some("aac".into()),
+                audio_channels: Some(2),
+                sample_rate: Some(48000),
+                bit_rate: Some(8_123_456),
+                container: Some("QuickTime / MOV".into()),
+                size_bytes: 0,
+            }
+        );
+        // sound only, and a file that says little about itself
+        let audio = parse_details(AUDIO_JSON).unwrap();
+        assert_eq!(
+            (audio.video_codec, audio.audio_codec, audio.bit_rate),
+            (None, None, None)
+        );
+        assert!(parse_details("nope").is_err());
+        // absent facts are left out of what the UI receives
+        let sent = serde_json::to_value(parse_details(IMAGE_JSON).unwrap()).unwrap();
+        assert_eq!(sent, serde_json::json!({"sizeBytes": 0}));
+    }
 
     #[test]
     fn classifies_by_extension_case_insensitively() {

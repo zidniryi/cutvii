@@ -23,6 +23,7 @@ import {
   trimClip,
   type EditResult,
 } from "./edit";
+import { detachAudio, setClipSound, type ClipSound } from "./audio";
 import { planPlacement, type DropPlacement } from "./placement";
 import { setClipTransform, type Transform } from "./transform";
 
@@ -105,6 +106,19 @@ export function applyBackgroundToAllClips(background: FitBackground): EditResult
 
 export function changeReversed(clipId: string, reversed: boolean): EditResult {
   return run(reversed ? "Reverse clip" : "Play clip forwards", (p) => setClipReversed(p, clipId, reversed));
+}
+
+export function changeClipSound(clipId: string, patch: Partial<ClipSound>): EditResult {
+  const label = patch.muted === undefined ? "Change fade" : patch.muted ? "Mute clip" : "Unmute clip";
+  return run(label, (p) => setClipSound(p, clipId, patch));
+}
+
+/** Put a video clip's sound on an audio track as its own clip (adding a track if none is free there). */
+export function detachClipAudio(clipId: string): EditResult {
+  const ids = { clipId: crypto.randomUUID(), trackId: crypto.randomUUID() };
+  const result = run("Detach audio", (p) => detachAudio(p, clipId, ids));
+  if (result.ok) useSelectionStore.getState().select(ids.clipId);
+  return result;
 }
 
 export function changeTransform(clipId: string, patch: Partial<Transform> | null): EditResult {

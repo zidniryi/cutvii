@@ -35,6 +35,11 @@ Source of truth: `src-tauri/src/export/` (`plan.rs` builds the plan and FFmpeg f
 - Sources: audio-track clips and the audio of video clips (if the file has an audio stream).
 - Each clip is positioned at `timelineStart` (millisecond resolution), scaled by `volume` (0–2), resampled to
   48 kHz stereo, and mixed over a silent base without level normalisation. Overlapping loud clips can clip.
+- A clip with `muted` contributes no sound (its picture is unaffected). A video asset on an audio track is that
+  video's detached sound: it contributes sound only.
+- `fadeIn` / `fadeOut` are straight-line ramps (`afade`) at the start and end of the clip's sound, in timeline
+  seconds, applied after the speed change. Longer than the clip: the fade-in is cut to the clip's length and the
+  fade-out gets what is left. The preview ramps the element's volume by the same rule.
 - `muted` tracks contribute nothing; `hidden` video tracks still play their sound (as in the preview).
 - The file always has an audio stream (silent if nothing is audible).
 

@@ -151,6 +151,13 @@ pub fn validate(project: &Project) -> Result<(), Vec<String>> {
                     "{at}.rotation: must be between -{MAX_ROTATION} and {MAX_ROTATION} degrees"
                 ));
             }
+            for (name, fade) in [("fadeIn", clip.fade_in), ("fadeOut", clip.fade_out)] {
+                if fade.is_some_and(|f| !(0.0..=MAX_FADE).contains(&f)) {
+                    err(format!(
+                        "{at}.{name}: must be between 0 and {MAX_FADE} seconds"
+                    ));
+                }
+            }
             if clip.crop.is_some_and(|c| !c.is_valid()) {
                 err(format!(
                     "{at}.crop: each side must be between 0 and {MAX_CROP}, and at least a tenth of the picture must remain"
@@ -206,7 +213,8 @@ pub fn validate(project: &Project) -> Result<(), Vec<String>> {
                 continue;
             };
             match (track.track_type, asset.media_type) {
-                (TrackType::Audio, MediaType::Audio)
+                // a video on an audio track is its detached sound
+                (TrackType::Audio, MediaType::Audio | MediaType::Video)
                 | (TrackType::Video, MediaType::Video | MediaType::Image) => {}
                 (TrackType::Audio, other) => err(format!(
                     "{at}.assetId: {other:?} asset cannot be placed on an audio track"

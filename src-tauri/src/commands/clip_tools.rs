@@ -9,10 +9,12 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 
+use crate::commands::export::reveal_command;
 use crate::errors::{AppError, AppResult};
 use crate::media::MediaBackend;
 use crate::media::ffmpeg::FfmpegBackend;
 use crate::media::import::{ImportedMedia, cache_key, import_one};
+use crate::media::probe::MediaDetails;
 use crate::media::text::{
     FONT_EXTENSIONS, FontInfo, TextSpec, ensure_font_preview, ensure_text_picture, import_font,
     list_fonts, load_bundled_fonts, load_user_fonts,
@@ -226,6 +228,25 @@ pub async fn render_text(
     })
     .await
     .map_err(|e| AppError::InvalidInput(format!("text task failed: {e}")))?
+}
+
+/// Codecs, container, bit rate and size of an imported file, for the Info tab.
+#[tauri::command]
+pub async fn media_details(app: AppHandle, path: String) -> AppResult<MediaDetails> {
+    let src = allowed_source(&app, &path)?;
+    tauri::async_runtime::spawn_blocking(move || FfmpegBackend::locate()?.details(&src))
+        .await
+        .map_err(|e| AppError::InvalidInput(format!("details task failed: {e}")))?
+}
+
+/// Show an imported file in Finder / Explorer / the file manager. Only files of this session can be shown.
+#[tauri::command]
+pub fn reveal_media(app: AppHandle, path: String) -> AppResult<()> {
+    let src = allowed_source(&app, &path)?;
+    let (program, args) = reveal_command(&src);
+    // argument vector, no shell; only a failure to start the file manager counts as an error
+    std::process::Command::new(program).args(args).spawn()?;
+    Ok(())
 }
 
 fn fonts_dir(app: &AppHandle) -> AppResult<PathBuf> {

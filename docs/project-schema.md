@@ -20,6 +20,15 @@ Optional: `rotation` (degrees clockwise, -180 to 180; absent means 0), `flipH` a
 top-bottom; absent means false). The defaults (0, 0, 1, 1, no rotation, no flip) leave the clip as it was before
 these were applied. Sound ignores them.
 
+## Clip sound (schemaVersion 6)
+
+Optional on a clip: `muted` (the clip makes no sound, its picture still shows; absent means false), `fadeIn` and
+`fadeOut` (seconds on the timeline, 0–60; absent means 0). A fade longer than its clip is shortened when applied:
+the fade-in is at most the clip's length and the fade-out takes what is left.
+
+An audio track may hold a **video** asset: that is the video's detached sound, heard but never shown. A still on
+an audio track is still rejected.
+
 ## Crop (schemaVersion 6)
 
 A clip may carry `crop`: `left`, `top`, `right`, `bottom`, each the share (0–0.9) of the source picture cut away
@@ -45,7 +54,7 @@ version number.
 - Unknown fields are rejected.
 - Ids are unique per kind; `clip.trackId` equals its containing track; `clip.assetId` exists.
 - `sourceOut > sourceIn`; `sourceOut` does not exceed the asset's `duration` (1 ms tolerance).
-- Audio tracks hold audio assets only; video tracks hold video or image assets.
+- Audio tracks hold audio assets, or a video asset as its detached sound; video tracks hold video or image assets.
 
 ## Known limits
 

@@ -4,6 +4,7 @@
  */
 import type { MediaAsset, Project, TimelineClip, TimelineTrack } from "@/project/model";
 import { clipEnd, clipSpeed, EPS } from "@/timeline/clips";
+import { isSoundOnly } from "@/timeline/audio";
 import { isTransformed } from "@/timeline/transform";
 
 /** Clips starting within this many seconds are mounted (paused) so they are ready when reached. */
@@ -139,7 +140,7 @@ export function planSync({ role, playing, paused, currentTime, desired, lead = f
  */
 export function pickLead(layers: Layer[]): Layer | undefined {
   const active = layers.filter((l) => l.role === "active" && l.asset.type !== "image");
-  return active.find((l) => l.asset.type === "audio") ?? active.find((l) => l.visible) ?? active[0];
+  return active.find((l) => isSoundOnly(l.track, l.asset)) ?? active.find((l) => l.visible) ?? active[0];
 }
 
 export function mediaErrorMessage(code: number | undefined): string {

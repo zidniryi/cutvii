@@ -40,6 +40,7 @@ import {
   type Rect,
 } from "@/timeline/fit";
 import { useImagePreviewStore } from "@/store/imagePreviews";
+import { fadeGain, isSoundOnly } from "@/timeline/audio";
 import { transformStyle } from "@/timeline/transform";
 import type { Crop } from "@/project/model";
 
@@ -89,10 +90,13 @@ export function Preview() {
         const el = elements.current.get(layer.clip.id);
         if (!el) continue;
         // clip volume (capped at 100% in the preview; export applies gain) times the monitor volume
-        el.volume = Math.min(1, Math.max(0, layer.clip.volume)) * monitor.volume;
+        // ... and the clip's fades, which follow the playhead
+        el.volume =
+          Math.min(1, Math.max(0, layer.clip.volume)) * monitor.volume * fadeGain(layer.clip, playhead);
         const speed = clipSpeed(layer.clip);
         // same rule as export: no sound above 4x
-        el.muted = monitor.muted || layer.track.muted || speed > MAX_AUDIBLE_SPEED;
+        el.muted =
+          monitor.muted || layer.track.muted || (layer.clip.muted ?? false) || speed > MAX_AUDIBLE_SPEED;
         const base = previewRate(speed * monitor.previewSpeed).rate; // preview speed is monitor-only
         if ("preservesPitch" in el) el.preservesPitch = layer.clip.keepPitch ?? true;
 
@@ -385,7 +389,8 @@ function LayerView({
       setMediaError(asset.id, mediaErrorMessage(e.currentTarget.error?.code)),
   };
 
-  if (asset.type === "audio") {
+  // an audio file, or a video's detached sound on an audio track: heard, never shown
+  if (isSoundOnly(track, asset)) {
     return <audio ref={register} aria-hidden {...common} />;
   }
   const mode = layer.clip.fitMode ?? DEFAULT_FIT_MODE;

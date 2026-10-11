@@ -37,6 +37,8 @@ pub fn run() {
             commands::clip_tools::prepare_image_preview,
             commands::clip_tools::prepare_waveform,
             commands::clip_tools::render_text,
+            commands::clip_tools::media_details,
+            commands::clip_tools::reveal_media,
             commands::clip_tools::text_fonts,
             commands::clip_tools::import_text_font,
             commands::media::import_media,

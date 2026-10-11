@@ -1298,6 +1298,85 @@ mod tests {
     }
 
     #[test]
+    fn fades_ramp_the_sound_and_a_muted_clip_is_silent() {
+        let Some(e) = env("fades") else { return };
+        let (red, tone) = (e.red(), e.tone());
+        let render = |name: &str, change: &dyn Fn(&mut Project)| {
+            let mut p = project(
+                vec![
+                    asset("red", &red, "video", Some(4.0)),
+                    asset("tone", &tone, "audio", Some(3.0)),
+                ],
+                vec![
+                    track(
+                        "v1",
+                        "video",
+                        0,
+                        false,
+                        false,
+                        vec![clip("c1", "red", "v1", 0.0, 0.0, 3.0, 1.0)],
+                    ),
+                    track(
+                        "a1",
+                        "audio",
+                        1,
+                        false,
+                        false,
+                        vec![clip("c2", "tone", "a1", 0.0, 0.0, 3.0, 1.0)],
+                    ),
+                ],
+            );
+            // the video has a tone of its own: muted here, so only the audio clip is heard
+            p.tracks[0].clips[0].muted = Some(true);
+            change(&mut p);
+            let out = e.dir.join(name);
+            e.export(&p, &opts(Quality::Draft), &out)
+                .0
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            out
+        };
+        let plain = render("plain.mp4", &|_| {});
+        let level = e.volume(&plain, 1.2, 0.6);
+        assert!(level > -40.0, "the tone is there: {level}");
+
+        // 1 s in, 1 s out on a 3 s clip: quiet at both ends, full in the middle
+        let faded = render("faded.mp4", &|p| {
+            let c = &mut p.tracks[1].clips[0];
+            (c.fade_in, c.fade_out) = (Some(1.0), Some(1.0));
+        });
+        // measured on decoded samples (a seek before decoding is not exact enough for a 0.2 s window)
+        let between = |from: f64, to: f64| {
+            let out = command(&e.ffmpeg)
+                .args(["-hide_banner", "-i"])
+                .arg(&faded)
+                .args(["-vn", "-af"])
+                .arg(format!("atrim={from}:{to},volumedetect"))
+                .args(["-f", "null", "-"])
+                .output()
+                .unwrap();
+            let text = String::from_utf8_lossy(&out.stderr).into_owned();
+            text.lines()
+                .find_map(|l| l.split("mean_volume:").nth(1))
+                .and_then(|v| v.trim().trim_end_matches("dB").trim().parse::<f64>().ok())
+                .unwrap_or_else(|| panic!("no mean_volume in:\n{text}"))
+        };
+        let (start, middle, end) = (between(0.0, 0.2), between(1.2, 1.8), between(2.75, 2.95));
+        assert!(
+            (middle - level).abs() < 1.5,
+            "full level in the middle: {middle} vs {level}"
+        );
+        assert!(start < middle - 12.0, "fading in: {start} vs {middle}");
+        assert!(end < middle - 12.0, "fading out: {end} vs {middle}");
+
+        let muted = render("muted.mp4", &|p| p.tracks[1].clips[0].muted = Some(true));
+        assert!(e.volume(&muted, 1.2, 0.6) < -80.0, "a muted clip is silent");
+        assert!(
+            near(e.color_at(&muted, 1.0), (255, 0, 0), 60),
+            "the picture is untouched"
+        );
+    }
+
+    #[test]
     fn exports_audio_only_as_m4a_and_wav() {
         let Some(e) = env("audio") else { return };
         let (red, tone, green) = (e.red(), e.tone(), e.green_png());
