@@ -24,6 +24,7 @@ import {
   type EditResult,
 } from "./edit";
 import { detachAudio, setClipSound, type ClipSound } from "./audio";
+import { setClipColor, type ColorAdjust } from "./color";
 import { planPlacement, type DropPlacement } from "./placement";
 import { setClipTransform, type Transform } from "./transform";
 
@@ -119,6 +120,10 @@ export function detachClipAudio(clipId: string): EditResult {
   const result = run("Detach audio", (p) => detachAudio(p, clipId, ids));
   if (result.ok) useSelectionStore.getState().select(ids.clipId);
   return result;
+}
+
+export function changeColor(clipId: string, patch: Partial<ColorAdjust> | null): EditResult {
+  return run(patch ? "Adjust colour" : "Reset colour", (p) => setClipColor(p, clipId, patch));
 }
 
 export function changeTransform(clipId: string, patch: Partial<Transform> | null): EditResult {

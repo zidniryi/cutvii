@@ -40,7 +40,10 @@ import {
   type Rect,
 } from "@/timeline/fit";
 import { useImagePreviewStore } from "@/store/imagePreviews";
+import { ColorCanvas } from "@/components/preview/ColorCanvas";
+import { useLutStore } from "@/store/luts";
 import { fadeGain, isSoundOnly } from "@/timeline/audio";
+import { colorKey, colorOf, isGraded } from "@/timeline/color";
 import { transformStyle } from "@/timeline/transform";
 import type { Crop } from "@/project/model";
 
@@ -377,7 +380,25 @@ function LayerView({
 }) {
   const { asset, track, visible } = layer;
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const imageRef = useRef<HTMLImageElement | null>(null);
   const setMediaError = usePlaybackStore.getState().setMediaError;
+  // Colour: the values being dragged if any, otherwise the clip's own; none while "Before" is held.
+  const colorDraft = useUiStore((s) => (s.colorDraft?.clipId === layer.clip.id ? s.colorDraft.adjust : null));
+  const colorBefore = useUiStore((s) => s.colorBefore === layer.clip.id);
+  const adjust = colorDraft ?? colorOf(layer.clip);
+  const graded = isGraded(adjust) && !asset.text && asset.type !== "audio" && track.type === "video";
+  // The table for these values; while a newer one is on its way (a slider being dragged) the clip keeps
+  // the last one it had, so the picture never flashes back to ungraded.
+  const lut = useLutStore((s) => {
+    if (!graded || colorBefore) return null;
+    const entry = s.entries[colorKey(adjust)];
+    return entry?.status === "ready" ? entry.lut : (s.held[layer.clip.id] ?? null);
+  });
+  useEffect(() => {
+    if (graded) useLutStore.getState().ensure(adjust, layer.clip.id);
+  });
+  // a shader may only read media loaded with CORS; the asset protocol allows it
+  const crossOrigin = graded ? ("anonymous" as const) : undefined;
   // a reversed clip has nothing to show until its reversed copy exists (never play it forwards by mistake)
   if (layer.clip.reversed && asset.type !== "image" && reverse?.status !== "ready") return null;
   const src = mediaUrl(layer.clip.reversed && reverse?.path ? reverse.path : asset.path);
@@ -465,8 +486,10 @@ function LayerView({
           ))}
         {framed(layout.picture, {}, (style) => (
           <img
+            ref={imageRef}
             src={src}
             alt=""
+            crossOrigin={crossOrigin}
             data-role="picture"
             onLoad={() => setMediaError(asset.id, null)}
             onError={() => setMediaError(asset.id, mediaErrorMessage(4))}
@@ -474,6 +497,16 @@ function LayerView({
             style={style}
           />
         ))}
+        {lut &&
+          framed(layout.picture, {}, (style) => (
+            <ColorCanvas
+              source={() => imageRef.current}
+              lut={lut}
+              live={false}
+              className="absolute max-w-none"
+              style={style}
+            />
+          ))}
       </div>
     );
   }
@@ -501,6 +534,7 @@ function LayerView({
             register(el);
           }}
           {...common}
+          crossOrigin={crossOrigin}
           aria-hidden
           playsInline
           data-role="picture"
@@ -508,6 +542,17 @@ function LayerView({
           style={style}
         />
       ))}
+      {lut &&
+        visible &&
+        framed(layout.picture, {}, (style) => (
+          <ColorCanvas
+            source={() => videoRef.current}
+            lut={lut}
+            live
+            className="absolute max-w-none"
+            style={style}
+          />
+        ))}
     </div>
   );
 }

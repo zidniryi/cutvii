@@ -47,6 +47,9 @@ struct Stream {
     codec_name: Option<String>,
     channels: Option<u32>,
     sample_rate: Option<String>,
+    color_transfer: Option<String>,
+    color_primaries: Option<String>,
+    color_space: Option<String>,
     width: Option<u32>,
     height: Option<u32>,
     duration: Option<String>,
@@ -241,8 +244,21 @@ pub struct MediaDetails {
     /// The container as FFprobe names it, for example "QuickTime / MOV".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub container: Option<String>,
+    /// The picture is HDR or wide-gamut (PQ / HLG transfer, or BT.2020 colours). CutVii's colour tools
+    /// assume standard dynamic range (Rec.709), so such footage gets a warning.
+    pub hdr: bool,
     /// Size of the file on disk, filled in by the caller.
     pub size_bytes: u64,
+}
+
+/// PQ (HDR10, Dolby Vision) or HLG transfer, or BT.2020 primaries / matrix.
+fn is_hdr(video: &Stream) -> bool {
+    let has = |field: &Option<String>, names: &[&str]| {
+        field.as_deref().is_some_and(|v| names.contains(&v))
+    };
+    has(&video.color_transfer, &["smpte2084", "arib-std-b67"])
+        || has(&video.color_primaries, &["bt2020"])
+        || has(&video.color_space, &["bt2020nc", "bt2020c"])
 }
 
 /// Codec and container facts from ffprobe output (`-show_format -show_streams`).
@@ -268,6 +284,7 @@ pub fn parse_details(json: &str) -> AppResult<MediaDetails> {
             .and_then(|f| f.bit_rate.as_deref())
             .and_then(|r| r.parse().ok()),
         container: out.format.as_ref().and_then(|f| f.format_long_name.clone()),
+        hdr: first("video").is_some_and(is_hdr),
         size_bytes: 0,
     })
 }
@@ -318,6 +335,7 @@ mod tests {
                 sample_rate: Some(48000),
                 bit_rate: Some(8_123_456),
                 container: Some("QuickTime / MOV".into()),
+                hdr: false,
                 size_bytes: 0,
             }
         );
@@ -330,7 +348,20 @@ mod tests {
         assert!(parse_details("nope").is_err());
         // absent facts are left out of what the UI receives
         let sent = serde_json::to_value(parse_details(IMAGE_JSON).unwrap()).unwrap();
-        assert_eq!(sent, serde_json::json!({"sizeBytes": 0}));
+        assert_eq!(sent, serde_json::json!({"sizeBytes": 0, "hdr": false}));
+        // HDR and wide-gamut footage is recognised by its tags
+        for tags in [
+            r#""color_transfer":"smpte2084""#,
+            r#""color_transfer":"arib-std-b67","pix_fmt":"yuv420p10le""#,
+            r#""color_primaries":"bt2020""#,
+            r#""color_space":"bt2020nc""#,
+        ] {
+            let json =
+                format!(r#"{{"streams":[{{"codec_type":"video","codec_name":"hevc",{tags}}}]}}"#);
+            assert!(parse_details(&json).unwrap().hdr, "{tags}");
+        }
+        let sdr = r#"{"streams":[{"codec_type":"video","color_transfer":"bt709","color_primaries":"bt709","color_space":"bt709","pix_fmt":"yuv420p"}]}"#;
+        assert!(!parse_details(sdr).unwrap().hdr);
     }
 
     #[test]

@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::MediaType;
+use super::color::ensure_lut;
 use super::probe::{
     MediaDetails, apply_rotation, classify_extension, parse_details, parse_frame_rotation,
     parse_probe_json, parse_stream_summary,
@@ -357,6 +358,18 @@ impl MediaBackend for FfmpegBackend {
         progress: &mut dyn FnMut(f64),
         cancel: &AtomicBool,
     ) -> AppResult<ExportReport> {
+        // Colour: bake each graded clip's table now (same code and same files as the preview uses).
+        let mut graded = request.plan.clone();
+        let luts = std::env::temp_dir().join("cutvii-luts");
+        for clip in graded.clips.iter_mut().filter(|c| c.video) {
+            if let Some(adjust) = &clip.color {
+                clip.lut = Some(ensure_lut(&luts, adjust)?.cube);
+            }
+        }
+        let request = &RenderRequest {
+            plan: graded,
+            output: request.output.clone(),
+        };
         let listing = if request.plan.format == ExportFormat::Mp3 || !request.plan.format.is_audio()
         {
             command(&self.ffmpeg)

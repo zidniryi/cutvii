@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::media::MediaType;
+use crate::media::color::ColorAdjust;
 use crate::media::text::TextSpec;
 
 pub const SCHEMA_VERSION: u32 = 6;
@@ -117,6 +118,9 @@ pub struct TimelineClip {
     pub fade_in: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fade_out: Option<f64>,
+    /// The Adjust sliders of the Color tab. Absent means the picture is left as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<ColorAdjust>,
 }
 
 /// The longest fade that can be stored. A fade longer than its clip is shortened when it is applied.

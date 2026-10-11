@@ -11,6 +11,8 @@ export interface MediaDetails {
   /** Bits per second for the whole file. */
   bitRate?: number;
   container?: string;
+  /** HDR or wide-colour footage (the colour tools assume standard dynamic range). */
+  hdr?: boolean;
   sizeBytes: number;
 }
 

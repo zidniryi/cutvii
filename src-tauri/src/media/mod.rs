@@ -6,6 +6,7 @@ use std::sync::atomic::AtomicBool;
 
 use serde::{Deserialize, Serialize};
 
+pub mod color;
 pub mod ffmpeg;
 pub mod import;
 pub mod probe;

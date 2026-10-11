@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "CutVii",
+        "title": "CutVii - Creative editing. Flexible workflow. On-device AI.",
         "width": 1280,
         "height": 800,
         "minWidth": 360,
@@ -40,7 +40,8 @@
           "$APPCACHE/reverse/**",
           "$APPCACHE/previews/**",
           "$APPCACHE/waveforms/**",
-          "$APPCACHE/font-previews/**"
+          "$APPCACHE/font-previews/**",
+          "$APPCACHE/luts/**"
         ]
       },
       "devCsp": null
@@ -58,7 +59,7 @@
     ],
     "resources": ["assets/fonts/*.ttf", "assets/fonts/licenses/*"],
     "category": "Video",
-    "shortDescription": "Cut fast. Keep it local.",
+    "shortDescription": "Creative editing. Flexible workflow. On-device AI.",
     "longDescription": "CutVii is a local-first, offline-friendly desktop video editor: import, edit on a multi-track timeline, preview and export MP4. Your media is never modified or uploaded.",
     "copyright": "CutVii contributors"
   }

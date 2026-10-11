@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { AlertTriangle, Sparkles } from "lucide-react";
 import { AiPanel } from "@/components/inspector/AiPanel";
+import { ColorPanel } from "@/components/inspector/ColorPanel";
 import { CropPanel } from "@/components/inspector/CropPanel";
 import { MediaInfo } from "@/components/inspector/MediaInfo";
 import { SoundPanel } from "@/components/inspector/SoundPanel";
@@ -343,9 +344,9 @@ function SpeedPanel({
 
 /** Tabs that have working controls for each kind of clip, in display order. The first one is the default. */
 export const TABS_FOR: Record<ClipKind, InspectorTab[]> = {
-  video: ["video", "audio", "ai", "speed", "info"],
+  video: ["video", "color", "audio", "ai", "speed", "info"],
   audio: ["audio", "ai", "speed", "info"],
-  image: ["video", "info"], // stills have no sound and no speed
+  image: ["video", "color", "info"], // stills have no sound and no speed
 };
 const TEXT_TABS: InspectorTab[] = ["text", "info"];
 const TAB_LABEL: Record<InspectorTab, string> = {
@@ -355,6 +356,7 @@ const TAB_LABEL: Record<InspectorTab, string> = {
   info: "Info",
   text: "Text",
   ai: "AI",
+  color: "Color",
 };
 
 function FitChips({ clip }: { clip: TimelineClip }) {
@@ -759,6 +761,7 @@ function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset;
         {active === "text" && asset.text && (
           <TransformPanel key={`${clip.id}-transform`} clip={clip} position={false} />
         )}
+        {active === "color" && <ColorPanel key={`${clip.id}-color`} clip={clip} asset={asset} />}
         {active === "ai" && <AiPanel key={`${clip.id}-ai`} clip={clip} />}
         {active === "info" && <InfoTab clip={clip} asset={asset} fps={fps} />}
       </div>

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** Bump when the on-disk shape changes, and add a migration in `src-tauri/src/project/migrate.rs`. v2: clip speed. v3: fitMode. v4: fitBackground. v5: text assets. v6: clip crop, text font, rotation and flip, clip mute and fades. */
+/** Bump when the on-disk shape changes, and add a migration in `src-tauri/src/project/migrate.rs`. v2: clip speed. v3: fitMode. v4: fitBackground. v5: text assets. v6: clip crop, text font, rotation and flip, clip mute and fades, clip colour. */
 export const SCHEMA_VERSION = 6;
 
 /** Tolerance (seconds) when comparing a clip's sourceOut with the asset duration. */
@@ -157,6 +157,25 @@ export const CropSchema = z
     message: "at least a tenth of the picture must remain",
   });
 
+const colorValue = z.number().min(-1).max(1);
+
+/**
+ * Colour adjustment: each value runs from -1 to 1 and 0 changes nothing. Rust bakes them into one lookup
+ * table (`src-tauri/src/media/color.rs`) that both the preview and the export apply.
+ */
+export const ColorAdjustSchema = z
+  .object({
+    exposure: colorValue,
+    contrast: colorValue,
+    saturation: colorValue,
+    vibrance: colorValue,
+    temperature: colorValue,
+    tint: colorValue,
+    highlights: colorValue,
+    shadows: colorValue,
+  })
+  .strict();
+
 /** The longest fade that can be stored (seconds). Same in Rust. A fade longer than its clip is shortened. */
 export const MAX_FADE = 60;
 
@@ -204,6 +223,8 @@ export const TimelineClipSchema = z
     fadeOut: z.number().min(0).max(MAX_FADE).optional(),
     /** Edges of the picture cut away; absent means none. */
     crop: CropSchema.optional(),
+    /** The Adjust sliders of the Color tab; absent means the picture is left as it is. */
+    color: ColorAdjustSchema.optional(),
   })
   .strict()
   .refine((c) => c.sourceOut > c.sourceIn, {
@@ -280,6 +301,7 @@ export const ProjectSchema = z
     });
   });
 
+export type ColorAdjust = z.infer<typeof ColorAdjustSchema>;
 export type Crop = z.infer<typeof CropSchema>;
 export type TextSpec = z.infer<typeof TextSpecSchema>;
 export type FitBackground = z.infer<typeof FitBackgroundSchema>;

@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use super::{ExportFormat, ExportOptions, Quality};
 use crate::media::MediaType;
+use crate::media::color::{ColorAdjust, filter_path};
 use crate::project::{
     BackgroundKind, Crop, DEFAULT_BLUR_AMOUNT, FitMode, Project, TrackType, Transform, validate,
 };
@@ -48,6 +49,11 @@ pub struct PlannedClip {
     pub crop: Option<Crop>,
     /// Position, scale, rotation, flip and opacity of the clip's layer; `None` when it is left as it is.
     pub transform: Option<Transform>,
+    /// Colour adjustment of the picture; `None` when nothing is set (and always for text).
+    pub color: Option<ColorAdjust>,
+    /// The baked table for `color` (a `.cube` file). Filled in just before rendering: planning itself
+    /// writes no files. Without it the colour step is left out of the graph.
+    pub lut: Option<PathBuf>,
     /// A text picture: drawn over the tracks below with its transparency kept, never on a background.
     pub transparent: bool,
     /// Contributes picture (on a visible video track, not an audio asset).
@@ -217,6 +223,10 @@ pub fn build_plan(
                     .unwrap_or(DEFAULT_BLUR_AMOUNT),
                 crop: c.crop.filter(|k| !k.is_none() && asset.text.is_none()),
                 transform: Some(c.transform()).filter(|t| !t.is_identity()),
+                color: c
+                    .color
+                    .filter(|k| video && !k.is_identity() && asset.text.is_none()),
+                lut: None,
                 transparent: asset.text.is_some(),
                 video,
                 audio,
@@ -394,6 +404,11 @@ pub fn build_filter_graph(plan: &ExportPlan) -> FilterGraph {
                     k.left,
                     k.top
                 ),
+                None => source,
+            };
+            // colour: the one baked table, on the picture itself (so a blurred copy of it is graded too)
+            let source = match &clip.lut {
+                Some(lut) => format!("{source},lut3d=file={}", filter_path(lut)),
                 None => source,
             };
             let cover = format!("scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}");
@@ -996,6 +1011,60 @@ mod tests {
                 .unwrap_err()
                 .join(";")
                 .contains("fadeOut")
+        );
+    }
+
+    #[test]
+    fn colour_is_one_baked_table_applied_to_the_picture() {
+        let mut p = sample();
+        let warm = ColorAdjust {
+            temperature: 0.5,
+            contrast: 0.2,
+            ..Default::default()
+        };
+        p.tracks[0].clips[0].color = Some(warm);
+        p.tracks[1].clips[0].color = Some(ColorAdjust::default()); // nothing set: no colour step
+        p.tracks[2].clips[0].color = Some(warm); // sound has no picture
+        let mut plan = build_plan(&p, &opts(), &sample_facts()).unwrap();
+        assert_eq!(plan.clips[0].color, Some(warm));
+        assert!(plan.clips[1].color.is_none() && plan.clips[2].color.is_none());
+        assert!(
+            plan.clips.iter().all(|c| c.lut.is_none()),
+            "planning writes no files"
+        );
+        assert!(
+            !build_filter_graph(&plan).graph.contains("lut3d"),
+            "no table yet, no colour step"
+        );
+
+        plan.clips[0].lut = Some(PathBuf::from("/cache/luts/abc.cube"));
+        let g = build_filter_graph(&plan).graph;
+        assert!(
+            g.contains("[0:v]fps=30,lut3d=file='/cache/luts/abc.cube',scale=640:360"),
+            "{g}"
+        );
+        assert_eq!(g.matches("lut3d").count(), 1);
+        // with a crop: crop first, then colour, then the fit
+        plan.clips[0].crop = Some(Crop {
+            left: 0.5,
+            ..Default::default()
+        });
+        let g = build_filter_graph(&plan).graph;
+        assert!(
+            g.contains("ih*0.000000,lut3d=file='/cache/luts/abc.cube',scale="),
+            "{g}"
+        );
+
+        let mut bad = sample();
+        bad.tracks[0].clips[0].color = Some(ColorAdjust {
+            exposure: 3.0,
+            ..Default::default()
+        });
+        assert!(
+            build_plan(&bad, &opts(), &sample_facts())
+                .unwrap_err()
+                .join(";")
+                .contains("color")
         );
     }
 

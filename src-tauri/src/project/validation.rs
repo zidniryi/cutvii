@@ -151,6 +151,9 @@ pub fn validate(project: &Project) -> Result<(), Vec<String>> {
                     "{at}.rotation: must be between -{MAX_ROTATION} and {MAX_ROTATION} degrees"
                 ));
             }
+            if clip.color.is_some_and(|c| !c.is_valid()) {
+                err(format!("{at}.color: every value must be between -1 and 1"));
+            }
             for (name, fade) in [("fadeIn", clip.fade_in), ("fadeOut", clip.fade_out)] {
                 if fade.is_some_and(|f| !(0.0..=MAX_FADE).contains(&f)) {
                     err(format!(

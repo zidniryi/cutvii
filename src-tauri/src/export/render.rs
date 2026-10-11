@@ -1377,6 +1377,63 @@ mod tests {
     }
 
     #[test]
+    fn colour_adjustments_reach_the_exported_picture() {
+        let Some(e) = env("colour") else { return };
+        let red = e.red();
+        let render = |name: &str, color: crate::media::color::ColorAdjust| {
+            let mut p = project(
+                vec![asset("red", &red, "video", Some(4.0))],
+                vec![track(
+                    "v1",
+                    "video",
+                    0,
+                    false,
+                    false,
+                    vec![clip("c1", "red", "v1", 0.0, 0.0, 1.0, 1.0)],
+                )],
+            );
+            p.tracks[0].clips[0].color = Some(color);
+            let out = e.dir.join(name);
+            e.export(&p, &opts(Quality::Draft), &out)
+                .0
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            e.color_at(&out, 0.5)
+        };
+        let neutral = crate::media::color::ColorAdjust::default();
+        let plain = render("plain.mp4", neutral);
+        assert!(
+            near(plain, (255, 0, 0), 60),
+            "nothing set: still red, {plain:?}"
+        );
+
+        // no saturation: the red becomes its own grey
+        let grey = render(
+            "grey.mp4",
+            crate::media::color::ColorAdjust {
+                saturation: -1.0,
+                ..neutral
+            },
+        );
+        let spread = grey.0.max(grey.1).max(grey.2) - grey.0.min(grey.1).min(grey.2);
+        assert!(spread < 14, "grey has no colour left: {grey:?}");
+        // 21 % of full scale: 0.2126 * 255 = 54
+        assert!((40..70).contains(&grey.0), "the grey of pure red: {grey:?}");
+
+        // two stops darker: clearly darker, still red
+        let dark = render(
+            "dark.mp4",
+            crate::media::color::ColorAdjust {
+                exposure: -1.0,
+                ..neutral
+            },
+        );
+        assert!(
+            dark.0 < plain.0.saturating_sub(60) && dark.0 > dark.1 + 40,
+            "{dark:?} vs {plain:?}"
+        );
+    }
+
+    #[test]
     fn exports_audio_only_as_m4a_and_wav() {
         let Some(e) = env("audio") else { return };
         let (red, tone, green) = (e.red(), e.tone(), e.green_png());

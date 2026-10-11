@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { AboutDialog } from "@/components/AboutDialog";
 import { AppDialog } from "@/components/AppDialog";
 import { CanvasDialog } from "@/components/canvas/CanvasDialog";
 import { CanvasNotice } from "@/components/canvas/CanvasNotice";
@@ -81,6 +82,7 @@ export default function App() {
       <NewProjectDialog />
       <CanvasDialog />
       <AppDialog />
+      <AboutDialog />
     </TooltipProvider>
   );
 }

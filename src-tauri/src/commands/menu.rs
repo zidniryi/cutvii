@@ -1,9 +1,7 @@
 //! Native menu bar: File > New Project / Open Project / Save / Save As.
 //! The menu only tells the webview *which* action was chosen; the flows (confirm discard, dialogs) live there.
 
-use tauri::menu::{
-    AboutMetadata, Menu, MenuItemBuilder, MenuItemKind, PredefinedMenuItem, SubmenuBuilder,
-};
+use tauri::menu::{Menu, MenuItemBuilder, MenuItemKind, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{AppHandle, Emitter};
 
 pub const MENU_EVENT: &str = "menu-action";
@@ -16,22 +14,13 @@ pub const FILE_ITEMS: [(&str, &str, &str); 4] = [
     ("save-project-as", "Save As…", "CmdOrCtrl+Shift+S"),
 ];
 
-pub const ABOUT_TEXT: &str = "Cut fast. Keep it local.\n\nAn open-source video editor that works offline.\nYour media never leaves your computer.";
+/// Our own About item: it opens CutVii's About window in the webview, where the layout is ours (the
+/// system's About panel cannot centre its text).
+pub const ABOUT_ID: &str = "about";
 
-/// Replace the default About item with one that carries the app icon and tagline.
+/// Replace the default About item with ours.
 fn install_about(app: &AppHandle, menu: &Menu<tauri::Wry>) -> tauri::Result<()> {
-    let info = app.package_info();
-    let metadata = AboutMetadata {
-        name: Some("CutVii".into()),
-        version: Some(info.version.to_string()),
-        // macOS shows `credits`; Windows/Linux show `comments`
-        comments: Some(ABOUT_TEXT.into()),
-        credits: Some(ABOUT_TEXT.into()),
-        copyright: Some("© CutVii contributors".into()),
-        icon: app.default_window_icon().cloned(),
-        ..Default::default()
-    };
-    let about = PredefinedMenuItem::about(app, Some("About CutVii"), Some(metadata))?;
+    let about = MenuItemBuilder::with_id(ABOUT_ID, "About CutVii").build(app)?;
 
     // macOS: the app menu is the first submenu and About is its first item
     for item in menu.items()? {
@@ -65,6 +54,11 @@ pub fn is_file_action(id: &str) -> bool {
     FILE_ITEMS.iter().any(|(known, _, _)| *known == id)
 }
 
+/// Every id the webview acts on: the File items and About.
+pub fn is_forwarded(id: &str) -> bool {
+    is_file_action(id) || id == ABOUT_ID
+}
+
 /// Start from the platform's default menu and add our items at the top of File (creating File if needed).
 /// Passed to `Builder::menu`, which is what actually installs it (setting it from `setup` was overwritten).
 pub fn build(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
@@ -93,7 +87,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
 }
 
 pub fn handle(app: &AppHandle, id: &str) {
-    if is_file_action(id) {
+    if is_forwarded(id) {
         app.emit(MENU_EVENT, id).ok();
     }
 }
@@ -107,6 +101,8 @@ mod tests {
         assert!(is_file_action("new-project") && is_file_action("open-project"));
         assert!(is_file_action("save-project") && is_file_action("save-project-as"));
         assert!(!is_file_action("quit") && !is_file_action(""));
+        assert!(is_forwarded(ABOUT_ID) && is_forwarded("save-project") && !is_forwarded("quit"));
+        assert!(!is_file_action(ABOUT_ID), "About is not a file action");
         let mut ids: Vec<_> = FILE_ITEMS.iter().map(|i| i.0).collect();
         ids.dedup();
         assert_eq!(ids.len(), FILE_ITEMS.len());

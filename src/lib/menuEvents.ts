@@ -1,11 +1,13 @@
 import { listen } from "@tauri-apps/api/event";
 import { newProjectFlow, openProjectFlow, saveFlow } from "@/project/fileActions";
+import { useUiStore } from "@/store/ui";
 
 const ACTIONS: Record<string, () => unknown> = {
   "new-project": () => newProjectFlow(),
   "open-project": () => openProjectFlow(),
   "save-project": () => saveFlow(false),
   "save-project-as": () => saveFlow(true),
+  about: () => useUiStore.getState().setAboutOpen(true),
 };
 
 /** Native menu bar (File > New Project, Open Project, Save, Save As) -> the same flows as the in-app menu. */

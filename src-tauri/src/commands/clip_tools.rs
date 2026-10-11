@@ -12,6 +12,7 @@ use tauri_plugin_dialog::DialogExt;
 use crate::commands::export::reveal_command;
 use crate::errors::{AppError, AppResult};
 use crate::media::MediaBackend;
+use crate::media::color::{ColorAdjust, ensure_lut};
 use crate::media::ffmpeg::FfmpegBackend;
 use crate::media::import::{ImportedMedia, cache_key, import_one};
 use crate::media::probe::MediaDetails;
@@ -247,6 +248,25 @@ pub fn reveal_media(app: AppHandle, path: String) -> AppResult<()> {
     // argument vector, no shell; only a failure to start the file manager counts as an error
     std::process::Command::new(program).args(args).spawn()?;
     Ok(())
+}
+
+/// Bake (or reuse) the colour table for the Adjust values and return the file the preview shader loads.
+/// The export bakes the same table with the same code.
+#[tauri::command]
+pub async fn bake_color_lut(app: AppHandle, adjust: ColorAdjust) -> AppResult<String> {
+    let dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| AppError::InvalidInput(format!("no cache directory: {e}")))?
+        .join("luts");
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(ensure_lut(&dir, &adjust)?
+            .binary
+            .to_string_lossy()
+            .into_owned())
+    })
+    .await
+    .map_err(|e| AppError::InvalidInput(format!("colour task failed: {e}")))?
 }
 
 fn fonts_dir(app: &AppHandle) -> AppResult<PathBuf> {
