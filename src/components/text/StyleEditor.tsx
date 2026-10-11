@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { FontPicker } from "@/components/inspector/FontPicker";
+import { PositionControl, type PositionProps } from "@/components/text/PositionControl";
 import { StylePreview } from "@/components/text/StylePreview";
 import { Button } from "@/components/ui/button";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
@@ -40,6 +41,15 @@ function Colour({
       {label}
     </label>
   );
+}
+
+export interface SizeProps {
+  /** Font size as a share of the canvas height. */
+  value: number;
+  min: number;
+  max: number;
+  canvasHeight: number;
+  onChange: (share: number) => void;
 }
 
 /** A slider in percent of the font size (or of full strength). */
@@ -118,11 +128,17 @@ export function StyleEditor({
   value,
   label,
   onChange,
+  position,
+  size,
 }: {
   value: CustomStyle;
   /** The name written in the sample. */
   label: string;
   onChange: (next: CustomStyle) => void;
+  /** Where the styled text goes, when the editor is used for something that has a place (subtitles). */
+  position?: PositionProps;
+  /** The font size, when the editor is used for something that has one (subtitles). */
+  size?: SizeProps;
 }) {
   const fonts = useFontStore((s) => s.fonts);
   useEffect(() => useFontStore.getState().ensure(), []);
@@ -172,6 +188,26 @@ export function StyleEditor({
           CAPITALS
         </button>
       </div>
+      {size && (
+        <label className="block">
+          <span className="mb-1 flex justify-between text-text-muted">
+            Font size
+            <span className="tabular-nums">
+              {Math.round(size.value * size.canvasHeight)} px ({Math.round(size.value * 1000) / 10}%)
+            </span>
+          </span>
+          <input
+            type="range"
+            aria-label="Font size"
+            min={size.min * 100}
+            max={size.max * 100}
+            step={0.5}
+            value={Math.round(size.value * 1000) / 10}
+            className="w-full accent-[var(--accent)] pointer-coarse:h-11"
+            onChange={(e) => size.onChange(Number(e.target.value) / 100)}
+          />
+        </label>
+      )}
 
       <Part
         title="Outline"
@@ -322,6 +358,8 @@ export function StyleEditor({
           </>
         )}
       </Part>
+
+      {position && <PositionControl {...position} />}
 
       <label className="block">
         <span className="mb-1 block text-text-muted">Fade in and out (s)</span>

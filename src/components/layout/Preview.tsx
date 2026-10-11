@@ -18,7 +18,9 @@ import {
 } from "@/playback/engine";
 import { TransportBar } from "@/components/preview/TransportBar";
 import { CropOverlay } from "@/components/preview/CropOverlay";
+import { PositionGuides } from "@/components/preview/PositionGuides";
 import { useTextDrag } from "@/components/preview/useTextDrag";
+import { useTextStyleStore } from "@/store/textStyles";
 import { useSelectionStore } from "@/store/selection";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/store/ui";
@@ -183,6 +185,7 @@ export function Preview() {
   const { width, height, backgroundColor } = project.settings;
   const ratio = width / height;
   const textDrag = useTextDrag(layers, project.settings);
+  const safeMargin = useTextStyleStore((s) => s.safeMargin);
 
   // Crop box in the preview: only while its clip is selected and under the playhead.
   const cropEdit = useUiStore((s) => s.cropEdit);
@@ -245,6 +248,8 @@ export function Preview() {
                 }}
               />
             ))}
+
+            {textDrag.guides && <PositionGuides safe={safeMargin} {...textDrag.guides} />}
 
             {cropLayer && (
               <CropOverlay

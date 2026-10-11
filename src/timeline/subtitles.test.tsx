@@ -8,7 +8,7 @@ import { useProjectStore } from "@/store/project";
 import { useSelectionStore } from "@/store/selection";
 import { useUiStore } from "@/store/ui";
 import { expectValid, IDS, makeProject } from "@/test/makeProject";
-import { addClip } from "./edit";
+import { addClip, deleteClip } from "./edit";
 import { useTextStyleStore } from "@/store/textStyles";
 import { aiKindOf, aiTarget, openAiTools } from "./ai";
 import { findStyle, matchesStyle } from "./textStyles";
@@ -282,6 +282,32 @@ describe("subtitles from the AI tab", () => {
     const plain = useProjectStore.getState().project;
     expect(plain.assets.find((a) => a.text)!.text).toEqual(subtitleSpec("Hello there.", 1080));
     expect(plain.tracks.at(-1)!.clips.some((c) => "fadeIn" in c)).toBe(false);
+  });
+
+  it("reuses the empty top track left by deleted subtitles instead of piling up tracks", () => {
+    const item = (id: string): DrawnSubtitle => ({
+      start: 1,
+      duration: 1,
+      text: "Hi",
+      spec: subtitleSpec("Hi", 1080),
+      picture: "/data/text/hi.png",
+      assetId: `a-${id}`,
+      clipId: id,
+    });
+    const first = addSubtitleClips(project(), [item("one")], "subs");
+    if (!first.ok) throw new Error(first.error.message);
+    const count = first.project.tracks.length;
+    const emptied = deleteClip(first.project, "one");
+    if (!emptied.ok) throw new Error(emptied.error.message);
+    const again = addSubtitleClips(emptied.project, [item("two")], "subs-2");
+    if (!again.ok) throw new Error(again.error.message);
+    expect(again.project.tracks).toHaveLength(count);
+    expect(again.project.tracks.find((t) => t.id === "subs")!.clips.map((c) => c.id)).toEqual(["two"]);
+    // a top track that is in use is left alone
+    const third = addSubtitleClips(again.project, [item("three")], "subs-3");
+    if (!third.ok) throw new Error(third.error.message);
+    expect(third.project.tracks).toHaveLength(count + 1);
+    expectValid(third.project);
   });
 
   it("shortens a style's fade on a subtitle too brief to hold it", () => {

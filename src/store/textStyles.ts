@@ -25,11 +25,29 @@ const PrefsSchema = z
     order: z.string().max(80).array().max(500),
     subtitleStyleId: z.string().max(80).nullable(),
     subtitleCustom: z.record(z.string().max(80), CustomSchema),
+    /** Where subtitles are put (shares of the canvas); null for the usual place. */
+    subtitlePosition: z
+      .object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) })
+      .strict()
+      .nullable()
+      .default(null),
+    /** Subtitle font size as a share of the canvas height; null for the usual size. */
+    subtitleSize: z.number().min(0.02).max(0.2).nullable().default(null),
+    /** Anchors and guides keep texts inside the safe margin. */
+    safeMargin: z.boolean().default(true),
   })
   .strict();
 type Prefs = z.infer<typeof PrefsSchema>;
 
-const EMPTY: Prefs = { mine: [], order: [], subtitleStyleId: null, subtitleCustom: {} };
+const EMPTY: Prefs = {
+  mine: [],
+  order: [],
+  subtitleStyleId: null,
+  subtitleCustom: {},
+  subtitlePosition: null,
+  subtitleSize: null,
+  safeMargin: true,
+};
 const BUILT_IN = new Set(STYLE_PRESETS.map((p) => p.id));
 
 function readPrefs(): Prefs {
@@ -72,6 +90,9 @@ interface StyleState extends Prefs {
   setSubtitleStyle: (id: string | null) => void;
   /** Keep (or with `null` drop) the user's changes to a style as used for subtitles. */
   setSubtitleCustom: (id: string, custom: CustomStyle | null) => void;
+  setSubtitlePosition: (at: { x: number; y: number } | null) => void;
+  setSubtitleSize: (share: number | null) => void;
+  setSafeMargin: (on: boolean) => void;
   /** For tests: forget everything of the user's. */
   reset: () => void;
 }
@@ -81,6 +102,9 @@ const prefsOf = (s: Prefs): Prefs => ({
   order: s.order,
   subtitleStyleId: s.subtitleStyleId,
   subtitleCustom: s.subtitleCustom,
+  subtitlePosition: s.subtitlePosition,
+  subtitleSize: s.subtitleSize,
+  safeMargin: s.safeMargin,
 });
 
 export const useTextStyleStore = create<StyleState>((set, get) => {
@@ -153,6 +177,18 @@ export const useTextStyleStore = create<StyleState>((set, get) => {
       if (get().editingId === id) set({ editingId: null });
     },
     setSubtitleStyle: (subtitleStyleId) => keep(() => ({ subtitleStyleId })),
+    setSubtitlePosition: (at) =>
+      keep(() => ({
+        subtitlePosition:
+          at && [at.x, at.y].every((v) => Number.isFinite(v) && v >= 0 && v <= 1)
+            ? { x: at.x, y: at.y }
+            : null,
+      })),
+    setSubtitleSize: (share) =>
+      keep(() => ({
+        subtitleSize: share !== null && Number.isFinite(share) ? Math.min(0.2, Math.max(0.02, share)) : null,
+      })),
+    setSafeMargin: (safeMargin) => keep(() => ({ safeMargin })),
     setSubtitleCustom: (id, custom) =>
       keep((s) => {
         const subtitleCustom = { ...s.subtitleCustom };

@@ -293,7 +293,7 @@ export function watchTextPictures(): () => void {
 const CHAR_WIDTH = 0.62;
 const LINE_HEIGHT = 1.25;
 const WRAP_WIDTH = 0.9;
-const HIT_PADDING = 0.02;
+export const HIT_PADDING = 0.02;
 
 export interface Box {
   left: number;

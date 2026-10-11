@@ -338,10 +338,10 @@ describe("editing text", () => {
     fireEvent.click(screen.getByRole("radio", { name: "Align right" }));
     await waitFor(() => expect(textOf().text?.align).toBe("right"));
 
-    const down = screen.getByRole("slider", { name: /Position down/ });
+    const down = screen.getByRole("spinbutton", { name: "Y (%)" });
     fireEvent.change(down, { target: { value: "85" } });
-    expect(textOf().text?.y).toBe(0.5); // moves on release
-    fireEvent.pointerUp(down);
+    expect(textOf().text?.y).toBe(0.5); // moves when the field is left
+    fireEvent.blur(down);
     await waitFor(() => expect(textOf().text?.y).toBe(0.85));
     expectValid(useProjectStore.getState().project);
   });

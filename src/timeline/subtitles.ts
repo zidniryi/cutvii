@@ -7,6 +7,7 @@ import { clipDuration, clipSpeed, findClip } from "./clips";
 import { addClip, addTrack, type EditResult } from "./edit";
 import { setTextFade, TEXT_FONT_LIMITS } from "./text";
 import type { TextStyle } from "@/project/model";
+import { DEFAULT_SUBTITLE_POSITION, type Position } from "./textPosition";
 import { withStyle } from "./textStyles";
 
 /** One stretch of speech; times are seconds from the start of the clip's used source range. */
@@ -25,7 +26,9 @@ export interface Subtitle {
 
 /** A subtitle shorter than this cannot be read; it is dropped. */
 export const MIN_SUBTITLE_SECONDS = 0.2;
-const SUBTITLE_FONT_SHARE = 0.045;
+export const SUBTITLE_FONT_SHARE = 0.045;
+/** The smallest and largest subtitle size that can be chosen, as shares of the canvas height. */
+export const SUBTITLE_SIZE_LIMITS = { min: 0.02, max: 0.2 } as const;
 
 /**
  * Where each recognised segment sits on the timeline: scaled by the clip's speed, kept inside the clip, and
@@ -50,16 +53,22 @@ export function subtitlesFor(clip: TimelineClip, segments: SpeechSegment[]): Sub
 }
 
 /** How subtitles look: white, centred, near the bottom, sized for the canvas. Editable like any text. */
-export function subtitleSpec(text: string, canvasHeight: number): TextSpec {
-  const size = Math.round(canvasHeight * SUBTITLE_FONT_SHARE);
+export function subtitleSpec(
+  text: string,
+  canvasHeight: number,
+  at: Position = DEFAULT_SUBTITLE_POSITION,
+  /** Font size as a share of the canvas height. */
+  share: number = SUBTITLE_FONT_SHARE,
+): TextSpec {
+  const size = Math.round(canvasHeight * share);
   return {
     content: text,
     fontSize: Math.min(TEXT_FONT_LIMITS.max, Math.max(TEXT_FONT_LIMITS.min, size)),
     color: "#FFFFFF",
     bold: true,
     align: "center",
-    x: 0.5,
-    y: 0.88,
+    x: at.x,
+    y: at.y,
   };
 }
 
@@ -73,11 +82,17 @@ export interface DrawnSubtitle extends Subtitle {
   fade?: number;
 }
 
-/** Put drawn subtitles on a new video track above everything. One undoable step. */
-export function addSubtitleClips(project: Project, items: DrawnSubtitle[], trackId: string): EditResult {
+/**
+ * Put drawn subtitles on a video track above everything: the top track when it is an empty video track
+ * (left behind by deleting earlier subtitles), otherwise a new one with the id `newTrackId`. One undoable step.
+ */
+export function addSubtitleClips(project: Project, items: DrawnSubtitle[], newTrackId: string): EditResult {
   if (items.length === 0) return { ok: true, project };
   const { width, height } = project.settings;
-  const track = addTrack(project, "video", trackId);
+  const top = [...project.tracks].sort((a, b) => b.order - a.order)[0];
+  const reuse = top && top.type === "video" && top.clips.length === 0 ? top : undefined;
+  const trackId = reuse?.id ?? newTrackId;
+  const track: EditResult = reuse ? { ok: true, project } : addTrack(project, "video", trackId);
   if (!track.ok) return track;
   const assets: MediaAsset[] = items.map((item) => ({
     id: item.assetId,
@@ -108,6 +123,19 @@ export function addSubtitleClips(project: Project, items: DrawnSubtitle[], track
   return { ok: true, project: next };
 }
 
+/** Scroll the timeline so the track holding `clipId` is in view (it may be below the visible tracks). */
+function showTrackOf(clipId: string) {
+  const track = useProjectStore.getState().project.tracks.find((t) => t.clips.some((c) => c.id === clipId));
+  if (!track || typeof document === "undefined") return;
+  // after the timeline has drawn the new track
+  requestAnimationFrame(() => {
+    const lane = Array.from(document.querySelectorAll("[data-track-id]")).find(
+      (el) => el.getAttribute("data-track-id") === track.id,
+    );
+    if (lane && typeof lane.scrollIntoView === "function") lane.scrollIntoView({ block: "nearest" });
+  });
+}
+
 const message = (e: unknown) =>
   typeof e === "string" ? e : e instanceof Error ? e.message : "unknown error";
 
@@ -124,6 +152,10 @@ export async function generateSubtitles(
   onStage: (stage: string) => void = () => {},
   /** A text style for the subtitles; without one they get the plain subtitle look. */
   style?: { style: TextStyle; fade?: number },
+  /** Where the subtitles go; the usual place at the bottom when absent. */
+  at?: Position,
+  /** Font size as a share of the canvas height; the usual subtitle size when absent. */
+  share?: number,
 ): Promise<SubtitleResult> {
   const before = useProjectStore.getState().project;
   const found = findClip(before, clipId);
@@ -159,7 +191,7 @@ export async function generateSubtitles(
   try {
     for (const [i, subtitle] of subtitles.entries()) {
       onStage(`Drawing subtitle ${i + 1} of ${subtitles.length}`);
-      const plain = subtitleSpec(subtitle.text, height);
+      const plain = subtitleSpec(subtitle.text, height, at, share);
       const spec = style ? withStyle(plain, style.style) : plain;
       const picture = await invoke<string>("render_text", { spec, width, height });
       drawn.push({
@@ -179,5 +211,7 @@ export async function generateSubtitles(
     label: "Add subtitles",
     apply: (p) => addSubtitleClips(p, drawn, trackId),
   });
-  return result.ok ? { ok: true, added: drawn.length } : { ok: false, reason: result.error.message };
+  if (!result.ok) return { ok: false, reason: result.error.message };
+  showTrackOf(drawn[0].clipId);
+  return { ok: true, added: drawn.length };
 }

@@ -1,3 +1,4 @@
+import { ClipPosition } from "@/components/text/PositionControl";
 import { useEffect, useRef, useState } from "react";
 import { AlignCenter, AlignLeft, AlignRight, Bold } from "lucide-react";
 import { FontPicker } from "@/components/inspector/FontPicker";
@@ -25,46 +26,6 @@ const ALIGNS = [
   { id: "center", label: "Align centre", icon: AlignCenter },
   { id: "right", label: "Align right", icon: AlignRight },
 ] as const;
-
-/** Position slider in percent of the canvas. Dragging only moves the number; the text moves on release. */
-function PositionField({
-  label,
-  value,
-  onCommit,
-}: {
-  label: string;
-  value: number;
-  onCommit: (v: number) => void;
-}) {
-  const [draft, setDraft] = useState<number | null>(null);
-  const pct = Math.round((draft ?? value) * 100);
-  function commit() {
-    if (draft === null) return;
-    const v = draft;
-    setDraft(null);
-    if (v !== value) onCommit(v);
-  }
-  return (
-    <label className="block">
-      <span className="mb-1 flex justify-between text-xs text-text-muted">
-        {label} <span className="tabular-nums">{pct}%</span>
-      </span>
-      <input
-        type="range"
-        min={0}
-        max={100}
-        step={1}
-        value={pct}
-        aria-valuetext={`${pct} percent`}
-        className="w-full accent-[var(--accent)] pointer-coarse:h-11"
-        onChange={(e) => setDraft(Number(e.target.value) / 100)}
-        onPointerUp={commit}
-        onKeyUp={commit}
-        onBlur={commit}
-      />
-    </label>
-  );
-}
 
 /** Editor for a text clip. Every committed change redraws the text and is one undo step. */
 export function TextPanel({
@@ -261,9 +222,7 @@ export function TextPanel({
         </div>
       </div>
 
-      <PositionField label="Position across" value={spec.x} onCommit={(x) => apply({ x })} />
-      <PositionField label="Position down" value={spec.y} onCommit={(y) => apply({ y })} />
-      <p className="text-xs text-text-muted">50% / 50% is the middle of the picture.</p>
+      <ClipPosition clipId={clipId} spec={spec} onProblem={setProblem} />
 
       <label className="block">
         <span className="mb-1 block text-xs text-text-muted">Fade in and out (s)</span>

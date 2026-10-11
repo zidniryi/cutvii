@@ -5,7 +5,14 @@ import { cn } from "@/lib/utils";
 import type { TimelineClip } from "@/project/model";
 import { SPEECH_LANGUAGES, useAiStore, type SpeechModel } from "@/store/ai";
 import { DEFAULT_STYLE, subtitleStyleOf, useTextStyleStore } from "@/store/textStyles";
-import { generateSubtitles } from "@/timeline/subtitles";
+import { useProjectStore } from "@/store/project";
+import {
+  generateSubtitles,
+  SUBTITLE_FONT_SHARE,
+  SUBTITLE_SIZE_LIMITS,
+  subtitleSpec,
+} from "@/timeline/subtitles";
+import { DEFAULT_SUBTITLE_POSITION } from "@/timeline/textPosition";
 import { StyleEditor } from "@/components/text/StyleEditor";
 import { StyleList } from "@/components/text/StyleList";
 import { StylePreview } from "@/components/text/StylePreview";
@@ -129,6 +136,11 @@ export function AiPanel({ clip }: { clip: TimelineClip }) {
   const subtitleCustom = useTextStyleStore((s) => s.subtitleCustom);
   const subtitle = subtitleStyleOf({ mine: ownStyles, subtitleStyleId, subtitleCustom });
   const [customising, setCustomising] = useState(false);
+  const subtitleAt = useTextStyleStore((s) => s.subtitlePosition) ?? DEFAULT_SUBTITLE_POSITION;
+  const subtitleSize = useTextStyleStore((s) => s.subtitleSize) ?? SUBTITLE_FONT_SHARE;
+  const canvasWidth = useProjectStore((s) => s.project.settings.width);
+  const canvasHeight = useProjectStore((s) => s.project.settings.height);
+  const canvas = { width: canvasWidth, height: canvasHeight };
 
   // default to a model that is already here, otherwise the middle one
   const model =
@@ -182,7 +194,15 @@ export function AiPanel({ clip }: { clip: TimelineClip }) {
       subtitle.id === DEFAULT_STYLE && !subtitle.customised
         ? undefined
         : { style: subtitle.style, fade: subtitle.fade };
-    const result = await generateSubtitles(clip.id, model.id, language || null, setStage, look);
+    const result = await generateSubtitles(
+      clip.id,
+      model.id,
+      language || null,
+      setStage,
+      look,
+      subtitleAt,
+      subtitleSize,
+    );
     setStage(null);
     setNote(
       result.ok
@@ -359,6 +379,19 @@ export function AiPanel({ clip }: { clip: TimelineClip }) {
                       }
                       label={subtitle.name}
                       onChange={(next) => useTextStyleStore.getState().setSubtitleCustom(subtitle.id, next)}
+                      size={{
+                        value: subtitleSize,
+                        ...SUBTITLE_SIZE_LIMITS,
+                        canvasHeight: canvas.height,
+                        onChange: (share) => useTextStyleStore.getState().setSubtitleSize(share),
+                      }}
+                      position={{
+                        // a typical line, to know how much room a subtitle takes
+                        spec: subtitleSpec("A line of subtitles", canvas.height, subtitleAt, subtitleSize),
+                        canvas,
+                        resetTo: DEFAULT_SUBTITLE_POSITION,
+                        onChange: (to) => useTextStyleStore.getState().setSubtitlePosition(to),
+                      }}
                     />
                   </div>
                 )}

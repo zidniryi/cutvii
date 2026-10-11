@@ -214,9 +214,10 @@ export function Timeline() {
         </div>
       }
     >
-      <div className="flex min-h-0 flex-1 select-none" data-timeline-area>
+      {/* more tracks than fit: the headers and the lanes scroll up and down together */}
+      <div className="flex min-h-0 flex-1 items-start overflow-y-auto select-none" data-timeline-area>
         {/* track headers */}
-        <div className="shrink-0 border-r bg-surface-1" style={{ width: HEADER_WIDTH }}>
+        <div className="min-h-full shrink-0 border-r bg-surface-1" style={{ width: HEADER_WIDTH }}>
           <div style={{ height: RULER_HEIGHT }} className="border-b" />
           {project.tracks.map((t) => (
             <div
@@ -252,7 +253,7 @@ export function Timeline() {
         <div
           ref={scrollerRef}
           data-timeline-scroller
-          className="relative min-w-0 flex-1 overflow-x-auto overflow-y-hidden"
+          className="relative min-h-full min-w-0 flex-1 overflow-x-auto overflow-y-hidden"
         >
           <div className="relative" style={{ width, height: Math.max(height, 0) }}>
             <Ruler pps={pps} from={from} to={to} />

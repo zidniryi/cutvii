@@ -2,7 +2,10 @@ import { useCallback, useState } from "react";
 import type { Layer } from "@/playback/engine";
 import { useSelectionStore } from "@/store/selection";
 import { useUiStore } from "@/store/ui";
+import type { TextSpec } from "@/project/model";
+import { useTextStyleStore } from "@/store/textStyles";
 import { editText, textHitBox } from "@/timeline/text";
+import { snapPosition } from "@/timeline/textPosition";
 
 /** Pointer travel (share of the preview) below which a press is a click, not a move. */
 const MOVE_THRESHOLD = 0.004;
@@ -21,6 +24,10 @@ interface Drag {
   /** How far it has been moved so far (shares of the canvas). */
   dx: number;
   dy: number;
+  spec: TextSpec;
+  /** Guide lines it is snapped onto right now. */
+  vertical: number[];
+  horizontal: number[];
 }
 
 /**
@@ -66,6 +73,9 @@ export function useTextDrag(layers: Layer[], canvas: { width: number; height: nu
       y: spec.y,
       dx: 0,
       dy: 0,
+      spec,
+      vertical: [],
+      horizontal: [],
     });
   }
 
@@ -78,9 +88,21 @@ export function useTextDrag(layers: Layer[], canvas: { width: number; height: nu
       return;
     }
     // the text centre stays inside the canvas, so what is shown is exactly what will be saved
-    const dx = clamp01(drag.x + (e.clientX - drag.fromX) / at.rect.width) - drag.x;
-    const dy = clamp01(drag.y + (e.clientY - drag.fromY) / at.rect.height) - drag.y;
-    setDrag({ ...drag, dx, dy });
+    const free = {
+      x: clamp01(drag.x + (e.clientX - drag.fromX) / at.rect.width),
+      y: clamp01(drag.y + (e.clientY - drag.fromY) / at.rect.height),
+    };
+    // pulled onto the centre lines and the safe margin when close; Alt moves freely
+    const to = e.altKey
+      ? { ...free, vertical: [], horizontal: [] }
+      : snapPosition(free, drag.spec, canvas, useTextStyleStore.getState().safeMargin);
+    setDrag({
+      ...drag,
+      dx: to.x - drag.x,
+      dy: to.y - drag.y,
+      vertical: to.vertical,
+      horizontal: to.horizontal,
+    });
   }
 
   function onPointerUp() {
@@ -105,5 +127,7 @@ export function useTextDrag(layers: Layer[], canvas: { width: number; height: nu
     /** How far the picture of `clipId` is shifted right now, in shares of the stage. */
     shiftOf: (clipId: string) => (drag?.clipId === clipId ? { dx: drag.dx, dy: drag.dy } : null),
     cursor: drag ? "grabbing" : hovering ? "grab" : undefined,
+    /** Guide lines to draw while a text is being dragged. */
+    guides: drag ? { vertical: drag.vertical, horizontal: drag.horizontal } : null,
   };
 }

@@ -323,7 +323,7 @@ pub fn transcribe(
     }
     ran.map_err(|e| failed("failed", e))?;
 
-    let raw = state
+    let raw: Vec<Segment> = state
         .as_iter()
         .map(|segment| Segment {
             // whisper counts in hundredths of a second
@@ -335,9 +335,28 @@ pub fn transcribe(
                 .unwrap_or_default(),
         })
         .collect();
-    Ok(clean_segments(
-        raw,
-        samples.len() as f64 / SAMPLE_RATE as f64,
+    let heard = non_speech_note(&raw);
+    let segments = clean_segments(raw, samples.len() as f64 / SAMPLE_RATE as f64);
+    match heard {
+        Some(note) if segments.is_empty() => Err(AppError::InvalidInput(note)),
+        _ => Ok(segments),
+    }
+}
+
+/// When the model recognised something but none of it is words (it labels music as "[Music]" or "♪"),
+/// say so: that is a different problem from a silent clip, and a larger model or naming the language
+/// often helps with singing.
+pub fn non_speech_note(raw: &[Segment]) -> Option<String> {
+    let labels: Vec<&str> = raw
+        .iter()
+        .map(|s| s.text.trim())
+        .filter(|t| !t.is_empty() && !is_speech(t))
+        .collect();
+    let first = labels.first()?;
+    let label: String = first.chars().take(24).collect();
+    Some(format!(
+        "only music or other sounds were recognised, no words (the model heard \u{201c}{label}\u{201d}). \
+         Singing is harder than speech: try the Small model and choose the language instead of Auto"
     ))
 }
 
@@ -573,6 +592,28 @@ mod tests {
             assert!(e.contains("missing or damaged"), "{e}");
         }
         fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn music_only_results_are_explained_instead_of_looking_like_silence() {
+        let seg = |text: &str| Segment {
+            start: 0.0,
+            end: 5.0,
+            text: text.into(),
+        };
+        let note = non_speech_note(&[seg(" [Music] "), seg("(applause)")]).unwrap();
+        assert!(
+            note.contains("[Music]") && note.contains("Small model"),
+            "{note}"
+        );
+        assert!(non_speech_note(&[seg("  ♪  ")]).unwrap().contains("♪"));
+        assert_eq!(
+            non_speech_note(&[]),
+            None,
+            "nothing heard at all: a silent clip"
+        );
+        assert_eq!(non_speech_note(&[seg("Hello there.")]), None);
+        assert_eq!(non_speech_note(&[seg("   ")]), None);
     }
 
     /// Runs a real transcription, but only with files that are already on this machine: set
