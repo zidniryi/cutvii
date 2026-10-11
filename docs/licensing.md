@@ -76,8 +76,32 @@ No GPL/LGPL/AGPL crates.
 
 - The app icon (`design/app-icon.png`) and in-app logo are original artwork for this project; no third-party logo or
   mascot is used. The default Tauri icon set was replaced.
-- Fonts: the UI uses the system font stack. Text and titles are drawn with **Noto Sans** Regular and Bold
-  (`src-tauri/assets/fonts/`, Copyright 2022 The Noto Project Authors), compiled into the app under the
-  **SIL Open Font License 1.1** (`src-tauri/assets/fonts/OFL.txt`). The OFL allows bundling and redistribution;
-  ship the licence text with any distributed build and do not sell the fonts on their own. Text drawing uses
-  `cosmic-text` (MIT OR Apache-2.0) and `png` (MIT OR Apache-2.0).
+- Fonts: the UI uses the system font stack. Text and titles can be drawn in 37 font families that ship with the
+  app: 36 under the **SIL Open Font License 1.1** and one (Luckiest Guy) under the **Apache License 2.0**. The
+  files are in `src-tauri/assets/fonts/` and each licence text, with its copyright line, is in
+  `src-tauri/assets/fonts/licenses/`. Noto Sans (the default) is compiled into the program; the others are bundle
+  resources (`bundle.resources` in `tauri.conf.json`), about 30 MB in total, read from disk only when used:
+
+  Alegreya, Aleo, Alex Brush, Arapey, Assistant, Barlow, Bitcount Ink, Bitter, Brawler, Bungee Spice, Caladea,
+  Carme, DM Sans, Enriqueta, Fraunces, Google Sans, Grandiflora One, Grechen Fuemen, Lato, Libre Baskerville, LINE
+  Seed JP, Luckiest Guy, Merienda, Merriweather, Mulish (formerly Muli), Noto Sans, Nunito, Open Sans, Oswald,
+  Pinyon Script, Playfair Display, Playwrite NZ Basic Guides, Poppins, Roboto, Rokkitt, Rubik, Work Sans.
+
+  - Luckiest Guy (Copyright 2010 Brian J. Bonislawsky DBA Astigmatic) is Apache-2.0: ship
+    `licenses/LuckiestGuy-Apache-2.0.txt` with any distributed build.
+  - Playwrite NZ Basic Guides is listed as OFL by Google Fonts but its folder there carries no licence file;
+    `licenses/PlaywriteNZ-OFL.txt` is the licence of the same project's Playwrite NZ Basic (same copyright line).
+  - The OFL allows bundling and redistribution: ship the licence texts with any distributed build (they are part
+    of the resources) and do not sell the fonts on their own.
+  - Several licences reserve the font name (Lato, Libre Baskerville, Merriweather, Playfair Display): the files
+    are shipped unmodified, so the names may be kept. A modified copy would have to be renamed.
+  - "Google" and "Google Sans" are trademarks of Google LLC (`licenses/GoogleSans-TRADEMARKS.md`): the font may be
+    offered under its name, but the name must not be used to suggest any affiliation with Google.
+  - Bitcount Ink and Bungee Spice are colour fonts; CutVii draws them in the single text colour.
+  - Alex Brush, Arapey, Bungee Spice, Carme, Grandiflora One, Grechen Fuemen, Luckiest Guy, Pinyon Script and
+    Playwrite NZ Basic Guides have one weight (Bold does nothing).
+    Barlow, Brawler, Caladea, Enriqueta, Lato, LINE Seed JP and Poppins ship as Regular and Bold only.
+
+- Fonts a user imports (`.ttf`, `.otf`, `.ttc`) are copied into the app data folder on their machine and are never
+  redistributed by CutVii; the user is responsible for having the right to use them.
+- Text drawing uses `cosmic-text` (MIT OR Apache-2.0) and `png` (MIT OR Apache-2.0).

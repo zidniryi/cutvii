@@ -5,6 +5,7 @@
 //! fonts are read, so the same text gives the same pixels on every machine and platform.
 
 use std::collections::hash_map::DefaultHasher;
+use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::BufWriter;
@@ -18,9 +19,18 @@ use serde::{Deserialize, Serialize};
 
 use crate::errors::{AppError, AppResult};
 
+/// The font of a text that names none, and the stand-in for a font that is not installed here.
 pub const FONT_FAMILY: &str = "Noto Sans";
-const FONT_REGULAR: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
-const FONT_BOLD: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Bold.ttf");
+/// The default font is compiled in, so text can always be drawn. The other fonts that come with CutVii are
+/// files shipped next to the app (`assets/fonts`, all SIL Open Font License; see `assets/fonts/licenses`).
+const BUILT_IN_FONTS: &[&[u8]] = &[
+    include_bytes!("../../assets/fonts/NotoSans-Regular.ttf"),
+    include_bytes!("../../assets/fonts/NotoSans-Bold.ttf"),
+];
+/// Font files the user may import.
+pub const FONT_EXTENSIONS: &[&str] = &["ttf", "otf", "ttc"];
+pub const MAX_FONT_BYTES: u64 = 40 * 1024 * 1024;
+const MAX_FONT_NAME: usize = 100;
 
 /// Bump when the drawing changes, so cached pictures are made again.
 pub const RENDER_VERSION: u32 = 1;
@@ -52,6 +62,9 @@ pub struct TextSpec {
     pub color: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub bold: bool,
+    /// Font family name. Absent means Noto Sans; a family that is not installed is drawn in Noto Sans too.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font: Option<String>,
     #[serde(default)]
     pub align: TextAlign,
     /// Centre of the text block as a share of the canvas (0.5, 0.5 = the middle).
@@ -79,6 +92,13 @@ impl TextSpec {
         }
         if !(MIN_FONT_SIZE..=MAX_FONT_SIZE).contains(&self.font_size) {
             return fail("the font size must be between 8 and 2000");
+        }
+        if self
+            .font
+            .as_ref()
+            .is_some_and(|f| f.trim().is_empty() || f.chars().count() > MAX_FONT_NAME)
+        {
+            return fail("the font name is not valid");
         }
         if parse_color(&self.color).is_none() {
             return fail("the text colour must be a #RRGGBB colour");
@@ -109,6 +129,7 @@ pub fn text_key(spec: &TextSpec, width: u32, height: u32) -> String {
         spec.font_size.to_bits(),
         &spec.color,
         spec.bold,
+        &spec.font,
         spec.align,
         spec.x.to_bits(),
         spec.y.to_bits(),
@@ -117,17 +138,188 @@ pub fn text_key(spec: &TextSpec, width: u32, height: u32) -> String {
     format!("{:016x}", h.finish())
 }
 
-fn fonts() -> &'static Mutex<(FontSystem, SwashCache)> {
-    static FONTS: OnceLock<Mutex<(FontSystem, SwashCache)>> = OnceLock::new();
+struct Fonts {
+    system: FontSystem,
+    cache: SwashCache,
+    /// Families that came with the app.
+    bundled: BTreeSet<String>,
+    /// Families only the user's imported files provide.
+    imported: BTreeSet<String>,
+    /// Imported font files already loaded.
+    loaded: HashSet<PathBuf>,
+}
+
+fn family_names(db: &fontdb::Database) -> BTreeSet<String> {
+    db.faces()
+        .filter_map(|face| face.families.first().map(|(name, _)| name.clone()))
+        .collect()
+}
+
+fn fonts() -> &'static Mutex<Fonts> {
+    static FONTS: OnceLock<Mutex<Fonts>> = OnceLock::new();
     FONTS.get_or_init(|| {
         let mut db = fontdb::Database::new();
-        db.load_font_data(FONT_REGULAR.to_vec());
-        db.load_font_data(FONT_BOLD.to_vec());
-        Mutex::new((
-            FontSystem::new_with_locale_and_db("en-US".into(), db),
-            SwashCache::new(),
-        ))
+        for font in BUILT_IN_FONTS {
+            db.load_font_data(font.to_vec());
+        }
+        let bundled = family_names(&db);
+        Mutex::new(Fonts {
+            system: FontSystem::new_with_locale_and_db("en-US".into(), db),
+            cache: SwashCache::new(),
+            bundled,
+            imported: BTreeSet::new(),
+            loaded: HashSet::new(),
+        })
     })
+}
+
+fn is_font_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| FONT_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
+}
+
+/// Load every font file in `dir` that is not loaded yet. Returns the families those files provide.
+fn load_fonts_in(dir: &Path, guard: &mut Fonts) -> BTreeSet<String> {
+    let mut families = BTreeSet::new();
+    let Ok(entries) = fs::read_dir(dir) else {
+        return families;
+    };
+    let mut paths: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| is_font_file(p))
+        .collect();
+    paths.sort();
+    for path in paths {
+        if !guard.loaded.insert(path.clone()) {
+            continue;
+        }
+        // the file is read when the font is used, not kept in memory
+        let db = guard.system.db_mut();
+        for id in db.load_font_source(fontdb::Source::File(path)) {
+            if let Some((name, _)) = db.face(id).and_then(|face| face.families.first()) {
+                families.insert(name.clone());
+            }
+        }
+    }
+    families
+}
+
+/// Make the fonts that ship with CutVii (the files in `dir`) available. Returns how many families were
+/// added; 0 on the first call means the folder is missing and only the built-in default font can be used.
+pub fn load_bundled_fonts(dir: &Path) -> usize {
+    let mut guard = fonts().lock().unwrap_or_else(|e| e.into_inner());
+    let families = load_fonts_in(dir, &mut guard);
+    for family in &families {
+        guard.imported.remove(family);
+    }
+    let added = families.len();
+    guard.bundled.extend(families);
+    added
+}
+
+/// Make the fonts the user imported earlier (the files in `dir`) available. Cheap to call again.
+pub fn load_user_fonts(dir: &Path) {
+    let mut guard = fonts().lock().unwrap_or_else(|e| e.into_inner());
+    let families = load_fonts_in(dir, &mut guard);
+    let new: Vec<String> = families
+        .into_iter()
+        .filter(|f| !guard.bundled.contains(f))
+        .collect();
+    guard.imported.extend(new);
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FontInfo {
+    pub family: String,
+    /// Comes with CutVii (as opposed to imported by the user on this machine).
+    pub bundled: bool,
+    /// A small picture of the family name drawn in the font itself, for the font picker.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
+}
+
+/// Size of a font preview picture; the picker shows it at half this size so it stays sharp.
+pub const FONT_PREVIEW_SIZE: (u32, u32) = (560, 64);
+const FONT_PREVIEW_FONT_SIZE: f64 = 34.0;
+/// The app's text colour (`--text`).
+const FONT_PREVIEW_COLOR: &str = "#F2F0ED";
+
+/// The preview picture of `family` inside `dir`: its name drawn in the font, made once and reused.
+pub fn ensure_font_preview(dir: &Path, family: &str) -> AppResult<PathBuf> {
+    let (width, height) = FONT_PREVIEW_SIZE;
+    let spec = TextSpec {
+        content: family.to_string(),
+        font_size: FONT_PREVIEW_FONT_SIZE,
+        color: FONT_PREVIEW_COLOR.into(),
+        bold: false,
+        font: Some(family.to_string()),
+        align: TextAlign::Left,
+        // the 90% text box then spans the whole picture but for a small margin
+        x: 0.5,
+        y: 0.5,
+    };
+    let out = dir.join(format!("{}.png", text_key(&spec, width, height)));
+    if !out.is_file() {
+        write_text_png(&spec, width, height, &out)?;
+    }
+    Ok(out)
+}
+
+/// Every font text can be drawn in, by family name: bundled ones first, then imported ones.
+pub fn list_fonts() -> Vec<FontInfo> {
+    let guard = fonts().lock().unwrap_or_else(|e| e.into_inner());
+    let mut all: Vec<FontInfo> = family_names(guard.system.db())
+        .into_iter()
+        .map(|family| FontInfo {
+            bundled: guard.bundled.contains(&family),
+            family,
+            preview: None,
+        })
+        .collect();
+    all.sort_by(|a, b| b.bundled.cmp(&a.bundled).then(a.family.cmp(&b.family)));
+    all
+}
+
+/// Copy a font file into `dir` and make it available. The original is only read. Returns its families.
+pub fn import_font(src: &Path, dir: &Path) -> AppResult<Vec<String>> {
+    let invalid = |m: &str| AppError::InvalidInput(m.to_string());
+    if !is_font_file(src) {
+        return Err(invalid("choose a .ttf, .otf or .ttc font file"));
+    }
+    if fs::metadata(src)?.len() > MAX_FONT_BYTES {
+        return Err(invalid("that font file is too large (40 MB at most)"));
+    }
+    let bytes = fs::read(src)?;
+    // read it on its own first: a file that is not a font must never reach the shared font list
+    let mut probe = fontdb::Database::new();
+    probe.load_font_data(bytes.clone());
+    let families: Vec<String> = family_names(&probe).into_iter().collect();
+    if families.is_empty() {
+        return Err(invalid("that file is not a font CutVii can read"));
+    }
+    let name = src
+        .file_name()
+        .ok_or_else(|| invalid("that font file has no name"))?;
+    fs::create_dir_all(dir)?;
+    let target = dir.join(name);
+    if fs::read(&target).ok().as_deref() != Some(&bytes[..]) {
+        let tmp = target.with_extension(format!("part-{}", std::process::id()));
+        fs::write(&tmp, &bytes)?;
+        fs::rename(&tmp, &target)?;
+    }
+    let mut guard = fonts().lock().unwrap_or_else(|e| e.into_inner());
+    if guard.loaded.insert(target.clone()) {
+        guard.system.db_mut().load_font_data(bytes);
+    }
+    for family in &families {
+        if !guard.bundled.contains(family) {
+            guard.imported.insert(family.clone());
+        }
+    }
+    Ok(families)
 }
 
 /// Draw `spec` on a transparent canvas. Returns straight-alpha RGBA, `width * height * 4` bytes.
@@ -137,13 +329,24 @@ pub fn render(spec: &TextSpec, width: u32, height: u32) -> AppResult<Vec<u8>> {
     let (r, g, b) = parse_color(&spec.color).expect("validated");
 
     let mut guard = fonts().lock().unwrap_or_else(|e| e.into_inner());
-    let (font_system, cache) = &mut *guard;
+    // a font that is not installed here (a project from another machine) is drawn in the default font
+    let family = spec
+        .font
+        .as_deref()
+        .filter(|f| family_names(guard.system.db()).contains(*f))
+        .unwrap_or(FONT_FAMILY)
+        .to_string();
+    let Fonts {
+        system: font_system,
+        cache,
+        ..
+    } = &mut *guard;
     let size = spec.font_size as f32;
     let box_width = (width as f64 * WRAP_WIDTH) as f32;
     let mut buffer = Buffer::new(font_system, Metrics::new(size, size * LINE_HEIGHT));
     buffer.set_size(Some(box_width), None);
     let attrs = Attrs::new()
-        .family(Family::Name(FONT_FAMILY))
+        .family(Family::Name(&family))
         .weight(if spec.bold {
             Weight::BOLD
         } else {
@@ -225,6 +428,7 @@ pub fn ensure_text_picture(
 ) -> AppResult<PathBuf> {
     spec.validate()?;
     check_canvas(width, height)?;
+    load_user_fonts(&data_dir.join("fonts"));
     let out = data_dir
         .join("text")
         .join(format!("{}.png", text_key(spec, width, height)));
@@ -240,6 +444,57 @@ mod tests {
 
     const W: u32 = 640;
     const H: u32 = 360;
+    /// Every family that ships with CutVii, in the order the picker lists them.
+    const ALL_FAMILIES: &[&str] = &[
+        "Alegreya",
+        "Aleo",
+        "Alex Brush",
+        "Arapey",
+        "Assistant",
+        "Barlow",
+        "Bitcount Ink",
+        "Bitter",
+        "Brawler",
+        "Bungee Spice",
+        "Caladea",
+        "Carme",
+        "DM Sans",
+        "Enriqueta",
+        "Fraunces",
+        "Google Sans",
+        "Grandiflora One",
+        "Grechen Fuemen",
+        "LINE Seed JP",
+        "Lato",
+        "Libre Baskerville",
+        "Luckiest Guy",
+        "Merienda",
+        "Merriweather",
+        "Mulish",
+        "Noto Sans",
+        "Nunito",
+        "Open Sans",
+        "Oswald",
+        "Pinyon Script",
+        "Playfair Display",
+        "Playwrite NZ Basic Guides",
+        "Poppins",
+        "Roboto",
+        "Rokkitt",
+        "Rubik",
+        "Work Sans",
+    ];
+    const SINGLE_WEIGHT: &[&str] = &[
+        "Alex Brush",
+        "Arapey",
+        "Bungee Spice",
+        "Carme",
+        "Grandiflora One",
+        "Grechen Fuemen",
+        "Luckiest Guy",
+        "Pinyon Script",
+        "Playwrite NZ Basic Guides",
+    ];
 
     fn spec(content: &str) -> TextSpec {
         TextSpec {
@@ -247,6 +502,7 @@ mod tests {
             font_size: 48.0,
             color: "#E5733A".into(),
             bold: false,
+            font: None,
             align: TextAlign::Center,
             x: 0.5,
             y: 0.5,
@@ -360,6 +616,132 @@ mod tests {
             ..spec("Corner")
         };
         assert!(ink(&render(&edge, W, H).unwrap()).1 > 0);
+    }
+
+    #[test]
+    fn bundled_fonts_are_listed_and_change_the_picture() {
+        let shipped = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/fonts");
+        load_bundled_fonts(&shipped);
+        assert_eq!(
+            load_bundled_fonts(&shipped),
+            0,
+            "loading again adds nothing"
+        );
+        assert_eq!(load_bundled_fonts(&shipped.join("missing")), 0);
+        let fonts = list_fonts();
+        let bundled: Vec<&str> = fonts
+            .iter()
+            .filter(|f| f.bundled)
+            .map(|f| f.family.as_str())
+            .collect();
+        assert_eq!(bundled, ALL_FAMILIES);
+        let with = |font: Option<&str>, bold: bool| TextSpec {
+            font: font.map(String::from),
+            bold,
+            ..spec("Hamburg")
+        };
+        let default = render(&with(None, false), W, H).unwrap();
+        assert_eq!(
+            default,
+            render(&with(Some("Noto Sans"), false), W, H).unwrap()
+        );
+        let mut seen = vec![default.clone()];
+        for family in ALL_FAMILIES.iter().filter(|f| **f != "Noto Sans") {
+            let regular = render(&with(Some(family), false), W, H).unwrap();
+            assert!(ink(&regular).1 > 0, "{family} draws something");
+            assert!(!seen.contains(&regular), "{family} has its own look");
+            // most families get heavier when bold; a few come in a single weight
+            let bold = ink(&render(&with(Some(family), true), W, H).unwrap()).1;
+            if !SINGLE_WEIGHT.contains(family) {
+                assert!(bold > ink(&regular).1 * 21 / 20, "{family} bold");
+            }
+            seen.push(regular);
+        }
+        // a font that is not installed here is drawn in the default font, but is a different cache entry
+        assert_eq!(
+            default,
+            render(&with(Some("Not Installed"), false), W, H).unwrap()
+        );
+        assert_ne!(
+            text_key(&with(None, false), W, H),
+            text_key(&with(Some("Roboto"), false), W, H)
+        );
+        assert!(with(Some("  "), false).validate().is_err());
+        assert!(with(Some(&"x".repeat(101)), false).validate().is_err());
+    }
+
+    #[test]
+    fn font_previews_show_the_name_in_the_font_and_are_made_once() {
+        load_bundled_fonts(&Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/fonts"));
+        let dir = std::env::temp_dir().join(format!("cutvii-previews-{}", std::process::id()));
+        let roboto = ensure_font_preview(&dir, "Roboto").unwrap();
+        let script = ensure_font_preview(&dir, "Pinyon Script").unwrap();
+        assert_ne!(roboto, script);
+        assert_ne!(fs::read(&roboto).unwrap(), fs::read(&script).unwrap());
+        let made = fs::metadata(&roboto).unwrap().modified().unwrap();
+        assert_eq!(ensure_font_preview(&dir, "Roboto").unwrap(), roboto);
+        assert_eq!(fs::metadata(&roboto).unwrap().modified().unwrap(), made);
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 2);
+
+        // the longest family name still fits on one line of the picture
+        let (w, h) = FONT_PREVIEW_SIZE;
+        let long = TextSpec {
+            content: "Playwrite NZ Basic Guides".into(),
+            font_size: FONT_PREVIEW_FONT_SIZE,
+            color: FONT_PREVIEW_COLOR.into(),
+            bold: false,
+            font: Some("Playwrite NZ Basic Guides".into()),
+            align: TextAlign::Left,
+            x: 0.5,
+            y: 0.5,
+        };
+        let pixels = render(&long, w, h).unwrap();
+        let rows: Vec<u32> = pixels
+            .chunks_exact(4)
+            .enumerate()
+            .filter(|(_, p)| p[3] > 0)
+            .map(|(i, _)| i as u32 / w)
+            .collect();
+        assert!(
+            rows.iter().min().unwrap() > &0 && rows.iter().max().unwrap() < &(h - 1),
+            "not cut off at the top or bottom"
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn importing_a_font_copies_it_and_rejects_files_that_are_not_fonts() {
+        let dir = std::env::temp_dir().join(format!("cutvii-fonts-{}", std::process::id()));
+        let (from, store) = (dir.join("downloads"), dir.join("fonts"));
+        fs::create_dir_all(&from).unwrap();
+        let assets = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/fonts");
+        let source = from.join("My Font.TTF");
+        fs::copy(assets.join("GrechenFuemen-Regular.ttf"), &source).unwrap();
+
+        assert_eq!(import_font(&source, &store).unwrap(), ["Grechen Fuemen"]);
+        let copy = store.join("My Font.TTF");
+        assert_eq!(fs::read(&copy).unwrap(), fs::read(&source).unwrap());
+        // again: same result, still one file, and the original is untouched
+        assert_eq!(import_font(&source, &store).unwrap(), ["Grechen Fuemen"]);
+        assert_eq!(fs::read_dir(&store).unwrap().count(), 1);
+        assert!(source.is_file());
+        load_user_fonts(&store); // what a later start of the app does
+        load_user_fonts(&dir.join("missing"));
+
+        let fake = from.join("fake.ttf");
+        fs::write(&fake, b"this is not a font").unwrap();
+        let e = import_font(&fake, &store).unwrap_err().to_string();
+        assert!(e.contains("not a font"), "{e}");
+        let text = from.join("notes.txt");
+        fs::write(&text, b"hello").unwrap();
+        assert!(import_font(&text, &store).is_err());
+        assert!(import_font(&from.join("gone.ttf"), &store).is_err());
+        assert_eq!(
+            fs::read_dir(&store).unwrap().count(),
+            1,
+            "nothing else was stored"
+        );
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

@@ -28,6 +28,11 @@ png = "0.18.1"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+# Text drawing, PNG encoding and font parsing live in dependencies; unoptimised they make every text edit in
+# `tauri dev` visibly slow. Dependencies are optimised in dev builds too (our own code stays quick to compile).
+[profile.dev.package."*"]
+opt-level = 3
+
 [profile.release]
 codegen-units = 1
 lto = true

@@ -7,12 +7,16 @@ use std::sync::atomic::AtomicBool;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_dialog::DialogExt;
 
 use crate::errors::{AppError, AppResult};
 use crate::media::MediaBackend;
 use crate::media::ffmpeg::FfmpegBackend;
 use crate::media::import::{ImportedMedia, cache_key, import_one};
-use crate::media::text::{TextSpec, ensure_text_picture};
+use crate::media::text::{
+    FONT_EXTENSIONS, FontInfo, TextSpec, ensure_font_preview, ensure_text_picture, import_font,
+    list_fonts, load_bundled_fonts, load_user_fonts,
+};
 use crate::media::waveform::{FORMAT_VERSION, write_waveform};
 
 pub const REVERSE_PROGRESS_EVENT: &str = "reverse-progress";
@@ -222,6 +226,87 @@ pub async fn render_text(
     })
     .await
     .map_err(|e| AppError::InvalidInput(format!("text task failed: {e}")))?
+}
+
+fn fonts_dir(app: &AppHandle) -> AppResult<PathBuf> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::InvalidInput(format!("no data directory: {e}")))?
+        .join("fonts"))
+}
+
+/// Called once at startup, before any text is drawn: the fonts shipped with the app, then the ones the user
+/// imported. Without the shipped folder only the built-in default font is available, which is worth a line
+/// in the log but never stops the app.
+pub fn load_fonts(app: &AppHandle) {
+    match app.path().resource_dir() {
+        Ok(resources) => {
+            let dir = resources.join("assets").join("fonts");
+            if load_bundled_fonts(&dir) == 0 {
+                eprintln!("CutVii: no bundled fonts found in {}", dir.display());
+            }
+        }
+        Err(e) => eprintln!("CutVii: no resource directory for the bundled fonts: {e}"),
+    }
+    if let Ok(dir) = fonts_dir(app) {
+        load_user_fonts(&dir);
+    }
+}
+
+/// The fonts text can use: the ones that come with CutVii and the ones imported on this machine, each with
+/// a small cached picture of its name for the font picker (left out if it cannot be drawn).
+#[tauri::command]
+pub async fn text_fonts(app: AppHandle) -> AppResult<Vec<FontInfo>> {
+    let dir = fonts_dir(&app)?;
+    let previews = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| AppError::InvalidInput(format!("no cache directory: {e}")))?
+        .join("font-previews");
+    tauri::async_runtime::spawn_blocking(move || {
+        load_user_fonts(&dir);
+        list_fonts()
+            .into_iter()
+            .map(|font| FontInfo {
+                preview: ensure_font_preview(&previews, &font.family)
+                    .ok()
+                    .map(|p| p.to_string_lossy().into_owned()),
+                ..font
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| AppError::InvalidInput(format!("font task failed: {e}")))
+}
+
+/// Native "Import font" dialog: copy the chosen font files into the app data folder and return the family
+/// names they provide. Empty when the user cancels. The webview never supplies a path.
+#[tauri::command]
+pub async fn import_text_font(app: AppHandle) -> AppResult<Vec<String>> {
+    let dir = fonts_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let picked = app
+            .dialog()
+            .file()
+            .add_filter("Fonts", FONT_EXTENSIONS)
+            .blocking_pick_files()
+            .unwrap_or_default();
+        let mut families = Vec::new();
+        for file in picked {
+            let path = file
+                .into_path()
+                .map_err(|e| AppError::InvalidInput(format!("that file cannot be read: {e}")))?;
+            for family in import_font(&path, &dir)? {
+                if !families.contains(&family) {
+                    families.push(family);
+                }
+            }
+        }
+        Ok(families)
+    })
+    .await
+    .map_err(|e| AppError::InvalidInput(format!("font task failed: {e}")))?
 }
 
 #[cfg(test)]

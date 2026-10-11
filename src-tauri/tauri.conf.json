@@ -39,7 +39,8 @@
           "$APPCACHE/thumbnails/**",
           "$APPCACHE/reverse/**",
           "$APPCACHE/previews/**",
-          "$APPCACHE/waveforms/**"
+          "$APPCACHE/waveforms/**",
+          "$APPCACHE/font-previews/**"
         ]
       },
       "devCsp": null
@@ -55,6 +56,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": ["assets/fonts/*.ttf", "assets/fonts/licenses/*"],
     "category": "Video",
     "shortDescription": "Cut fast. Keep it local.",
     "longDescription": "CutVii is a local-first, offline-friendly desktop video editor: import, edit on a multi-track timeline, preview and export MP4. Your media is never modified or uploaded.",

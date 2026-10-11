@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use super::{ExportFormat, ExportOptions, Quality};
 use crate::media::MediaType;
 use crate::project::{
-    BackgroundKind, Crop, DEFAULT_BLUR_AMOUNT, FitMode, Project, TrackType, validate,
+    BackgroundKind, Crop, DEFAULT_BLUR_AMOUNT, FitMode, Project, TrackType, Transform, validate,
 };
 
 /// What we need to know about a source file that the project itself does not record.
@@ -43,6 +43,8 @@ pub struct PlannedClip {
     pub blur_amount: f64,
     /// Shares of the source picture cut away before it is scaled to the canvas (never set for text).
     pub crop: Option<Crop>,
+    /// Position, scale, rotation, flip and opacity of the clip's layer; `None` when it is left as it is.
+    pub transform: Option<Transform>,
     /// A text picture: drawn over the tracks below with its transparency kept, never on a background.
     pub transparent: bool,
     /// Contributes picture (on a visible video track, not an audio asset).
@@ -208,6 +210,7 @@ pub fn build_plan(
                     .and_then(|b| b.blur)
                     .unwrap_or(DEFAULT_BLUR_AMOUNT),
                 crop: c.crop.filter(|k| !k.is_none() && asset.text.is_none()),
+                transform: Some(c.transform()).filter(|t| !t.is_identity()),
                 transparent: asset.text.is_some(),
                 video,
                 audio,
@@ -436,10 +439,42 @@ pub fn build_filter_graph(plan: &ExportPlan) -> FilterGraph {
                     parts.push(format!("[g{i}][s{i}]overlay=x=(W-w)/2:y=(H-h)/2:format=auto:shortest=1,{finish}"));
                 }
             }
-            parts.push(format!(
-                "[v{current}][c{i}]overlay=eof_action=pass:repeatlast=0[v{n}]",
-                n = current + 1
-            ));
+            // Transform: the finished canvas-sized layer is mirrored, scaled, rotated and faded, then laid
+            // over the tracks below at its offset. Whatever it leaves uncovered keeps showing them.
+            match clip.transform {
+                Some(t) => {
+                    let mut chain = vec!["format=rgba".to_string()];
+                    if t.flip_h {
+                        chain.push("hflip".into());
+                    }
+                    if t.flip_v {
+                        chain.push("vflip".into());
+                    }
+                    if t.scale != 1.0 {
+                        chain.push(format!("scale=w=iw*{s:.6}:h=ih*{s:.6}", s = t.scale));
+                    }
+                    if t.rotation != 0.0 {
+                        let a = t.rotation.to_radians();
+                        chain.push(format!(
+                            "rotate={a:.6}:ow=rotw({a:.6}):oh=roth({a:.6}):c=black@0"
+                        ));
+                    }
+                    if t.opacity != 1.0 {
+                        chain.push(format!("colorchannelmixer=aa={:.4}", t.opacity));
+                    }
+                    parts.push(format!("[c{i}]{}[t{i}]", chain.join(",")));
+                    parts.push(format!(
+                        "[v{current}][t{i}]overlay=x=(W-w)/2+({dx:.3}):y=(H-h)/2+({dy:.3}):eof_action=pass:repeatlast=0[v{n}]",
+                        dx = t.x * w as f64,
+                        dy = t.y * h as f64,
+                        n = current + 1
+                    ));
+                }
+                None => parts.push(format!(
+                    "[v{current}][c{i}]overlay=eof_action=pass:repeatlast=0[v{n}]",
+                    n = current + 1
+                )),
+            }
             current += 1;
         }
         parts.push(format!("[v{current}]null[vout]"));
@@ -719,6 +754,7 @@ mod tests {
             font_size: 48.0,
             color: "#FFFFFF".into(),
             bold: false,
+            font: None,
             align: Default::default(),
             x: 0.5,
             y: 0.5,
@@ -818,6 +854,73 @@ mod tests {
                 .join(";");
             assert!(e.contains("crop"), "{bad:?}: {e}");
         }
+    }
+
+    #[test]
+    fn transforms_place_the_finished_layer_over_the_tracks_below() {
+        let mut p = sample();
+        let plain = build_plan(&p, &opts(), &sample_facts()).unwrap();
+        assert!(plain.clips.iter().all(|c| c.transform.is_none()));
+
+        // picture-in-picture: half size, moved right and up, a little see-through
+        let c = &mut p.tracks[1].clips[0];
+        (c.scale, c.x, c.y, c.opacity) = (0.5, 0.25, -0.1, 0.8);
+        let g = build_filter_graph(&build_plan(&p, &opts(), &sample_facts()).unwrap()).graph;
+        assert!(
+            g.contains(
+                "[c1]format=rgba,scale=w=iw*0.500000:h=ih*0.500000,colorchannelmixer=aa=0.8000[t1]"
+            ),
+            "{g}"
+        );
+        assert!(
+            g.contains("[v1][t1]overlay=x=(W-w)/2+(160.000):y=(H-h)/2+(-36.000):eof_action=pass:repeatlast=0[v2]"),
+            "{g}"
+        );
+        assert!(
+            g.contains("[v0][c0]overlay=eof_action=pass:repeatlast=0[v1]"),
+            "the other clip is untouched"
+        );
+
+        // mirror first, then turn (the preview applies them in the same order)
+        let c = &mut p.tracks[1].clips[0];
+        (c.scale, c.x, c.y, c.opacity) = (1.0, 0.0, 0.0, 1.0);
+        (c.rotation, c.flip_h, c.flip_v) = (Some(90.0), Some(true), Some(true));
+        let g = build_filter_graph(&build_plan(&p, &opts(), &sample_facts()).unwrap()).graph;
+        assert!(
+            g.contains("[c1]format=rgba,hflip,vflip,rotate=1.570796:ow=rotw(1.570796):oh=roth(1.570796):c=black@0[t1]"),
+            "{g}"
+        );
+        assert!(g.contains("overlay=x=(W-w)/2+(0.000):y=(H-h)/2+(0.000)"));
+
+        // out-of-range values never reach FFmpeg
+        for (field, value) in [
+            ("scale", 9.0),
+            ("scale", 0.0),
+            ("x", 3.0),
+            ("y", -2.5),
+            ("opacity", 1.5),
+        ] {
+            let mut bad = sample();
+            let c = &mut bad.tracks[1].clips[0];
+            match field {
+                "scale" => c.scale = value,
+                "x" => c.x = value,
+                "y" => c.y = value,
+                _ => c.opacity = value,
+            }
+            let e = build_plan(&bad, &opts(), &sample_facts())
+                .unwrap_err()
+                .join(";");
+            assert!(e.contains(field), "{field}={value}: {e}");
+        }
+        let mut bad = sample();
+        bad.tracks[1].clips[0].rotation = Some(200.0);
+        assert!(
+            build_plan(&bad, &opts(), &sample_facts())
+                .unwrap_err()
+                .join(";")
+                .contains("rotation")
+        );
     }
 
     #[test]

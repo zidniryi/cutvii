@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { Inspector } from "@/components/layout/Inspector";
 import { Preview } from "@/components/layout/Preview";
@@ -7,6 +7,7 @@ import { layersAt } from "@/playback/engine";
 import { SCHEMA_VERSION, type Project, type TextSpec } from "@/project/model";
 import { parseProject } from "@/project/parse";
 import { usePlaybackStore } from "@/store/playback";
+import { useFontStore } from "@/store/fonts";
 import { useProjectStore } from "@/store/project";
 import { useSelectionStore } from "@/store/selection";
 import { useUiStore } from "@/store/ui";
@@ -24,6 +25,7 @@ import {
   textTrackFor,
   watchTextPictures,
 } from "./text";
+import { placeList } from "@/components/inspector/FontPicker";
 import { TYPING_DELAY_MS } from "@/components/inspector/TextPanel";
 import { withCanvas } from "@/project/canvas";
 
@@ -81,7 +83,7 @@ describe("text in the project file", () => {
     expect(errors((c) => (c.assets.at(-1)!.text!.fontSize = 4))).not.toHaveLength(0);
     expect(errors((c) => (c.assets.at(-1)!.text!.color = "white"))).not.toHaveLength(0);
     expect(errors((c) => (c.assets.at(-1)!.text!.x = 1.2))).not.toHaveLength(0);
-    expect(errors((c) => Object.assign(c.assets.at(-1)!.text!, { font: "Arial" }))).not.toHaveLength(0);
+    expect(errors((c) => Object.assign(c.assets.at(-1)!.text!, { shadow: true }))).not.toHaveLength(0);
   });
 
   it("is named after its first line", () => {
@@ -422,8 +424,9 @@ describe("moving text in the preview", () => {
         spec: expect.objectContaining({ x: 0.75, y: 0.7, content: "Hello\nworld" }),
       }),
     );
+    // the shifted old picture stays until the redrawn one is on screen: no jump back, no blink
+    await waitFor(() => expect(text()).toHaveAttribute("src", "asset://localhost/data/text/moved.png"));
     await waitFor(() => expect(text().style.transform).toBe(""));
-    expect(text()).toHaveAttribute("src", "asset://localhost/data/text/moved.png");
     expect(useProjectStore.getState().past).toHaveLength(1);
 
     // dragged past the edge: the centre stops at the edge of the canvas
@@ -434,5 +437,174 @@ describe("moving text in the preview", () => {
     await waitFor(() => expect(stored().text).toMatchObject({ x: 1, y: 0 }));
     undo();
     expect(stored().text).toMatchObject({ x: 0.75, y: 0.7 });
+  });
+});
+
+describe("choosing a font", () => {
+  const FONTS = [
+    { family: "Noto Sans", bundled: true, preview: "/cache/font-previews/noto.png" },
+    { family: "Roboto", bundled: true, preview: "/cache/font-previews/roboto.png" },
+    { family: "Rokkitt", bundled: true },
+    { family: "My Hand", bundled: false, preview: "/cache/font-previews/hand.png" },
+  ];
+  const stored = () => useProjectStore.getState().project.assets.find((a) => a.id === "text")!.text!;
+  /** Rust answers per command; `picked` is what the import dialog returns. */
+  function rust(picked: string[] | Error) {
+    vi.mocked(invoke).mockImplementation((async (cmd: string, args?: { spec: TextSpec }) => {
+      if (cmd === "text_fonts") return FONTS;
+      if (cmd === "import_text_font") {
+        if (picked instanceof Error) throw picked.message;
+        if (picked.length > 0) FONTS.push(...picked.map((family) => ({ family, bundled: false })));
+        return picked;
+      }
+      return `/data/text/${args?.spec.font ?? "default"}.png`;
+    }) as never);
+  }
+  beforeEach(() => {
+    useProjectStore.getState().loadProject(withText(2), "/p.cutvii", []);
+    useSelectionStore.getState().select("title");
+    useFontStore.setState({ fonts: [{ family: "Noto Sans", bundled: true }], loaded: false });
+    vi.mocked(invoke).mockReset();
+  });
+  /** Open the picker once Rust has sent the list. */
+  async function openPicker() {
+    await waitFor(() => expect(useFontStore.getState().fonts.length).toBeGreaterThan(1));
+    fireEvent.click(screen.getByRole("button", { name: /^Font: / }));
+    return within(screen.getByRole("dialog", { name: "Choose a font" }));
+  }
+  const names = (picker: { getAllByRole: (role: string) => HTMLElement[] }) =>
+    picker.getAllByRole("option").map((o) => o.getAttribute("aria-label"));
+
+  it("opens a list of every font, drawn in its own typeface, with the current one ticked", async () => {
+    rust([]);
+    render(<Inspector />);
+    expect(screen.getByRole("button", { name: "Font: Noto Sans" })).toHaveAttribute("aria-expanded", "false");
+    const picker = await openPicker();
+    expect(names(picker)).toEqual(["My Hand", "Noto Sans", "Roboto", "Rokkitt"]); // imported first, then A to Z
+    expect(picker.getByText("Imported")).toBeInTheDocument();
+    expect(picker.getByText("Included")).toBeInTheDocument();
+    expect(picker.getByRole("option", { name: "Noto Sans" })).toHaveAttribute("aria-selected", "true");
+    // a picture of the name where Rust made one, plain text otherwise
+    expect(picker.getByRole("option", { name: "Roboto" }).querySelector("img")).toHaveAttribute(
+      "src",
+      "asset://localhost/cache/font-previews/roboto.png",
+    );
+    expect(picker.getByRole("option", { name: "Rokkitt" })).toHaveTextContent("Rokkitt");
+    expect(picker.getByRole("combobox", { name: "Search fonts" })).toHaveFocus();
+
+    fireEvent.click(picker.getByRole("option", { name: "Roboto" }));
+    await waitFor(() => expect(stored().font).toBe("Roboto"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Font: Roboto" })).toBeInTheDocument();
+    expect(invoke).toHaveBeenCalledWith(
+      "render_text",
+      expect.objectContaining({ spec: expect.objectContaining({ font: "Roboto", content: "Hello\nworld" }) }),
+    );
+    expectValid(useProjectStore.getState().project);
+    undo();
+    expect(stored().font).toBeUndefined();
+  });
+
+  it("searches as you type and works from the keyboard", async () => {
+    rust([]);
+    render(<Inspector />);
+    const picker = await openPicker();
+    const search = picker.getByRole("combobox", { name: "Search fonts" });
+
+    fireEvent.change(search, { target: { value: "  ro" } });
+    expect(names(picker)).toEqual(["Roboto", "Rokkitt"]);
+    expect(picker.queryByText("Imported")).not.toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "zzz" } });
+    expect(picker.queryAllByRole("option")).toHaveLength(0);
+    expect(picker.getByText(/No font matches “zzz”/)).toBeInTheDocument();
+    fireEvent.keyDown(search, { key: "Enter" }); // nothing to choose
+    expect(stored().font).toBeUndefined();
+
+    fireEvent.change(search, { target: { value: "RO" } }); // case does not matter
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    expect(picker.getByRole("option", { name: "Rokkitt" })).toHaveAttribute("data-active", "true");
+    fireEvent.keyDown(search, { key: "ArrowDown" }); // wraps round
+    expect(picker.getByRole("option", { name: "Roboto" })).toHaveAttribute("data-active", "true");
+    fireEvent.keyDown(search, { key: "ArrowUp" });
+    fireEvent.keyDown(search, { key: "Enter" });
+    await waitFor(() => expect(stored().font).toBe("Rokkitt"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("closes on Escape or a press elsewhere without changing the font", async () => {
+    rust([]);
+    render(<Inspector />);
+    let picker = await openPicker();
+    fireEvent.keyDown(picker.getByRole("combobox", { name: "Search fonts" }), { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Font: Noto Sans" })).toHaveFocus();
+
+    await openPicker();
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    // choosing the font already in use is not an edit
+    picker = await openPicker();
+    fireEvent.click(picker.getByRole("option", { name: "Noto Sans" }));
+    expect(invoke).not.toHaveBeenCalledWith("render_text", expect.anything());
+    expect(useProjectStore.getState().past).toHaveLength(0);
+  });
+
+  it("floats the list below the button, or above it when there is no room, and never off the window", () => {
+    const window = { width: 1280, height: 800 };
+    const button = (top: number) => ({ left: 980, right: 1270, top, bottom: top + 40, width: 290 });
+    // plenty of room below: hangs under the button, widened to fit the font names, kept inside the window
+    expect(placeList(button(200), window)).toEqual({ left: 932, width: 340, top: 244, listHeight: 360 });
+    // near the bottom: opens upwards, anchored to the top of the button
+    expect(placeList(button(700), window)).toEqual({ left: 932, width: 340, bottom: 104, listHeight: 360 });
+    // a short window: takes the larger side and a shorter list
+    const short = placeList(button(260), { width: 1280, height: 520 });
+    expect(short).toMatchObject({ bottom: 264, listHeight: 162 });
+    // a narrow window: as wide as it can be
+    expect(
+      placeList({ left: 10, right: 310, top: 100, bottom: 140, width: 300 }, { width: 320, height: 800 }),
+    ).toMatchObject({ left: 8, width: 304 });
+  });
+
+  it("imports a font file through Rust and switches the text to it", async () => {
+    rust(["Lobster"]);
+    render(<Inspector />);
+    const picker = await openPicker();
+    fireEvent.click(picker.getByRole("button", { name: /Import a font file/ }));
+    await waitFor(() => expect(stored().font).toBe("Lobster"));
+    expect(invoke).toHaveBeenCalledWith("import_text_font");
+    expect(await screen.findByRole("button", { name: "Font: Lobster" })).toBeInTheDocument();
+    FONTS.pop();
+  });
+
+  it("changes nothing when the import is cancelled, and says why when it fails", async () => {
+    rust([]);
+    const view = render(<Inspector />);
+    fireEvent.click((await openPicker()).getByRole("button", { name: /Import a font file/ }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("import_text_font"));
+    expect(stored().font).toBeUndefined();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    view.unmount();
+
+    rust(new Error("invalid input: that file is not a font CutVii can read"));
+    useFontStore.setState({ loaded: false });
+    render(<Inspector />);
+    fireEvent.click((await openPicker()).getByRole("button", { name: /Import a font file/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Could not import the font: .*not a font/);
+    expect(stored().font).toBeUndefined();
+  });
+
+  it("says so when a project uses a font that is not installed here", async () => {
+    rust([]);
+    const p = withText(2);
+    p.assets.at(-1)!.text = { ...spec, font: "Fancy Script" };
+    expectValid(p);
+    useProjectStore.getState().loadProject(p, "/p.cutvii", []);
+    render(<Inspector />);
+    expect(screen.getByRole("button", { name: "Font: Fancy Script" })).toHaveTextContent("Fancy Script");
+    expect(
+      screen.getByText(/“Fancy Script” is not installed here, so the text is drawn in Noto Sans/),
+    ).toBeInTheDocument();
+    const picker = await openPicker();
+    expect(picker.queryByRole("option", { selected: true })).not.toBeInTheDocument();
   });
 });

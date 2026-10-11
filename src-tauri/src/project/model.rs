@@ -100,6 +100,47 @@ pub struct TimelineClip {
     /// Part of the picture cut away on each side before it is scaled to the canvas. Absent means none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crop: Option<Crop>,
+    /// Clockwise rotation in degrees, -180..=180. Absent means 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<f64>,
+    /// Mirror the picture left-right / top-bottom. Absent means false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flip_h: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flip_v: Option<bool>,
+}
+
+/// Limits of the clip transform. `x` and `y` are shares of the canvas (0.1 = a tenth of its width to the
+/// right / of its height down); `scale` 1 is the fitted size.
+pub const MAX_OFFSET: f64 = 2.0;
+pub const MIN_SCALE: f64 = 0.05;
+pub const MAX_SCALE: f64 = 4.0;
+pub const MAX_ROTATION: f64 = 180.0;
+
+/// Where and how a clip's layer is placed on the canvas. The layer is the whole canvas-sized picture the
+/// clip produces (fit mode, background and crop already applied).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Transform {
+    pub x: f64,
+    pub y: f64,
+    pub scale: f64,
+    /// Degrees, clockwise.
+    pub rotation: f64,
+    pub flip_h: bool,
+    pub flip_v: bool,
+    pub opacity: f64,
+}
+
+impl Transform {
+    pub fn is_identity(&self) -> bool {
+        self.x == 0.0
+            && self.y == 0.0
+            && self.scale == 1.0
+            && self.rotation == 0.0
+            && !self.flip_h
+            && !self.flip_v
+            && self.opacity == 1.0
+    }
 }
 
 /// Shares of the source picture (0..=0.9) removed from each side. At least a tenth must remain each way.
@@ -160,6 +201,17 @@ pub const MIN_SPEED: f64 = 0.1;
 pub const MAX_SPEED: f64 = 10.0;
 
 impl TimelineClip {
+    pub fn transform(&self) -> Transform {
+        Transform {
+            x: self.x,
+            y: self.y,
+            scale: self.scale,
+            rotation: self.rotation.unwrap_or(0.0),
+            flip_h: self.flip_h.unwrap_or(false),
+            flip_v: self.flip_v.unwrap_or(false),
+            opacity: self.opacity,
+        }
+    }
     pub fn speed(&self) -> f64 {
         self.speed.unwrap_or(1.0)
     }

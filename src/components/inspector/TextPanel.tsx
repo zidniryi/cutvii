@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { AlignCenter, AlignLeft, AlignRight, Bold } from "lucide-react";
+import { FontPicker } from "@/components/inspector/FontPicker";
 import type { TextSpec } from "@/project/model";
 import { cn } from "@/lib/utils";
+import { DEFAULT_FONT, useFontStore } from "@/store/fonts";
 import { editText, TEXT_FONT_LIMITS } from "@/timeline/text";
 
 const fieldClass =
@@ -14,8 +16,8 @@ const chipClass = (selected: boolean) =>
       : "border-border bg-surface-2 text-text-muted hover:text-text",
   );
 
-/** While typing, the text is redrawn this long after the last keystroke. */
-export const TYPING_DELAY_MS = 400;
+/** While typing, the text is redrawn this long after the last keystroke (drawing itself takes a few ms). */
+export const TYPING_DELAY_MS = 120;
 
 const ALIGNS = [
   { id: "left", label: "Align left", icon: AlignLeft },
@@ -111,6 +113,21 @@ export function TextPanel({ clipId, spec }: { clipId: string; spec: TextSpec }) 
   }
   const align = spec.align ?? "center";
 
+  const fonts = useFontStore((s) => s.fonts);
+  useEffect(() => useFontStore.getState().ensure(), []);
+  const font = spec.font ?? DEFAULT_FONT;
+  const installed = fonts.some((f) => f.family === font);
+  function importFont() {
+    useFontStore
+      .getState()
+      .importFont()
+      .then(
+        // use the imported font straight away
+        (families) => families.length > 0 && apply({ font: families[0] }),
+        (e: Error) => setProblem(`Could not import the font: ${e.message}`),
+      );
+  }
+
   return (
     <div className="space-y-3">
       <label className="block">
@@ -136,6 +153,21 @@ export function TextPanel({ clipId, spec }: { clipId: string; spec: TextSpec }) 
           {problem}
         </p>
       )}
+
+      <div>
+        <p className="mb-1 text-xs text-text-muted">Font</p>
+        <FontPicker
+          fonts={fonts}
+          value={font}
+          onChange={(family) => apply({ font: family })}
+          onImport={importFont}
+        />
+        {!installed && (
+          <p className="mt-1 text-xs text-text-muted">
+            “{font}” is not installed here, so the text is drawn in {DEFAULT_FONT}.
+          </p>
+        )}
+      </div>
 
       <div className="grid grid-cols-2 gap-2">
         <label className="block">

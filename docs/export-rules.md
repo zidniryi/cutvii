@@ -13,14 +13,22 @@ Source of truth: `src-tauri/src/export/` (`plan.rs` builds the plan and FFmpeg f
   (blur sigma = 3 % of the canvas height). The preview uses the same geometry (`src/timeline/fit.ts`).
 - **Crop** comes first: the chosen shares are cut from the source picture (`crop=iw*…:ih*…`), and everything after
   it (fit mode, blurred copy, background) sees only what is left. The preview lays the clip out by the cropped
-  size and enlarges the picture inside a clipping frame by the same shares.
+  size and enlarges the picture inside a clipping frame by the same shares. The crop box in the preview and the
+  shape presets only choose those four shares; they add nothing to the export.
 - Stills are looped for the clip length; transparency is flattened onto the background.
 - **Text** is the exception to both rules above: a text picture keeps its transparency and is laid over whatever
   the tracks below show, with no background of its own (`fitMode` and `fitBackground` do not apply to it). It is
   scaled to fit the export size and centred. The preview shows the same file the export overlays, and shows every
   text layer down to the first video or image under it.
 - Gaps show the background colour.
-- `hidden` tracks give no picture. `x`, `y`, `scale`, `opacity` are not applied yet (not in the preview either).
+- `hidden` tracks give no picture.
+- **Transform:** a clip's finished, canvas-sized layer (fit, background and crop already applied) is mirrored
+  (`flipH`, `flipV`), scaled (`scale`), turned clockwise about its centre (`rotation`), faded (`opacity`) and laid
+  over the tracks below, centred and then moved by `x` and `y` shares of the canvas. Whatever it does not cover
+  keeps showing the tracks below (picture-in-picture). The preview applies the same steps in the same order with
+  CSS, and shows the tracks under any transformed clip. A clip left at the defaults covers the canvas as before.
+- Scaling works on the canvas-sized layer, so zooming in past 100 % enlarges export pixels rather than reading
+  more detail from the source, and large scales make the export slower.
 
 ## Timeline → sound
 

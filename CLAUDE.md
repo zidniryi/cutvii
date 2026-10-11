@@ -162,8 +162,8 @@ Android is done only after Phase 8 is verified on a real device or emulator.
 This file is the original spec plus sections 6j and 12. The user pasted newer spec sections (6c–6n) in chat only;
 they are **not** in this file. If a section is missing here, ask the user to paste it again rather than guessing.
 
-**Last green run (macOS):** Vitest 369 passed (41 files), Cargo 88 passed, typecheck/lint/prettier/clippy/rustfmt
-clean. Project schema is **v5** (`fixtures/project-v1..v5.json`, Rust migration chain in `project/migrate.rs`).
+**Last green run (macOS):** Vitest 399 passed (43 files), Cargo 97 passed, typecheck/lint/prettier/clippy/rustfmt
+clean. Project schema is **v6** (`fixtures/project-v1..v6.json`, Rust migration chain in `project/migrate.rs`).
 
 ### Done
 - Phases 0–7a: foundation, project + media import, timeline editing, preview, save/open, export, polish.
@@ -199,19 +199,46 @@ clean. Project schema is **v5** (`fixtures/project-v1..v5.json`, Rust migration 
 - Drag text in the preview to move it (`components/preview/useTextDrag.ts`): the hit area is an estimate
   (`textHitBox`, about 0.62 x font size per character), the picture is shifted with a CSS transform while
   dragging and redrawn on release through `editText` (one undo step).
+- Crop 6f-1 (the 6f text was never pasted; this scope is Claude's): schema v6 `clip.crop` (left/top/right/bottom
+  shares, 0-0.9, a tenth must remain), cut from the source before fit in the export (`crop=iw*..`) and by a
+  clipping frame in the preview, inspector Crop sliders + Reset in the Video tab (`inspector/CropPanel.tsx`).
+- Text fonts (asked for by the user on 2026-10-11): `TextSpec.font`, font picker in the Text tab, "Import font
+  file" (native dialog in Rust, copied to `$APPDATA/fonts`). 37 families ship in `src-tauri/assets/fonts`
+  (about 30 MB; all OFL except Luckiest Guy, Apache-2.0): only Noto Sans is compiled in, the rest are `bundle.resources` loaded at startup from
+  `resource_dir()/assets/fonts` (`clip_tools::load_fonts`, logs one line if the folder is missing). A font that
+  is not installed falls back to Noto Sans and the picker says so. Japanese and Korean text falls back to LINE
+  Seed JP / Grandiflora One whatever font is chosen.
+- Font picker (`inspector/FontPicker.tsx`, asked for by the user): a button that opens a floating, searchable
+  list (portal to `body`, opens upward when there is no room), each font drawn in its own typeface from a small
+  PNG Rust makes and caches in `$APPCACHE/font-previews` (`text_fonts` returns `preview`), imported fonts first,
+  arrow keys / Enter / Escape, "Import a font file" row at the bottom. Seen working in a macOS debug build.
+- Crop 6f-2 (scope is Claude's): "Crop in the preview" in the Crop panel opens `preview/CropOverlay.tsx` over
+  the stage: the whole picture dimmed outside a box with 8 handles (4 corners when a shape is locked), drag to
+  move or resize, saved on release, Done / Escape / Enter to leave; it closes when the clip is deselected or the
+  playhead leaves it. Shape chips Free / 16:9 / 9:16 / 1:1 / 4:5 / 4:3 crop to the largest centred box and lock
+  that shape (`ui.cropLock`). Math in `timeline/crop.ts`. Seen in a macOS debug build (static look only).
+- Smoother text editing (asked for by the user): the previous text picture stays until the redrawn one is
+  decoded (`TextPicture` in `Preview.tsx`), typing redraws after 120 ms, and `[profile.dev.package."*"]
+  opt-level = 3` makes a 1080p text draw in about 26 ms in dev builds instead of about 200 ms.
+- Inspector roadmap, Transform (6j): `x`, `y` (shares of the canvas), `scale`, `opacity` are now applied, and
+  `rotation`, `flipH`, `flipV` were added to the still-uncommitted schema v6 (no separate bump). The clip's
+  finished canvas-sized layer is transformed and laid over the tracks below, in export (`PlannedClip.transform`,
+  rgba chain + positioned overlay) and preview (`timeline/transform.ts` CSS; `layersAt` keeps going down past a
+  transformed clip). `inspector/TransformPanel.tsx` sliders + flips + Reset, in the Video tab and (without
+  position) the Text tab. Scale is uniform, so there is no aspect-lock toggle. Seen in a macOS debug build.
 - Export: MP4, plus audio-only M4A / MP3 / WAV; "Show in folder"; File menu (New/Open/Save), About tagline.
 
 ### Not done (queue, in the user's approved order unless they say otherwise)
 1. Text & titles, possible follow-ups (not requested yet): outline / shadow / background box, more fonts, a
    selection outline and resize handles in the preview, a text default duration other than 5 s.
-2. Crop & reframe 6f-1, 6f-2.
-3. Inspector roadmap (section 6j): transform, audio fades/detach, codec info, colour, etc.
-4. Upscale 6c-1..3: **needs the user's go-ahead first**. PyTorch CPU-only in a virtual environment outside the
+2. Inspector roadmap (section 6j), remaining: audio (mute, fades, detach), clip info (codec, size, show in
+   Finder, replace media), basic colour, then the comfort items. Transform is done.
+3. Upscale 6c-1..3: **needs the user's go-ahead first**. PyTorch CPU-only in a virtual environment outside the
    project; check free disk space first. Never bundle models; download only after explicit consent.
-5. Auto subtitles 6g (Whisper): after text. Model download only with consent; never bundle; never download
+4. Auto subtitles 6g (Whisper): after text. Model download only with consent; never bundle; never download
    models in automated tests.
-6. Audio clean-up & ducking 6i-1..3.
-7. Phase 7b leftovers: launch the packaged `.app`, check CSP and icon at runtime. Phase 8 Android.
+5. Audio clean-up & ducking 6i-1..3.
+6. Phase 7b leftovers: launch the packaged `.app`, check CSP and icon at runtime. Phase 8 Android.
 
 ### Never verified live (tests pass, nobody has looked at it in the running app)
 - Finder drag-and-drop after the `on_window_event` fix; music stutter after the audio-leads fix (user was asked,
@@ -220,8 +247,14 @@ clean. Project schema is **v5** (`fixtures/project-v1..v5.json`, Rust migration 
   bar, inspector tabs, MP3 export from the dialog.
 - Timeline waveforms on trimmed, sped-up, reversed or muted clips, and while scrolling/zooming a long clip
   (only whole, untouched clips were looked at).
-- The inspector Text tab and dragging text in the preview (tests pass; not looked at in the running app by
-  Claude).
+- The Transform sliders with a real pointer, a transformed *video* in the preview (only stills were looked
+  at), and dragging text that has been scaled or rotated (its grab area ignores the transform).
+- Dragging the crop box and its handles with a real pointer, cropping a video (only a still was looked at),
+  and whether text edits now feel smooth to the user.
+- Dragging text in the preview, the Crop sliders and importing a font file (tests pass; nobody has looked at
+  them in the running app). The user did confirm the Text tab and the font list on screen.
+- Bundled fonts in a packaged build: `bundle.resources` was only exercised by `tauri dev` (files appear in
+  `target/debug/assets/fonts`); no installer or `.app` was built with them.
 - Packaged `.app` never launched. Windows and Linux never built or run.
 
 ### Working notes
@@ -230,4 +263,9 @@ clean. Project schema is **v5** (`fixtures/project-v1..v5.json`, Rust migration 
 - The user works on this machine while sessions run: never `pkill` by name (kill only CutVii PIDs), never take
   full-screen screenshots (capture CutVii's window by id), never inject keystrokes.
 - Scripted multi-file edits break when prettier/`cargo fmt` reflowed an anchor; check the real text first.
+  On 2026-10-11 a half-applied script hot-reloaded into the user's running `pnpm tauri dev` window and crashed
+  it ("Target container is not a DOM element"). When the dev app is running, every saved file reaches the
+  user's window at once: check all anchors before writing anything, so an edit lands whole or not at all.
+- Temporary test hooks in `src/` also hot-reload into the dev app: guard them (for example
+  `location.protocol === "tauri:"`, true only in a `tauri build --debug` binary) and remove them right after.
 

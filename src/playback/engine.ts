@@ -4,6 +4,7 @@
  */
 import type { MediaAsset, Project, TimelineClip, TimelineTrack } from "@/project/model";
 import { clipEnd, clipSpeed, EPS } from "@/timeline/clips";
+import { isTransformed } from "@/timeline/transform";
 
 /** Clips starting within this many seconds are mounted (paused) so they are ready when reached. */
 export const PRELOAD_SECONDS = 1;
@@ -49,7 +50,8 @@ export function layersAt(project: Project, t: number, horizon = PRELOAD_SECONDS)
   const shown = new Set<Layer>();
   for (let i = pictures.length - 1; i >= 0; i--) {
     shown.add(pictures[i]);
-    if (!pictures[i].asset.text) break;
+    // text is transparent and a transformed clip no longer covers the canvas: keep going down
+    if (!pictures[i].asset.text && !isTransformed(pictures[i].clip)) break;
   }
   return layers.map((l) => (shown.has(l) ? { ...l, visible: true } : l));
 }

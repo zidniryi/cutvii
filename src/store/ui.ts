@@ -30,6 +30,12 @@ interface UiState {
   /** Last inspector tab the user chose, per kind of clip (UI state only). */
   inspectorTab: Partial<Record<ClipKind, InspectorTab>>;
   setInspectorTab: (kind: ClipKind, tab: InspectorTab) => void;
+  /** The clip whose crop box is being adjusted in the preview, if any. */
+  cropEdit: { clipId: string } | null;
+  setCropEdit: (cropEdit: { clipId: string } | null) => void;
+  /** Aspect preset chosen for a clip's crop: the crop box keeps this width / height while it is resized. */
+  cropLock: { clipId: string; ratio: number } | null;
+  setCropLock: (cropLock: { clipId: string; ratio: number } | null) => void;
   /** A save is being written (drives the status text; also stops a second save from starting). */
   saving: boolean;
   setSaving: (saving: boolean) => void;
@@ -52,6 +58,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   setCanvasNotice: (canvasNotice) => set({ canvasNotice }),
   inspectorTab: {},
   setInspectorTab: (kind, tab) => set((s) => ({ inspectorTab: { ...s.inspectorTab, [kind]: tab } })),
+  cropEdit: null,
+  setCropEdit: (cropEdit) => set({ cropEdit }),
+  cropLock: null,
+  setCropLock: (cropLock) => set({ cropLock }),
   saving: false,
   setSaving: (saving) => set({ saving }),
   dialog: null,

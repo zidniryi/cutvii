@@ -128,6 +128,29 @@ pub fn validate(project: &Project) -> Result<(), Vec<String>> {
             if !(0.0..=MAX_VOLUME).contains(&clip.volume) {
                 err(format!("{at}.volume: must be between 0 and {MAX_VOLUME}"));
             }
+            if !(-MAX_OFFSET..=MAX_OFFSET).contains(&clip.x)
+                || !(-MAX_OFFSET..=MAX_OFFSET).contains(&clip.y)
+            {
+                err(format!(
+                    "{at}.x/y: must be between -{MAX_OFFSET} and {MAX_OFFSET}"
+                ));
+            }
+            if !(MIN_SCALE..=MAX_SCALE).contains(&clip.scale) {
+                err(format!(
+                    "{at}.scale: must be between {MIN_SCALE} and {MAX_SCALE}"
+                ));
+            }
+            if !(0.0..=1.0).contains(&clip.opacity) {
+                err(format!("{at}.opacity: must be between 0 and 1"));
+            }
+            if clip
+                .rotation
+                .is_some_and(|r| !(-MAX_ROTATION..=MAX_ROTATION).contains(&r))
+            {
+                err(format!(
+                    "{at}.rotation: must be between -{MAX_ROTATION} and {MAX_ROTATION} degrees"
+                ));
+            }
             if clip.crop.is_some_and(|c| !c.is_valid()) {
                 err(format!(
                     "{at}.crop: each side must be between 0 and {MAX_CROP}, and at least a tenth of the picture must remain"

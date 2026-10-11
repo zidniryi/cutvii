@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MonitorPlay } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { assetName, mediaUrl } from "@/lib/media";
@@ -17,7 +17,10 @@ import {
   type Layer,
 } from "@/playback/engine";
 import { TransportBar } from "@/components/preview/TransportBar";
+import { CropOverlay } from "@/components/preview/CropOverlay";
 import { useTextDrag } from "@/components/preview/useTextDrag";
+import { useSelectionStore } from "@/store/selection";
+import { useUiStore } from "@/store/ui";
 import { ensureReversePreviews } from "@/playback/reversePreview";
 import { usePlaybackStore } from "@/store/playback";
 import { reverseKey, useReverseStore, type ReversePreview } from "@/store/reverse";
@@ -37,6 +40,7 @@ import {
   type Rect,
 } from "@/timeline/fit";
 import { useImagePreviewStore } from "@/store/imagePreviews";
+import { transformStyle } from "@/timeline/transform";
 import type { Crop } from "@/project/model";
 
 type MediaEl = HTMLVideoElement | HTMLAudioElement;
@@ -162,6 +166,23 @@ export function Preview() {
   const { width, height, backgroundColor } = project.settings;
   const ratio = width / height;
   const textDrag = useTextDrag(layers, project.settings);
+
+  // Crop box in the preview: only while its clip is selected and under the playhead.
+  const cropEdit = useUiStore((s) => s.cropEdit);
+  const cropLock = useUiStore((s) => s.cropLock);
+  const cropSelected = useSelectionStore((s) =>
+    Boolean(cropEdit && s.selectedClipIds.includes(cropEdit.clipId)),
+  );
+  const cropLayer =
+    cropEdit && cropSelected
+      ? layers.find(
+          (l) =>
+            l.clip.id === cropEdit.clipId && l.role === "active" && l.asset.type !== "audio" && !l.asset.text,
+        )
+      : undefined;
+  useEffect(() => {
+    if (cropEdit && !cropLayer) useUiStore.getState().setCropEdit(null);
+  }, [cropEdit, cropLayer]);
   const activeErrors = layers
     .filter((l) => l.role === "active" && mediaErrors[l.asset.id])
     .map((l) => `${assetName(l.asset)} ${mediaErrors[l.asset.id]}`);
@@ -196,6 +217,7 @@ export function Preview() {
                 canvas={{ width, height }}
                 backgroundImage={backgroundImageOf(layer)}
                 shift={textDrag.shiftOf(layer.clip.id)}
+                onTextShown={() => textDrag.settled(layer.clip.id)}
                 register={(el) => {
                   if (el) elements.current.set(layer.clip.id, el);
                   else elements.current.delete(layer.clip.id);
@@ -203,6 +225,20 @@ export function Preview() {
               />
             ))}
 
+            {cropLayer && (
+              <CropOverlay
+                key={cropLayer.clip.id}
+                clip={cropLayer.clip}
+                asset={cropLayer.asset}
+                canvas={{ width, height }}
+                video={() => {
+                  const el = elements.current.get(cropLayer.clip.id);
+                  return el instanceof HTMLVideoElement ? el : undefined;
+                }}
+                lockRatio={cropLock?.clipId === cropLayer.clip.id ? cropLock.ratio : null}
+                onDone={() => useUiStore.getState().setCropEdit(null)}
+              />
+            )}
             {!anyActive && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-text-muted [&_svg]:size-8">
                 <MonitorPlay />
@@ -249,6 +285,72 @@ export function Preview() {
   );
 }
 
+/**
+ * A text picture that never blinks: when the text is redrawn, the previous picture stays on screen until
+ * the new one has been decoded, and only then are they swapped.
+ */
+function TextPicture({
+  src,
+  zIndex,
+  shift,
+  placed,
+  onLoad,
+  onError,
+  onShown,
+}: {
+  src: string;
+  zIndex: number;
+  shift?: { dx: number; dy: number } | null;
+  /** The clip's own transform (applied after the drag shift). */
+  placed?: { transform?: string; opacity?: number };
+  onLoad: () => void;
+  onError: () => void;
+  onShown?: () => void;
+}) {
+  const [shown, setShown] = useState(src);
+  const shownCallback = useRef(onShown);
+  useEffect(() => {
+    shownCallback.current = onShown;
+  });
+  useEffect(() => {
+    if (src === shown) return;
+    let live = true;
+    const next = new Image();
+    next.src = src;
+    const swap = () => {
+      if (!live) return;
+      setShown(src);
+      shownCallback.current?.();
+    };
+    // a picture that cannot be decoded is swapped in too, so its error is reported as usual
+    Promise.resolve()
+      .then(() => next.decode?.())
+      .then(swap, swap);
+    return () => {
+      live = false;
+    };
+  }, [src, shown]);
+  return (
+    <img
+      src={shown}
+      alt=""
+      data-testid="text-layer"
+      onLoad={onLoad}
+      onError={onError}
+      draggable={false}
+      className="pointer-events-none absolute inset-0 h-full w-full object-contain"
+      style={{
+        zIndex,
+        opacity: placed?.opacity,
+        transform:
+          [shift ? `translate(${percent(shift.dx)}%, ${percent(shift.dy)}%)` : "", placed?.transform ?? ""]
+            .filter(Boolean)
+            .join(" ") || undefined,
+      }}
+    />
+  );
+}
+
 function LayerView({
   layer,
   register,
@@ -256,6 +358,7 @@ function LayerView({
   canvas,
   backgroundImage,
   shift,
+  onTextShown,
 }: {
   layer: Layer;
   register: (el: MediaEl | null) => void;
@@ -265,6 +368,8 @@ function LayerView({
   backgroundImage?: string;
   /** A text being dragged: how far its picture is shifted, in shares of the stage. */
   shift?: { dx: number; dy: number } | null;
+  /** A redrawn text picture has replaced the previous one on screen. */
+  onTextShown?: () => void;
 }) {
   const { asset, track, visible } = layer;
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -285,6 +390,8 @@ function LayerView({
   }
   const mode = layer.clip.fitMode ?? DEFAULT_FIT_MODE;
   // Same geometry as the export: computed from the real picture size, never the native pixel size.
+  // Position, scale, rotation, mirroring and opacity of the whole layer (the export does the same).
+  const placed = transformStyle(layer.clip);
   // A cropped clip is laid out by what is left of its picture, exactly as the export scales it after cropping.
   const crop = cropOf(layer.clip);
   const kept = croppedSize(asset.width ?? 0, asset.height ?? 0, crop);
@@ -325,18 +432,14 @@ function LayerView({
     // background of its own (the export overlays the same file).
     if (!visible) return null;
     return (
-      <img
+      <TextPicture
         src={src}
-        alt=""
-        data-testid="text-layer"
+        zIndex={track.order}
+        shift={shift}
+        placed={placed}
         onLoad={() => setMediaError(asset.id, null)}
         onError={() => setMediaError(asset.id, mediaErrorMessage(4))}
-        draggable={false}
-        className="pointer-events-none absolute inset-0 h-full w-full object-contain"
-        style={{
-          zIndex: track.order,
-          transform: shift ? `translate(${percent(shift.dx)}%, ${percent(shift.dy)}%)` : undefined,
-        }}
+        onShown={onTextShown}
       />
     );
   }
@@ -348,7 +451,7 @@ function LayerView({
         data-testid="image-layer"
         data-fit={mode}
         className="absolute inset-0 overflow-hidden"
-        style={{ zIndex: track.order, backgroundColor: fitBackgroundColor(background) }}
+        style={{ zIndex: track.order, backgroundColor: fitBackgroundColor(background), ...placed }}
       >
         {backdropImage}
         {layout.backdrop &&
@@ -376,9 +479,10 @@ function LayerView({
       data-fit={mode}
       className="pointer-events-none absolute inset-0 overflow-hidden"
       style={{
-        opacity: visible ? 1 : 0,
         zIndex: track.order,
         backgroundColor: fitBackgroundColor(background),
+        ...placed,
+        opacity: visible ? (placed.opacity ?? 1) : 0,
       }}
     >
       {visible && backdropImage}

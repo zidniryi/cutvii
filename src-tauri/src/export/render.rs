@@ -907,6 +907,7 @@ mod tests {
             font_size: 150.0,
             color: "#FFFFFF".into(),
             bold: true,
+            font: None,
             align: Default::default(),
             x: 0.5,
             y: 0.5,
@@ -1186,6 +1187,114 @@ mod tests {
             "above the flatter picture is background: {:?}",
             e.region(&flat, 0.5, "100:60:130:60")
         );
+    }
+
+    #[test]
+    fn transformed_clips_show_the_track_below_around_them() {
+        let Some(e) = env("transform") else { return };
+        let (red, blue) = (e.red(), e.blue());
+        let render = |name: &str, change: &dyn Fn(&mut crate::project::TimelineClip)| {
+            let mut p = project(
+                vec![
+                    asset("red", &red, "video", Some(4.0)),
+                    asset("blue", &blue, "video", Some(4.0)),
+                ],
+                vec![
+                    track(
+                        "v1",
+                        "video",
+                        0,
+                        false,
+                        false,
+                        vec![clip("c1", "red", "v1", 0.0, 0.0, 2.0, 1.0)],
+                    ),
+                    track(
+                        "v2",
+                        "video",
+                        1,
+                        false,
+                        false,
+                        vec![clip("c2", "blue", "v2", 0.0, 0.0, 2.0, 1.0)],
+                    ),
+                ],
+            );
+            change(&mut p.tracks[1].clips[0]);
+            let out = e.dir.join(name);
+            e.export(&p, &opts(Quality::Draft), &out)
+                .0
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            out
+        };
+        let (centre, corner) = ("80:60:280:150", "80:60:10:10");
+
+        // untouched: the top clip covers everything
+        let plain = render("plain.mp4", &|_| {});
+        assert!(is_blue(e.region(&plain, 1.0, corner)));
+
+        // half size: blue in the middle (320x180), the red clip around it
+        let small = render("small.mp4", &|c| c.scale = 0.5);
+        assert!(
+            is_blue(e.region(&small, 1.0, centre)),
+            "{:?}",
+            e.region(&small, 1.0, centre)
+        );
+        assert!(
+            is_red(e.region(&small, 1.0, corner)),
+            "{:?}",
+            e.region(&small, 1.0, corner)
+        );
+
+        // moved a quarter of the canvas right and down: its box is now 320..640 x 180..360
+        let moved = render("moved.mp4", &|c| (c.scale, c.x, c.y) = (0.5, 0.25, 0.25));
+        assert!(is_blue(e.region(&moved, 1.0, "80:60:500:260")));
+        assert!(
+            is_red(e.region(&moved, 1.0, "80:60:180:100")),
+            "where it used to be"
+        );
+
+        // turned 90 degrees: the 320x180 box becomes 180x320, so it reaches above the old box and no longer
+        // reaches its old left end
+        let turned = render("turned.mp4", &|c| (c.scale, c.rotation) = (0.5, Some(90.0)));
+        assert!(
+            is_blue(e.region(&turned, 1.0, "40:30:300:40")),
+            "{:?}",
+            e.region(&turned, 1.0, "40:30:300:40")
+        );
+        assert!(
+            is_red(e.region(&turned, 1.0, "40:60:170:150")),
+            "{:?}",
+            e.region(&turned, 1.0, "40:60:170:150")
+        );
+
+        // half see-through: a mix of both clips everywhere
+        let faded = render("faded.mp4", &|c| c.opacity = 0.5);
+        let mix = e.region(&faded, 1.0, centre);
+        assert!(
+            mix.0 > 70 && mix.2 > 70 && mix.1 < 60,
+            "red and blue mixed: {mix:?}"
+        );
+        assert!(e.decodes_cleanly(&faded));
+    }
+
+    #[test]
+    fn mirroring_swaps_the_sides_of_the_picture() {
+        let Some(e) = env("flip") else { return };
+        let img = e.two_tone_jpg("wide.jpg"); // 2:1, red | blue
+        let render = |name: &str, h: bool, v: bool| {
+            let mut p = still_project(&img, Some("fit"));
+            (p.tracks[0].clips[0].flip_h, p.tracks[0].clips[0].flip_v) = (Some(h), Some(v));
+            let out = e.dir.join(name);
+            e.export(&p, &square(), &out)
+                .0
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            out
+        };
+        let (left, right) = ("100:100:30:130", "100:100:230:130");
+        let mirrored = render("h.mp4", true, false);
+        assert!(is_blue(e.region(&mirrored, 0.5, left)) && is_red(e.region(&mirrored, 0.5, right)));
+        // top-bottom only: the sides stay where they were
+        let upside = render("v.mp4", false, true);
+        assert!(is_red(e.region(&upside, 0.5, left)) && is_blue(e.region(&upside, 0.5, right)));
     }
 
     #[test]

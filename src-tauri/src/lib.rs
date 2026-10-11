@@ -14,6 +14,10 @@ pub fn run() {
         .manage(commands::export::ExportJob::default())
         .manage(commands::export::LastExport::default())
         .manage(commands::drop::DropState::default())
+        .setup(|app| {
+            commands::clip_tools::load_fonts(app.handle());
+            Ok(())
+        })
         .menu(commands::menu::build)
         .on_menu_event(|app, event| commands::menu::handle(app, event.id().as_ref()))
         // OS file drags arrive as *window* events (the webview-event hook never sees them).
@@ -33,6 +37,8 @@ pub fn run() {
             commands::clip_tools::prepare_image_preview,
             commands::clip_tools::prepare_waveform,
             commands::clip_tools::render_text,
+            commands::clip_tools::text_fonts,
+            commands::clip_tools::import_text_font,
             commands::media::import_media,
             commands::media::relink_media,
             commands::media::pick_image,

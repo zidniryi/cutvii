@@ -2,6 +2,7 @@ import { useId, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import { CropPanel } from "@/components/inspector/CropPanel";
 import { TextPanel } from "@/components/inspector/TextPanel";
+import { TransformPanel } from "@/components/inspector/TransformPanel";
 import { Panel } from "@/components/Panel";
 import { assetName, fileName } from "@/lib/media";
 import { formatTimecode } from "@/lib/timecode";
@@ -698,7 +699,8 @@ function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset;
             opaque={asset.type === "video"}
           />
         )}
-        {active === "video" && <CropPanel key={`${clip.id}-crop`} clip={clip} />}
+        {active === "video" && <TransformPanel key={`${clip.id}-transform`} clip={clip} />}
+        {active === "video" && <CropPanel key={`${clip.id}-crop`} clip={clip} asset={asset} />}
         {active === "audio" && (
           <VolumeField
             key={`${clip.id}-vol`}
@@ -720,6 +722,9 @@ function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset;
         )}
         {active === "text" && asset.text && (
           <TextPanel key={`${clip.id}-text`} clipId={clip.id} spec={asset.text} />
+        )}
+        {active === "text" && asset.text && (
+          <TransformPanel key={`${clip.id}-transform`} clip={clip} position={false} />
         )}
         {active === "info" && <InfoTab clip={clip} asset={asset} fps={fps} />}
       </div>

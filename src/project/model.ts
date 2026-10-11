@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** Bump when the on-disk shape changes, and add a migration in `src-tauri/src/project/migrate.rs`. v2: clip speed. v3: fitMode. v4: fitBackground. v5: text assets. v6: clip crop. */
+/** Bump when the on-disk shape changes, and add a migration in `src-tauri/src/project/migrate.rs`. v2: clip speed. v3: fitMode. v4: fitBackground. v5: text assets. v6: clip crop, text font, rotation and flip. */
 export const SCHEMA_VERSION = 6;
 
 /** Tolerance (seconds) when comparing a clip's sourceOut with the asset duration. */
@@ -89,6 +89,8 @@ export const TextSpecSchema = z
     fontSize: z.number().min(8, "Font size must be 8 to 2000").max(2000, "Font size must be 8 to 2000"),
     color: z.string().regex(/^#[0-9a-fA-F]{6}$/, "must be a #RRGGBB color"),
     bold: z.boolean().optional(),
+    /** Font family name; absent means Noto Sans. A family that is not installed is drawn in Noto Sans. */
+    font: z.string().trim().min(1).max(100).optional(),
     /** Absent means "center". */
     align: z.enum(["left", "center", "right"]).optional(),
     /** Centre of the text block as a share of the canvas (0.5, 0.5 = the middle). */
@@ -155,6 +157,9 @@ export const CropSchema = z
     message: "at least a tenth of the picture must remain",
   });
 
+/** Limits of the clip transform. The same numbers are enforced in Rust (`project/model.rs`). */
+export const TRANSFORM_LIMITS = { offset: 2, minScale: 0.05, maxScale: 4, rotation: 180 } as const;
+
 export const TimelineClipSchema = z
   .object({
     id: Id,
@@ -164,10 +169,17 @@ export const TimelineClipSchema = z
     sourceIn: z.number().nonnegative(),
     sourceOut: z.number().nonnegative(),
     volume: z.number().min(0).max(MAX_VOLUME),
-    x: z.number().finite(),
-    y: z.number().finite(),
-    scale: z.number().positive().finite(),
+    /** Offset of the clip's layer as a share of the canvas (0.1 = a tenth of its width right / height down). */
+    x: z.number().min(-TRANSFORM_LIMITS.offset).max(TRANSFORM_LIMITS.offset),
+    y: z.number().min(-TRANSFORM_LIMITS.offset).max(TRANSFORM_LIMITS.offset),
+    /** 1 is the fitted size. */
+    scale: z.number().min(TRANSFORM_LIMITS.minScale).max(TRANSFORM_LIMITS.maxScale),
     opacity: z.number().min(0).max(1),
+    /** Clockwise rotation in degrees; absent means 0. */
+    rotation: z.number().min(-TRANSFORM_LIMITS.rotation).max(TRANSFORM_LIMITS.rotation).optional(),
+    /** Mirror left-right / top-bottom; absent means false. */
+    flipH: z.boolean().optional(),
+    flipV: z.boolean().optional(),
     /** How a video or image is scaled to the canvas; absent means "fill". Never shown at native pixel size. */
     fitMode: z.enum(["fill", "fit", "blur-bg"]).optional(),
     /** Background behind the picture; absent means black. */

@@ -24,6 +24,7 @@ import {
   type EditResult,
 } from "./edit";
 import { planPlacement, type DropPlacement } from "./placement";
+import { setClipTransform, type Transform } from "./transform";
 
 export { newDropPlacement, type DropPlacement, type DropTarget } from "./placement";
 
@@ -104,6 +105,10 @@ export function applyBackgroundToAllClips(background: FitBackground): EditResult
 
 export function changeReversed(clipId: string, reversed: boolean): EditResult {
   return run(reversed ? "Reverse clip" : "Play clip forwards", (p) => setClipReversed(p, clipId, reversed));
+}
+
+export function changeTransform(clipId: string, patch: Partial<Transform> | null): EditResult {
+  return run(patch ? "Transform" : "Reset transform", (p) => setClipTransform(p, clipId, patch));
 }
 
 export function changeCrop(clipId: string, crop: Crop | null): EditResult {

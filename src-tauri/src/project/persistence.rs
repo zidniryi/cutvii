@@ -207,6 +207,7 @@ mod tests {
             font_size: 64.0,
             color: "#FFFFFF".into(),
             bold: false,
+            font: None,
             align: Default::default(),
             x: 0.5,
             y: 0.5,

@@ -12,6 +12,14 @@ Both are tested against `fixtures/project-v1.json`; change the fixture and both 
 | `tracks[]`                 | `id`, `name`, `type` (`video`/`audio`), `order`, `muted`, `hidden`, `clips[]`.                                                                                                                                                                                                                                                                                                                                                      |
 | `clips[]`                  | `id`, `assetId`, `trackId`, `timelineStart`, `sourceIn`, `sourceOut` (seconds), `volume` (0–2), `x`, `y`, `scale` (>0), `opacity` (0–1); optional `fitBackground` (`kind`: `black`/`color`/`image`, `color`, `assetId`, `blur` 0–100), `fitMode` (`fill` default, `fit`, `blur-bg`; video and stills), `reversed`, `speed` (0.1–10, default 1), `keepPitch` (default true). Timeline length = (`sourceOut` − `sourceIn`) / `speed`. |
 
+## Transform (schemaVersion 6 adds rotation and flip)
+
+Every clip has `x`, `y` (offset of its layer as a share of the canvas, -2 to 2; 0.1 is a tenth of the canvas
+width to the right or of its height down), `scale` (0.05 to 4; 1 is the fitted size) and `opacity` (0 to 1).
+Optional: `rotation` (degrees clockwise, -180 to 180; absent means 0), `flipH` and `flipV` (mirror left-right /
+top-bottom; absent means false). The defaults (0, 0, 1, 1, no rotation, no flip) leave the clip as it was before
+these were applied. Sound ignores them.
+
 ## Crop (schemaVersion 6)
 
 A clip may carry `crop`: `left`, `top`, `right`, `bottom`, each the share (0–0.9) of the source picture cut away
@@ -23,7 +31,8 @@ v5 changes nothing but the version number.
 
 A text clip is an ordinary clip whose asset is an `image` with an extra `text` object: `content` (1–2000
 characters, line breaks kept), `fontSize` (8–2000, in canvas pixels), `color` (`#RRGGBB`), optional `bold`,
-optional `align` (`left` / `center` default / `right`), and `x`, `y` (centre of the text block as a share of the
+optional `font` (a family name, added in schemaVersion 6; absent means Noto Sans, and a family that is not
+installed on this machine is drawn in Noto Sans), optional `align` (`left` / `center` default / `right`), and `x`, `y` (centre of the text block as a share of the
 canvas, 0–1). The asset's `path` is the picture CutVii drew from those properties: a transparent PNG the size of
 the canvas, kept in the app data folder. If that file is gone when the project is opened (another machine, data
 folder cleared) it is drawn again and is not reported as missing media. Migration from v4 changes nothing but the
