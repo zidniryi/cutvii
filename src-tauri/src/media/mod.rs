@@ -12,6 +12,7 @@ pub mod import;
 pub mod probe;
 pub mod reverse;
 pub mod text;
+pub mod text_fx;
 pub mod tools;
 pub mod waveform;
 pub mod whisper;

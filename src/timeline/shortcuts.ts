@@ -10,6 +10,7 @@ export type ShortcutAction =
   | "cut"
   | "copy"
   | "paste"
+  | "select-all"
   | "zoom-in"
   | "zoom-out"
   | "zoom-fit"
@@ -51,6 +52,7 @@ export const SHORTCUT_LABELS: Record<ShortcutAction, string> = {
   cut: "Ctrl/⌘ X",
   copy: "Ctrl/⌘ C",
   paste: "Ctrl/⌘ V",
+  "select-all": "Ctrl/⌘ A",
   "zoom-in": "Ctrl/⌘ +",
   "zoom-out": "Ctrl/⌘ −",
   "zoom-fit": "Ctrl/⌘ 0",
@@ -85,6 +87,8 @@ function withModifier(e: KeyLike): ShortcutAction | null {
       return e.shiftKey ? null : "copy";
     case "v":
       return e.shiftKey ? null : "paste";
+    case "a":
+      return e.shiftKey ? null : "select-all";
     case "=":
     case "+":
       return "zoom-in";

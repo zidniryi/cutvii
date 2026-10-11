@@ -42,6 +42,11 @@ export function pruneSelection() {
   if (kept.length !== sel.selectedClipIds.length) sel.setSelection(kept);
 }
 
+/** Select every clip on the timeline (Ctrl/Cmd + A). */
+export function selectAllClips() {
+  useSelectionStore.getState().setSelection(project().tracks.flatMap((t) => t.clips.map((c) => c.id)));
+}
+
 export function undo() {
   useProjectStore.getState().undo();
   pruneSelection();

@@ -75,3 +75,35 @@ describe("resolveShortcut", () => {
     expect(Object.values(SHORTCUT_LABELS).every((l) => l.length > 0)).toBe(true);
   });
 });
+
+describe("select all", () => {
+  it("Ctrl/Cmd + A selects every clip, but is left to a text field while typing", async () => {
+    expect(act(key("a", { metaKey: true }))).toBe("select-all");
+    expect(act(key("A", { ctrlKey: true }))).toBe("select-all");
+    expect(act(key("a"))).toBeNull(); // a plain "a" is not a shortcut
+    expect(act(key("a", { metaKey: true }), { typing: true, onButton: false })).toBeNull();
+
+    const { useProjectStore } = await import("@/store/project");
+    const { useSelectionStore } = await import("@/store/selection");
+    const { IDS, makeProject } = await import("@/test/makeProject");
+    const { addClip } = await import("./edit");
+    const { selectAllClips } = await import("./editor");
+    let p = makeProject();
+    for (const [assetId, trackId, id, start] of [
+      [IDS.vid, IDS.v1, "a", 0],
+      [IDS.vid2, IDS.v2, "b", 2],
+      [IDS.aud, IDS.a1, "c", 0],
+    ] as const) {
+      const r = addClip(p, { assetId, trackId, start, id });
+      if (!r.ok) throw new Error(r.error.message);
+      p = r.project;
+    }
+    useProjectStore.getState().loadProject(p, "/p.cutvii", []);
+    useSelectionStore.getState().select("b");
+    selectAllClips();
+    expect([...useSelectionStore.getState().selectedClipIds].sort()).toEqual(["a", "b", "c"]);
+    useProjectStore.getState().loadProject(makeProject(), "/p.cutvii", []);
+    selectAllClips();
+    expect(useSelectionStore.getState().selectedClipIds).toEqual([]);
+  });
+});

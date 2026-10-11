@@ -425,9 +425,23 @@ pub fn build_filter_graph(plan: &ExportPlan) -> FilterGraph {
 
             match (still, clip.fit) {
                 // text: the whole picture, centred, with its transparency kept so the tracks below show
-                _ if clip.transparent => parts.push(format!(
-                    "{source},{contain},pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black@0,setsar=1,{shift}[c{i}]"
-                )),
+                _ if clip.transparent => {
+                    // a text that fades does so with its transparency, so what is under it shows through
+                    let mut fades = String::new();
+                    if clip.fade_in > 1e-6 {
+                        fades.push_str(&format!("fade=t=in:st=0:d={:.6}:alpha=1,", clip.fade_in));
+                    }
+                    if clip.fade_out > 1e-6 {
+                        fades.push_str(&format!(
+                            "fade=t=out:st={:.6}:d={:.6}:alpha=1,",
+                            clip.duration - clip.fade_out,
+                            clip.fade_out
+                        ));
+                    }
+                    parts.push(format!(
+                        "{source},{contain},pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black@0,{fades}setsar=1,{shift}[c{i}]"
+                    ))
+                }
                 // video, whole picture, plain colour bars: a pad is enough
                 (false, FitMode::Fit) if bg_inputs[i].is_none() => parts.push(format!(
                     "{source},{contain},pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color={clip_bg},setsar=1,format=yuv420p,{shift}[c{i}]"
@@ -788,6 +802,11 @@ mod tests {
             color: "#FFFFFF".into(),
             bold: false,
             font: None,
+            uppercase: false,
+            outline: None,
+            shadow: None,
+            backdrop: None,
+            highlight: None,
             align: Default::default(),
             x: 0.5,
             y: 0.5,
@@ -822,6 +841,14 @@ mod tests {
             g.graph
         );
         assert!(!g.graph.contains("[g1]"), "no background under text");
+        // a fading text fades its transparency in and out (clip c2 runs 3..5, so it is 2 s long)
+        let mut fading = plan.clone();
+        (fading.clips[1].fade_in, fading.clips[1].fade_out) = (0.5, 0.25);
+        let faded = build_filter_graph(&fading).graph;
+        assert!(
+            faded.contains("color=black@0,fade=t=in:st=0:d=0.500000:alpha=1,fade=t=out:st=1.750000:d=0.250000:alpha=1,setsar=1"),
+            "{faded}"
+        );
         assert!(!g.input_args.join(" ").contains("/m/bg.png"));
         assert!(
             g.graph

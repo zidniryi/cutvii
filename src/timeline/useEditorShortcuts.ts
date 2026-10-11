@@ -3,7 +3,7 @@ import { goToEnd, goToStart, stepFrames, togglePlayback } from "@/playback/contr
 import { newProjectFlow, openProjectFlow, saveFlow } from "@/project/fileActions";
 import { usePlaybackStore } from "@/store/playback";
 import { copySelected, cutSelected, pasteAtPlayhead } from "./clipboard";
-import { deleteSelected, redo, report, splitAtPlayhead, undo } from "./editor";
+import { deleteSelected, redo, report, selectAllClips, splitAtPlayhead, undo } from "./editor";
 import { freezeFrameAtPlayhead } from "./freeze";
 import { resolveShortcut, type ShortcutAction } from "./shortcuts";
 import { zoomByFactorAt, zoomByWheel, zoomStep, zoomToFit } from "./zoomController";
@@ -31,6 +31,7 @@ const RUN: Record<ShortcutAction, () => void> = {
   cut: () => void cutSelected(),
   copy: () => void copySelected(),
   paste: () => void report(pasteAtPlayhead()),
+  "select-all": selectAllClips,
   "zoom-in": () => zoomStep(1),
   "zoom-out": () => zoomStep(-1),
   "zoom-fit": zoomToFit,
