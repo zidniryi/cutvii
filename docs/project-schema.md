@@ -29,6 +29,13 @@ the fade-in is at most the clip's length and the fade-out takes what is left.
 An audio track may hold a **video** asset: that is the video's detached sound, heard but never shown. A still on
 an audio track is still rejected.
 
+## Colour (schemaVersion 6)
+
+A clip may carry `color` with the eight Adjust values, each from -1 to 1 where 0 changes nothing: `exposure`
+(1 is two stops brighter), `contrast`, `saturation`, `vibrance`, `temperature` (negative cooler, positive warmer),
+`tint` (negative greener, positive more magenta), `highlights`, `shadows`. All eight are written; a clip with
+nothing set has no `color` at all. It applies to video and image clips, not to sound or text.
+
 ## Crop (schemaVersion 6)
 
 A clip may carry `crop`: `left`, `top`, `right`, `bottom`, each the share (0–0.9) of the source picture cut away

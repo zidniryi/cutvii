@@ -15,6 +15,16 @@ Source of truth: `src-tauri/src/export/` (`plan.rs` builds the plan and FFmpeg f
   it (fit mode, blurred copy, background) sees only what is left. The preview lays the clip out by the cropped
   size and enlarges the picture inside a clipping frame by the same shares. The crop box in the preview and the
   shape presets only choose those four shares; they add nothing to the export.
+- **Colour:** a clip's Adjust values are baked by Rust into one 33×33×33 lookup table
+  (`src-tauri/src/media/color.rs`). The export applies it with `lut3d` (tetrahedral) to the clip's picture, after
+  the crop and before the fit, so a blurred copy of the picture is graded too. The preview applies the very same
+  table in a WebGL shader that interpolates the same way and cuts the fraction off as FFmpeg does. Measured: on
+  identical RGB input the two differ by at most 1 level of 255, on fewer than 0.001 % of values; on a real H.264
+  frame decoded by the webview, 98.6 % of pixels in flat areas are within 1 level of FFmpeg's, the rest sit at
+  sharp colour edges (the two decoders smooth colour differently). SDR / Rec.709 only: HDR and wide-colour
+  footage gets a warning in the Color tab.
+- Known preview gaps for colour: the blurred backdrop of **blur-bg** is not graded in the preview (it is in the
+  export), and a video with no colour-matrix tag may be read with a different matrix by FFmpeg than by the webview.
 - Stills are looped for the clip length; transparency is flattened onto the background.
 - **Text** is the exception to both rules above: a text picture keeps its transparency and is laid over whatever
   the tracks below show, with no background of its own (`fitMode` and `fitBackground` do not apply to it). It is
