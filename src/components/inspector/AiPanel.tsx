@@ -198,6 +198,7 @@ export function AiPanel({ clip }: { clip: TimelineClip }) {
 
   return (
     <div className="space-y-4 text-xs">
+      <AutoClipsSection clip={clip} />
       <div role="group" aria-label="Subtitles from speech" className="space-y-3">
         <div className="rounded-lg border border-accent/30 bg-accent-soft p-3">
           <p className="flex items-center gap-2 text-sm font-medium text-text [&_svg]:size-4 [&_svg]:text-accent">
@@ -427,8 +428,6 @@ export function AiPanel({ clip }: { clip: TimelineClip }) {
           </p>
         )}
       </div>
-
-      <AutoClipsSection clip={clip} />
 
       <div role="group" aria-label="More AI tools" className="space-y-1.5 border-t pt-3">
         <p className="text-text-muted">More AI tools</p>

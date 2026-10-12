@@ -24,7 +24,11 @@ export function AutoClipsSection({ clip }: { clip: TimelineClip }) {
   const ready = useAutoClipsStore(selectClipsReady);
 
   return (
-    <div role="group" aria-label="Auto clips" className="space-y-2 border-t pt-3">
+    <div
+      role="group"
+      aria-label="Auto clips"
+      className="space-y-2 rounded-lg border border-accent/40 bg-accent-soft p-3"
+    >
       <p className="flex items-center gap-2 text-sm font-medium text-text [&_svg]:size-4 [&_svg]:text-accent">
         <Scissors />
         Auto clips

@@ -4,6 +4,7 @@ import {
   EyeOff,
   Magnet,
   Maximize2,
+  Film,
   Scissors,
   Sparkles,
   Trash2,
@@ -26,6 +27,7 @@ import { useProjectStore } from "@/store/project";
 import { useSelectionStore } from "@/store/selection";
 import { useTimelineViewStore } from "@/store/timelineView";
 import { clipDuration, projectDuration } from "@/timeline/clips";
+import { selectClipsReady, useAutoClipsStore } from "@/store/autoClips";
 import { aiKindOf, openAiTools, openAutoClips } from "@/timeline/ai";
 import { copySelected, cutSelected } from "@/timeline/clipboard";
 import { freezeFrameAtPlayhead } from "@/timeline/freeze";
@@ -64,6 +66,7 @@ function Playhead({ pps }: { pps: number }) {
 
 export function Timeline() {
   const project = useProjectStore((s) => s.project);
+  const clipsReady = useAutoClipsStore(selectClipsReady);
   const selectedIds = useSelectionStore((s) => s.selectedClipIds);
   const pps = useTimelineViewStore((s) => s.pps);
   const snapping = useTimelineViewStore((s) => s.snapping);
@@ -169,6 +172,22 @@ export function Timeline() {
           >
             <Sparkles />
             AI
+          </button>
+          <button
+            type="button"
+            aria-label="Auto clips"
+            title="Auto clips: find short clips in a long video"
+            onClick={() => openAutoClips()}
+            className="relative mr-1 flex h-8 items-center gap-1.5 rounded-md bg-accent px-2.5 text-xs font-medium text-black hover:bg-accent-hover focus-visible:outline-accent pointer-coarse:h-11 [&_svg]:size-3.5"
+          >
+            <Film />
+            Auto clips
+            {clipsReady && (
+              <span
+                aria-hidden
+                className="absolute -top-1 -right-1 size-2.5 rounded-full border border-black bg-success"
+              />
+            )}
           </button>
           <IconButton label="Add text at playhead" icon={<Type />} onClick={() => void addTextAtPlayhead()} />
           <IconButton
