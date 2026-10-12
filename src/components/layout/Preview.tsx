@@ -437,8 +437,10 @@ function LayerView({
   useEffect(() => {
     if (graded) useLutStore.getState().ensure(adjust, layer.clip.id);
   });
-  // a shader may only read media loaded with CORS; the asset protocol allows it
-  const crossOrigin = graded ? ("anonymous" as const) : undefined;
+  // A shader may only read media that was LOADED with CORS, and the asset protocol allows it. It is set
+  // from the start, for every picture: switching it on when a clip first gets colour does not make an
+  // already loaded video load again, so the shader was refused and the colour silently never showed.
+  const crossOrigin = asset.text || asset.type === "audio" ? undefined : ("anonymous" as const);
   // a reversed clip has nothing to show until its reversed copy exists (never play it forwards by mistake)
   if (layer.clip.reversed && asset.type !== "image" && reverse?.status !== "ready") return null;
   const src = mediaUrl(layer.clip.reversed && reverse?.path ? reverse.path : asset.path);

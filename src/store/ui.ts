@@ -25,7 +25,9 @@ interface UiState {
   leftPanel: "library" | "text";
   /** Short, transient message about the last edit that did not work (e.g. "would overlap"). */
   notice: string | null;
-  setNotice: (notice: string | null) => void;
+  /** Something the user can do about the notice, shown as a button in the toast. */
+  noticeAction: { label: string; run: () => void } | null;
+  setNotice: (notice: string | null, action?: { label: string; run: () => void }) => void;
   newProjectOpen: boolean;
   setNewProjectOpen: (open: boolean) => void;
   /** CutVii's own About window. */
@@ -53,6 +55,9 @@ interface UiState {
   setColorDraft: (draft: { clipId: string; adjust: ColorAdjust } | null) => void;
   /** The clip shown without its colour changes while "Before" is held. */
   colorBefore: string | null;
+  /** Colour settings copied from a clip, to paste on another. Kept while the app is open. */
+  colorClipboard: ColorAdjust | null;
+  setColorClipboard: (color: ColorAdjust | null) => void;
   setColorBefore: (clipId: string | null) => void;
   /** A save is being written (drives the status text; also stops a second save from starting). */
   saving: boolean;
@@ -71,7 +76,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   previewFull: false,
   setPreviewFull: (previewFull) => set({ previewFull }),
   notice: null,
-  setNotice: (notice) => set({ notice }),
+  noticeAction: null,
+  setNotice: (notice, action) => set({ notice, noticeAction: notice && action ? action : null }),
   newProjectOpen: false,
   setNewProjectOpen: (newProjectOpen) => set({ newProjectOpen }),
   aboutOpen: false,
@@ -91,6 +97,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   colorDraft: null,
   setColorDraft: (colorDraft) => set({ colorDraft }),
   colorBefore: null,
+  colorClipboard: null,
+  setColorClipboard: (colorClipboard) => set({ colorClipboard }),
   setColorBefore: (colorBefore) => set({ colorBefore }),
   saving: false,
   setSaving: (saving) => set({ saving }),

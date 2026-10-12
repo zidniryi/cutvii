@@ -11,6 +11,7 @@ pub mod clipper_job;
 pub mod color;
 pub mod ffmpeg;
 pub mod import;
+pub mod looks;
 pub mod probe;
 pub mod reverse;
 pub mod text;

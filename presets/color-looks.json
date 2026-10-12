@@ -1,0 +1,170 @@
+[
+  {
+    "id": "warm-morning",
+    "name": "Warm Morning",
+    "adjust": {
+      "exposure": 0.08,
+      "contrast": 0.1,
+      "saturation": 0.08,
+      "vibrance": 0.15,
+      "temperature": 0.3,
+      "tint": 0.04,
+      "highlights": -0.1,
+      "shadows": 0.12
+    }
+  },
+  {
+    "id": "cool-steel",
+    "name": "Cool Steel",
+    "adjust": {
+      "exposure": 0,
+      "contrast": 0.22,
+      "saturation": -0.18,
+      "vibrance": 0,
+      "temperature": -0.32,
+      "tint": -0.04,
+      "highlights": -0.08,
+      "shadows": -0.06
+    }
+  },
+  {
+    "id": "soft-fade",
+    "name": "Soft Fade",
+    "adjust": {
+      "exposure": 0.06,
+      "contrast": -0.25,
+      "saturation": -0.12,
+      "vibrance": 0.05,
+      "temperature": 0.06,
+      "tint": 0,
+      "highlights": -0.2,
+      "shadows": 0.3
+    }
+  },
+  {
+    "id": "punch",
+    "name": "Punch",
+    "adjust": {
+      "exposure": 0.04,
+      "contrast": 0.35,
+      "saturation": 0.22,
+      "vibrance": 0.2,
+      "temperature": 0,
+      "tint": 0,
+      "highlights": 0.05,
+      "shadows": -0.12
+    }
+  },
+  {
+    "id": "late-sun",
+    "name": "Late Sun",
+    "adjust": {
+      "exposure": 0.05,
+      "contrast": 0.15,
+      "saturation": 0.15,
+      "vibrance": 0.1,
+      "temperature": 0.48,
+      "tint": 0.1,
+      "highlights": -0.18,
+      "shadows": 0.05
+    }
+  },
+  {
+    "id": "moss",
+    "name": "Moss",
+    "adjust": {
+      "exposure": -0.04,
+      "contrast": 0.12,
+      "saturation": -0.08,
+      "vibrance": 0.12,
+      "temperature": 0.08,
+      "tint": -0.28,
+      "highlights": -0.1,
+      "shadows": 0.08
+    }
+  },
+  {
+    "id": "dusk",
+    "name": "Dusk",
+    "adjust": {
+      "exposure": -0.12,
+      "contrast": 0.2,
+      "saturation": 0.05,
+      "vibrance": 0.1,
+      "temperature": -0.18,
+      "tint": 0.22,
+      "highlights": -0.15,
+      "shadows": -0.05
+    }
+  },
+  {
+    "id": "clean-bright",
+    "name": "Clean Bright",
+    "adjust": {
+      "exposure": 0.18,
+      "contrast": 0.08,
+      "saturation": 0.05,
+      "vibrance": 0.1,
+      "temperature": -0.04,
+      "tint": 0,
+      "highlights": -0.12,
+      "shadows": 0.2
+    }
+  },
+  {
+    "id": "quiet-film",
+    "name": "Quiet Film",
+    "adjust": {
+      "exposure": 0,
+      "contrast": -0.1,
+      "saturation": -0.3,
+      "vibrance": -0.05,
+      "temperature": 0.12,
+      "tint": -0.06,
+      "highlights": -0.15,
+      "shadows": 0.15
+    }
+  },
+  {
+    "id": "rose-air",
+    "name": "Rose Air",
+    "adjust": {
+      "exposure": 0.1,
+      "contrast": -0.05,
+      "saturation": 0.04,
+      "vibrance": 0.12,
+      "temperature": 0.1,
+      "tint": 0.3,
+      "highlights": -0.05,
+      "shadows": 0.1
+    }
+  },
+  {
+    "id": "night-blue",
+    "name": "Night Blue",
+    "adjust": {
+      "exposure": -0.2,
+      "contrast": 0.28,
+      "saturation": -0.05,
+      "vibrance": 0.05,
+      "temperature": -0.5,
+      "tint": 0.05,
+      "highlights": -0.2,
+      "shadows": -0.1
+    }
+  },
+  {
+    "id": "ink",
+    "name": "Ink",
+    "adjust": {
+      "exposure": 0,
+      "contrast": 0.3,
+      "saturation": -1,
+      "vibrance": 0,
+      "temperature": 0,
+      "tint": 0,
+      "highlights": 0.05,
+      "shadows": -0.08
+    }
+  }
+]

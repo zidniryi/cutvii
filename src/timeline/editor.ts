@@ -25,6 +25,7 @@ import {
 } from "./edit";
 import { detachAudio, setClipSound, type ClipSound } from "./audio";
 import { setClipColor, type ColorAdjust } from "./color";
+import { setColorOnAll } from "./looks";
 import { planPlacement, type DropPlacement } from "./placement";
 import { setTextFade } from "./text";
 import { setClipTransform, type Transform } from "./transform";
@@ -156,8 +157,23 @@ export function changeTextFade(clipId: string, seconds: number): EditResult {
   return run("Change text fade", (p) => setTextFade(p, clipId, seconds));
 }
 
-export function changeColor(clipId: string, patch: Partial<ColorAdjust> | null): EditResult {
-  return run(patch ? "Adjust colour" : "Reset colour", (p) => setClipColor(p, clipId, patch));
+/**
+ * Change a clip's colour. `patch` is merged into what the clip has; with `replace` the clip gets exactly
+ * `patch` instead (a look, a pasted colour). `null` clears it. One undo step either way.
+ */
+export function changeColor(clipId: string, patch: Partial<ColorAdjust> | null, replace = false): EditResult {
+  return run(patch ? "Adjust colour" : "Reset colour", (p) => {
+    if (!patch || !replace) return setClipColor(p, clipId, patch);
+    const cleared = setClipColor(p, clipId, null);
+    return cleared.ok ? setClipColor(cleared.project, clipId, patch) : cleared;
+  });
+}
+
+/** Give every clip that has a picture the same colour (`null` removes it everywhere). One undo step. */
+export function applyColorToAll(color: ColorAdjust | null): EditResult {
+  return run(color ? "Apply colour to all clips" : "Remove colour from all clips", (p) =>
+    setColorOnAll(p, color),
+  );
 }
 
 export function changeTransform(clipId: string, patch: Partial<Transform> | null): EditResult {

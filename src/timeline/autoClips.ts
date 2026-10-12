@@ -43,6 +43,8 @@ export interface AutoClipsSettings {
   subtitles: boolean;
   /** Subtitle font size as a share of the canvas height. */
   subtitleSize: number;
+  /** Where on the picture the subtitles sit. */
+  subtitlePlace: SubtitlePlace;
 }
 
 export const DEFAULT_SETTINGS: AutoClipsSettings = {
@@ -55,10 +57,22 @@ export const DEFAULT_SETTINGS: AutoClipsSettings = {
   output: "vertical",
   subtitles: true,
   subtitleSize: 0.045,
+  subtitlePlace: "bottom",
 };
 
 /** Subtitle size for clips, as a share of the canvas height: 4.5 % is about 86 px on a 1080×1920 video. */
 export const CLIP_SUBTITLE_SIZE = { min: 0.02, max: 0.1, default: 0.045 } as const;
+
+export type SubtitlePlace = "top" | "middle" | "bottom";
+/**
+ * Where each place puts the centre of a subtitle, as a share of the canvas height. Top and bottom leave
+ * room for a three-line caption inside the 5 % safe margin of a vertical video.
+ */
+export const SUBTITLE_PLACES: { id: SubtitlePlace; label: string; y: number }[] = [
+  { id: "top", label: "Top", y: 0.2 },
+  { id: "middle", label: "Middle", y: 0.5 },
+  { id: "bottom", label: "Bottom", y: 0.8 },
+];
 
 export const COUNT_CHOICES: (number | null)[] = [null, 3, 5, 10];
 

@@ -11,6 +11,7 @@ export const NOTICE_MS = 5000;
  */
 export function NoticeToast() {
   const notice = useUiStore((s) => s.notice);
+  const action = useUiStore((s) => s.noticeAction);
   useEffect(() => {
     if (!notice) return;
     const id = setTimeout(() => useUiStore.getState().setNotice(null), NOTICE_MS);
@@ -26,6 +27,18 @@ export function NoticeToast() {
       >
         <Info aria-hidden className="mt-0.5 size-4 shrink-0 text-accent" />
         <p className="min-w-0 flex-1 break-words">{notice}</p>
+        {action && (
+          <button
+            type="button"
+            onClick={() => {
+              useUiStore.getState().setNotice(null);
+              action.run();
+            }}
+            className="shrink-0 rounded-md bg-accent px-2 py-1 text-xs font-medium text-black hover:bg-accent-hover pointer-coarse:min-h-11"
+          >
+            {action.label}
+          </button>
+        )}
         <button
           type="button"
           aria-label="Dismiss"

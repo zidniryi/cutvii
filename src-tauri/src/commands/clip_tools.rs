@@ -15,11 +15,13 @@ use crate::media::MediaBackend;
 use crate::media::color::{ColorAdjust, ensure_lut};
 use crate::media::ffmpeg::FfmpegBackend;
 use crate::media::import::{ImportedMedia, cache_key, import_one};
+use crate::media::looks::{ensure_look_previews, read_frame};
 use crate::media::probe::MediaDetails;
 use crate::media::text::{
     FONT_EXTENSIONS, FontInfo, TextSpec, TextStyle, ensure_font_preview, ensure_style_preview,
     ensure_text_picture, import_font, list_fonts, load_bundled_fonts, load_user_fonts,
 };
+use crate::media::tools::{FFMPEG_ENV, locate_tool};
 use crate::media::waveform::{FORMAT_VERSION, write_waveform};
 
 pub const REVERSE_PROGRESS_EVENT: &str = "reverse-progress";
@@ -267,6 +269,36 @@ pub async fn bake_color_lut(app: AppHandle, adjust: ColorAdjust) -> AppResult<St
     })
     .await
     .map_err(|e| AppError::InvalidInput(format!("colour task failed: {e}")))?
+}
+
+/// Small pictures of one frame of an imported file, each shown through one of `looks` (in the same
+/// order), for the Looks gallery. `at` is a source time in seconds. Made once per frame and look.
+#[tauri::command]
+pub async fn look_previews(
+    app: AppHandle,
+    path: String,
+    at: f64,
+    looks: Vec<ColorAdjust>,
+) -> AppResult<Vec<String>> {
+    let src = allowed_source(&app, &path)?;
+    if !(at.is_finite() && at >= 0.0) {
+        return Err(AppError::InvalidInput("invalid time".into()));
+    }
+    let dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| AppError::InvalidInput(format!("no cache directory: {e}")))?
+        .join("look-previews");
+    tauri::async_runtime::spawn_blocking(move || {
+        let key = derived_key(&src, &format!("look-frame|{at:.3}"))?;
+        let frame = || read_frame(&locate_tool("ffmpeg", FFMPEG_ENV)?, &src, at);
+        Ok(ensure_look_previews(&dir, &key, &looks, &frame)?
+            .into_iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect())
+    })
+    .await
+    .map_err(|e| AppError::InvalidInput(format!("look preview task failed: {e}")))?
 }
 
 /// The sample picture of a text style (a bundled one or the user's own), drawn by the same rasterizer as

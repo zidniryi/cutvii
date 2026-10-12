@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { installCloseGuard } from "@/lib/closeGuard";
 import { onMenuAction } from "@/lib/menuEvents";
 import { useFileDrop } from "@/hooks/useFileDrop";
+import { watchLongClips } from "@/timeline/ai";
 import { watchTextPictures } from "@/timeline/text";
 import { useEditorShortcuts } from "@/timeline/useEditorShortcuts";
 
@@ -58,6 +59,7 @@ export default function App() {
   useEditorShortcuts();
   useFileDrop();
   useEffect(() => watchTextPictures(), []);
+  useEffect(() => watchLongClips(), []);
   useEffect(() => {
     const guard = installCloseGuard();
     const menu = onMenuAction();

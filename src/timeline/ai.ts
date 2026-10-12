@@ -89,3 +89,41 @@ export function openAutoClips(clipId?: string): boolean {
   auto.openWizard(target);
   return true;
 }
+
+/** A clip using at least this much of its file is "a long video" worth suggesting Auto clips for. */
+export const LONG_CLIP_SECONDS = 180;
+
+/**
+ * Suggest Auto clips when a long video or recording is put on the timeline: a toast with a "Find clips"
+ * button, once per file per session, never for clips that were already there when a project was opened.
+ * Returns the function that stops watching.
+ */
+export function watchLongClips(): () => void {
+  const suggested = new Set<string>();
+  const idsOf = (p: Project) => new Set(p.tracks.flatMap((t) => t.clips.map((c) => c.id)));
+  let before = useProjectStore.getState().project;
+  let known = idsOf(before);
+  return useProjectStore.subscribe((state) => {
+    const project = state.project;
+    if (project === before) return;
+    const sameProject = project.id === before.id;
+    before = project;
+    const now = idsOf(project);
+    const added = [...now].filter((id) => !known.has(id));
+    known = now;
+    // another project was opened, or many clips arrived at once (undo, paste, a created batch): stay quiet
+    if (!sameProject || added.length !== 1) return;
+    const found = findClip(project, added[0]);
+    const asset = found && project.assets.find((a) => a.id === found.clip.assetId);
+    if (!found || !asset || suggested.has(asset.path)) return;
+    if (found.clip.sourceOut - found.clip.sourceIn < LONG_CLIP_SECONDS) return;
+    if (autoClipsBlocker(project, found.clip.id) !== null) return;
+    if (useAutoClipsStore.getState().open) return;
+    suggested.add(asset.path);
+    const id = found.clip.id;
+    useUiStore.getState().setNotice("Long video: Auto clips can find short clips in it for you.", {
+      label: "Find clips",
+      run: () => void openAutoClips(id),
+    });
+  });
+}

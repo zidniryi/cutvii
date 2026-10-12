@@ -158,7 +158,8 @@ describe("colour in the preview and the inspector", () => {
     open(project(), "video", 1);
     const view = render(<Preview />);
     expect(screen.queryByTestId("color-canvas")).not.toBeInTheDocument();
-    expect(view.container.querySelector("video")).not.toHaveAttribute("crossorigin");
+    // readable by a shader from the first load: colour added later needs no reload of the video
+    expect(view.container.querySelector("video")).toHaveAttribute("crossorigin", "anonymous");
     view.unmount();
 
     open(graded(project(), "video", warm), "video", 1);
@@ -195,7 +196,7 @@ describe("colour in the preview and the inspector", () => {
     );
     const panel = within(screen.getByRole("group", { name: "Colour" }));
     expect(panel.getByRole("button", { name: "Reset all" })).toBeDisabled();
-    expect(panel.getAllByRole("slider")).toHaveLength(8);
+    expect(panel.getAllByRole("slider")).toHaveLength(9); // eight Adjust sliders and the look Intensity
 
     const exposure = panel.getByRole("slider", { name: "Exposure" });
     fireEvent.change(exposure, { target: { value: "40" } });

@@ -461,3 +461,84 @@ describe("subtitle size for clips", () => {
     useTextStyleStore.getState().reset();
   });
 });
+
+describe("subtitle position for clips", () => {
+  it("puts the subtitles at the chosen place, whatever position Auto subtitles has saved", async () => {
+    const { useTextStyleStore } = await import("@/store/textStyles");
+    const ys: number[] = [];
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
+      if (command === "render_text") ys.push((args as { spec: { y: number; x: number } }).spec.y);
+      if (command === "choose_clips_folder") return "/out";
+      if (command === "export_clips") return { folder: "/out", cancelled: false, files: [] };
+      return "/t.png";
+    });
+    useProjectStore.setState({ project: project(), past: [], future: [] });
+    useTextStyleStore.getState().setSubtitlePosition({ x: 0.5, y: 0.5 }); // saved for Auto subtitles
+    useAutoClipsStore.setState({
+      settings: DEFAULT_SETTINGS,
+      clips: [clip("b", 200, 206)],
+      sentences: SENTENCES,
+      context: {
+        fps: 30,
+        rangeIn: 0,
+        rangeOut: 600,
+        timelineStart: 5,
+        speed: 1,
+        path: "/m/talk.mp4",
+        video: true,
+      },
+    });
+    await exportSelectedClips(1080, "standard");
+    useAutoClipsStore.getState().patchSettings({ subtitlePlace: "top" });
+    await exportSelectedClips(1080, "standard");
+    useAutoClipsStore.getState().patchSettings({ subtitlePlace: "middle" });
+    await exportSelectedClips(1080, "standard");
+    expect(ys).toEqual([0.8, 0.2, 0.5]);
+    useTextStyleStore.getState().reset();
+  });
+});
+
+describe("suggesting Auto clips for a long video", () => {
+  it("offers Find clips once when a long clip is added, and stays quiet otherwise", async () => {
+    const { watchLongClips } = await import("./ai");
+    const { useUiStore } = await import("@/store/ui");
+    const base = makeProject();
+    const withLong: Project = {
+      ...base,
+      assets: [...base.assets, { id: "long", path: "/m/talk.mp4", type: "video", duration: 700 }],
+    };
+    useProjectStore.setState({ project: withLong, past: [], future: [] });
+    useAutoClipsStore.setState({ open: false, clipId: null, clips: [], status: "idle" });
+    useUiStore.setState({ notice: null, noticeAction: null });
+    const stop = watchLongClips();
+    const put = (assetId: string, trackId: string, start: number, id: string) =>
+      useProjectStore.getState().execute({
+        label: "Add",
+        apply: (p) => addClip(p, { assetId, trackId, start, id }),
+      });
+
+    put(IDS.vid, IDS.v2, 0, "short"); // 10 s: nothing
+    expect(useUiStore.getState().notice).toBeNull();
+
+    put("long", IDS.v1, 0, "talk");
+    expect(useUiStore.getState().notice).toMatch(/Long video/);
+    expect(useUiStore.getState().noticeAction?.label).toBe("Find clips");
+    useUiStore.getState().noticeAction!.run();
+    expect(useAutoClipsStore.getState()).toMatchObject({ open: true, clipId: "talk" });
+
+    // the same file again: not suggested twice; a plain notice has no button
+    useAutoClipsStore.getState().hide();
+    useUiStore.getState().setNotice("something else");
+    expect(useUiStore.getState().noticeAction).toBeNull();
+    put("long", IDS.v1, 800, "talk2");
+    expect(useUiStore.getState().notice).toBe("something else");
+
+    // opening another project full of long clips is not "adding" one
+    useUiStore.getState().setNotice(null);
+    stop();
+    const stopAgain = watchLongClips();
+    useProjectStore.setState({ project: { ...useProjectStore.getState().project, id: "other" } });
+    expect(useUiStore.getState().notice).toBeNull();
+    stopAgain();
+  });
+});

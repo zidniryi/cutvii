@@ -7,6 +7,7 @@ import { useMediaDetailsStore } from "@/store/mediaDetails";
 import { useUiStore } from "@/store/ui";
 import { COLOR_FIELDS, colorKey, colorOf, isGraded, type ColorAdjust } from "@/timeline/color";
 import { changeColor, report } from "@/timeline/editor";
+import { LooksPanel } from "./LooksPanel";
 
 /**
  * Colour sliders for a video or image clip. While a slider is dragged the preview follows; letting go is one
@@ -56,6 +57,7 @@ export function ColorPanel({ clip, asset }: { clip: TimelineClip; asset: MediaAs
 
   return (
     <div role="group" aria-label="Colour" className="space-y-3">
+      <LooksPanel clip={clip} asset={asset} />
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs text-text-muted">Adjust</p>
         <div className="flex gap-1">

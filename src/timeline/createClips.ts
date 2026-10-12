@@ -20,6 +20,7 @@ import {
   type OutputShape,
   type TranscriptSentence,
   CLIP_SUBTITLE_SIZE,
+  SUBTITLE_PLACES,
 } from "./autoClips";
 import { projectDuration } from "./clips";
 import { addClip, addTrack, type EditResult } from "./edit";
@@ -178,7 +179,12 @@ async function drawSubtitles(
   const styles = useTextStyleStore.getState();
   const subtitle = subtitleStyleOf(styles);
   const look = subtitle.id === DEFAULT_STYLE && !subtitle.customised ? undefined : subtitle;
-  const at = styles.subtitlePosition ?? CLIP_SUBTITLE_POSITION;
+  // the clips' own place too, for the same reason as the size below
+  const place = useAutoClipsStore.getState().settings.subtitlePlace;
+  const at: Position = {
+    x: 0.5,
+    y: SUBTITLE_PLACES.find((p) => p.id === place)?.y ?? CLIP_SUBTITLE_POSITION.y,
+  };
   // the clips' own size: the size chosen for Auto subtitles was picked for another canvas shape
   const share = Math.min(CLIP_SUBTITLE_SIZE.max, Math.max(CLIP_SUBTITLE_SIZE.min, size));
   const { width, height } = canvas;
