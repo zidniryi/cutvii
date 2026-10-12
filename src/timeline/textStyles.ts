@@ -22,6 +22,7 @@ export function withStyle(spec: TextSpec, style: TextStyle): TextSpec {
     y: spec.y,
   };
   if (spec.align !== undefined) kept.align = spec.align;
+  if (spec.wrap !== undefined) kept.wrap = spec.wrap;
   // only what the style sets: an absent part means "none", and nothing undefined ends up in the file
   return {
     ...kept,

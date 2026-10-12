@@ -135,6 +135,8 @@ export const TextSpecSchema = z
     /** Centre of the text block as a share of the canvas (0.5, 0.5 = the middle). */
     x: z.number().min(0).max(1),
     y: z.number().min(0).max(1),
+    /** Lines wrap at this share of the canvas width; absent means 0.9. Subtitles use their picture's width. */
+    wrap: z.number().min(0.05).max(1).optional(),
     ...textLook,
   })
   .strict();

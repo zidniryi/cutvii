@@ -309,15 +309,16 @@ export interface Box {
 export function textHitBox(spec: TextSpec, canvasWidth: number, canvasHeight: number): Box {
   const lineWidth = (chars: number) => (chars * spec.fontSize * CHAR_WIDTH) / canvasWidth;
   const lines = spec.content.split("\n");
-  const width = Math.min(WRAP_WIDTH, Math.max(...lines.map((l) => lineWidth(l.length))));
-  const rows = lines.reduce((n, l) => n + Math.max(1, Math.ceil(lineWidth(l.length) / WRAP_WIDTH)), 0);
+  const wrap = spec.wrap ?? WRAP_WIDTH;
+  const width = Math.min(wrap, Math.max(...lines.map((l) => lineWidth(l.length))));
+  const rows = lines.reduce((n, l) => n + Math.max(1, Math.ceil(lineWidth(l.length) / wrap)), 0);
   const height = (rows * spec.fontSize * LINE_HEIGHT) / canvasHeight;
   const align = spec.align ?? "center";
   const centre =
     align === "left"
-      ? spec.x - WRAP_WIDTH / 2 + width / 2
+      ? spec.x - wrap / 2 + width / 2
       : align === "right"
-        ? spec.x + WRAP_WIDTH / 2 - width / 2
+        ? spec.x + wrap / 2 - width / 2
         : spec.x;
   return {
     left: centre - width / 2 - HIT_PADDING,

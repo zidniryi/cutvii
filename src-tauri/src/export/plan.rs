@@ -807,6 +807,7 @@ mod tests {
             shadow: None,
             backdrop: None,
             highlight: None,
+            wrap: None,
             align: Default::default(),
             x: 0.5,
             y: 0.5,

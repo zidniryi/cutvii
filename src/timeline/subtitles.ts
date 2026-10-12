@@ -5,6 +5,7 @@ import { useAiStore } from "@/store/ai";
 import { useProjectStore } from "@/store/project";
 import { clipDuration, clipSpeed, findClip } from "./clips";
 import { addClip, addTrack, type EditResult } from "./edit";
+import { pictureWidthShare } from "./fit";
 import { setTextFade, TEXT_FONT_LIMITS } from "./text";
 import type { TextStyle } from "@/project/model";
 import { DEFAULT_SUBTITLE_POSITION, type Position } from "./textPosition";
@@ -59,9 +60,11 @@ export function subtitleSpec(
   at: Position = DEFAULT_SUBTITLE_POSITION,
   /** Font size as a share of the canvas height. */
   share: number = SUBTITLE_FONT_SHARE,
+  /** Share of the canvas width the lines may take; the usual text width when absent. */
+  wrap?: number,
 ): TextSpec {
   const size = Math.round(canvasHeight * share);
-  return {
+  const spec: TextSpec = {
     content: text,
     fontSize: Math.min(TEXT_FONT_LIMITS.max, Math.max(TEXT_FONT_LIMITS.min, size)),
     color: "#FFFFFF",
@@ -70,7 +73,29 @@ export function subtitleSpec(
     x: at.x,
     y: at.y,
   };
+  if (wrap !== undefined) spec.wrap = wrap;
+  return spec;
 }
+
+/** Subtitles keep this share of their picture's width (the same margin ordinary text keeps on the canvas). */
+export const SUBTITLE_WIDTH_IN_PICTURE = 0.9;
+
+/**
+ * The width subtitles of `clip` wrap at, as a share of the canvas: inside the clip's picture when that is
+ * narrower than the canvas (a portrait video on a wide canvas), `undefined` when the picture fills it.
+ */
+export function subtitleWrap(
+  clip: TimelineClip,
+  asset: Pick<MediaAsset, "width" | "height">,
+  canvasWidth: number,
+  canvasHeight: number,
+): number | undefined {
+  const picture = pictureWidthShare(clip, asset.width, asset.height, canvasWidth, canvasHeight);
+  if (picture >= 0.999) return undefined;
+  return Math.max(MIN_SUBTITLE_WRAP, Math.round(picture * SUBTITLE_WIDTH_IN_PICTURE * 1000) / 1000);
+}
+/** Narrower than this a subtitle is a column of single words. */
+const MIN_SUBTITLE_WRAP = 0.2;
 
 export interface DrawnSubtitle extends Subtitle {
   spec: TextSpec;
@@ -187,11 +212,12 @@ export async function generateSubtitles(
   if (subtitles.length === 0) return { ok: false, reason: "No speech was found in this clip" };
 
   const { width, height } = useProjectStore.getState().project.settings;
+  const wrap = subtitleWrap(now.clip, asset, width, height);
   const drawn: DrawnSubtitle[] = [];
   try {
     for (const [i, subtitle] of subtitles.entries()) {
       onStage(`Drawing subtitle ${i + 1} of ${subtitles.length}`);
-      const plain = subtitleSpec(subtitle.text, height, at, share);
+      const plain = subtitleSpec(subtitle.text, height, at, share, wrap);
       const spec = style ? withStyle(plain, style.style) : plain;
       const picture = await invoke<string>("render_text", { spec, width, height });
       drawn.push({

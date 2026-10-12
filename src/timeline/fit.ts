@@ -52,6 +52,26 @@ export function fitLayout(
   return { picture: cover };
 }
 
+/**
+ * How much of the canvas width a clip's sharp picture covers (0..1): its fit mode, crop and scale taken into
+ * account. Subtitles wrap inside this, so they stay on a portrait video shown on a wide canvas.
+ */
+export function pictureWidthShare(
+  clip: Pick<TimelineClip, "fitMode" | "crop" | "scale">,
+  srcW: number | undefined,
+  srcH: number | undefined,
+  canvasW: number,
+  canvasH: number,
+): number {
+  if (!(srcW && srcH && srcW > 0 && srcH > 0)) return 1;
+  const crop = clip.crop;
+  const w = srcW * (crop ? 1 - crop.left - crop.right : 1);
+  const h = srcH * (crop ? 1 - crop.top - crop.bottom : 1);
+  const { picture } = fitLayout(w, h, canvasW, canvasH, clip.fitMode ?? DEFAULT_FIT_MODE);
+  const share = picture.width * (clip.scale ?? 1);
+  return Number.isFinite(share) ? Math.min(1, Math.max(0, share)) : 1;
+}
+
 /** CSS for a `Rect` inside a positioned container. */
 export const rectStyle = (r: Rect) => ({
   left: `${r.x * 100}%`,

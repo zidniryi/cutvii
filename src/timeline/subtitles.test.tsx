@@ -11,13 +11,14 @@ import { expectValid, IDS, makeProject } from "@/test/makeProject";
 import { addClip, deleteClip } from "./edit";
 import { useTextStyleStore } from "@/store/textStyles";
 import { aiKindOf, aiTarget, openAiTools } from "./ai";
-import { findStyle, matchesStyle } from "./textStyles";
+import { findStyle, matchesStyle, withStyle } from "./textStyles";
 import { undo } from "./editor";
 import {
   addSubtitleClips,
   generateSubtitles,
   subtitleSpec,
   subtitlesFor,
+  subtitleWrap,
   type DrawnSubtitle,
 } from "./subtitles";
 
@@ -83,6 +84,33 @@ describe("subtitle timing", () => {
   it("styles subtitles for the canvas", () => {
     expect(subtitleSpec("Hi", 1080)).toMatchObject({ content: "Hi", fontSize: 49, y: 0.88, align: "center" });
     expect(subtitleSpec("Hi", 100).fontSize).toBe(8);
+  });
+
+  it("keeps subtitles inside a picture narrower than the canvas, whatever the canvas", () => {
+    const clip = clipOf(project());
+    const portrait = { width: 1080, height: 1920 };
+    const wide = { width: 1920, height: 1080 };
+    // a picture that fills the canvas: the usual text width
+    expect(subtitleWrap({ ...clip, fitMode: "fit" }, wide, 1920, 1080)).toBeUndefined();
+    expect(subtitleWrap({ ...clip, fitMode: "fit" }, portrait, 1080, 1920)).toBeUndefined();
+    expect(subtitleWrap({ ...clip, fitMode: "fill" }, portrait, 1920, 1080)).toBeUndefined();
+    expect(subtitleWrap(clip, { width: undefined, height: undefined }, 1920, 1080)).toBeUndefined();
+    // a portrait video shown whole on a wide canvas covers 31.6 % of its width; subtitles take 90 % of that
+    expect(subtitleWrap({ ...clip, fitMode: "fit" }, portrait, 1920, 1080)).toBeCloseTo(0.285, 3);
+    expect(subtitleWrap({ ...clip, fitMode: "blur-bg" }, portrait, 1920, 1080)).toBeCloseTo(0.285, 3);
+    // on a square canvas, and when the picture is scaled down or cropped
+    expect(subtitleWrap({ ...clip, fitMode: "fit" }, portrait, 1080, 1080)).toBeCloseTo(0.506, 3);
+    expect(subtitleWrap({ ...clip, fitMode: "fit", scale: 0.5 }, wide, 1920, 1080)).toBeCloseTo(0.45, 3);
+    const cropped = { left: 0.25, right: 0.25, top: 0, bottom: 0 };
+    expect(subtitleWrap({ ...clip, fitMode: "fit", crop: cropped }, wide, 1920, 1080)).toBeCloseTo(0.45, 3);
+    // never so narrow that every word is its own line
+    expect(subtitleWrap({ ...clip, fitMode: "fit", scale: 0.1 }, wide, 1920, 1080)).toBe(0.2);
+
+    const spec = subtitleSpec("Hello", 1080, undefined, undefined, 0.285);
+    expect(spec.wrap).toBe(0.285);
+    expect(subtitleSpec("Hello", 1080)).not.toHaveProperty("wrap");
+    // restyling a subtitle keeps its width
+    expect(withStyle(spec, findStyle("highlighter")!.style).wrap).toBe(0.285);
   });
 
   it("adds them as text clips on a new top track in one step", () => {

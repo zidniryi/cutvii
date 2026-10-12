@@ -40,8 +40,9 @@ pub const MIN_FONT_SIZE: f64 = 8.0;
 pub const MAX_FONT_SIZE: f64 = 2000.0;
 pub const MIN_SIDE: u32 = 16;
 pub const MAX_SIDE: u32 = 8192;
-/// Lines wrap at this share of the canvas width.
+/// Lines wrap at this share of the canvas width, unless the text says otherwise.
 pub const WRAP_WIDTH: f64 = 0.9;
+pub const MIN_WRAP: f64 = 0.05;
 const LINE_HEIGHT: f32 = 1.25;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -71,6 +72,10 @@ pub struct TextSpec {
     /// Centre of the text block as a share of the canvas (0.5, 0.5 = the middle).
     pub x: f64,
     pub y: f64,
+    /// Lines wrap at this share of the canvas width. Absent means `WRAP_WIDTH`; subtitles set it to the
+    /// width of the picture they belong to, so they stay inside a picture narrower than the canvas.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wrap: Option<f64>,
     /// Draw the text in capitals (the stored text keeps its own case).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub uppercase: bool,
@@ -187,6 +192,9 @@ impl TextSpec {
         }
         if !(0.0..=1.0).contains(&self.x) || !(0.0..=1.0).contains(&self.y) {
             return fail("the text position must be inside the canvas");
+        }
+        if self.wrap.is_some_and(|w| !(MIN_WRAP..=1.0).contains(&w)) {
+            return fail("the text width must be between 5% and 100% of the canvas");
         }
         let colours = [
             self.outline.as_ref().map(|o| &o.color),
@@ -361,6 +369,7 @@ pub fn ensure_font_preview(dir: &Path, family: &str) -> AppResult<PathBuf> {
         shadow: None,
         backdrop: None,
         highlight: None,
+        wrap: None,
         align: TextAlign::Left,
         // the 90% text box then spans the whole picture but for a small margin
         x: 0.5,
@@ -474,7 +483,7 @@ pub fn render(spec: &TextSpec, width: u32, height: u32) -> AppResult<Vec<u8>> {
         ..
     } = &mut *guard;
     let size = spec.font_size as f32;
-    let box_width = (width as f64 * WRAP_WIDTH) as f32;
+    let box_width = (width as f64 * spec.wrap.unwrap_or(WRAP_WIDTH)) as f32;
     let mut buffer = Buffer::new(font_system, Metrics::new(size, size * LINE_HEIGHT));
     buffer.set_size(Some(box_width), None);
     let attrs = Attrs::new()
@@ -813,6 +822,7 @@ fn sample_spec(content: String) -> TextSpec {
         shadow: None,
         backdrop: None,
         highlight: None,
+        wrap: None,
         align: TextAlign::Center,
         x: 0.5,
         y: 0.5,
@@ -959,6 +969,7 @@ mod tests {
             shadow: None,
             backdrop: None,
             highlight: None,
+            wrap: None,
             align: TextAlign::Center,
             x: 0.5,
             y: 0.5,
@@ -1065,6 +1076,24 @@ mod tests {
         assert!(b - t > (b1 - t1) * 2, "more than one line");
         let ((_, t2, _, b2), _) = ink(&render(&spec("One\nTwo"), W, H).unwrap());
         assert!(b2 - t2 > (b1 - t1) * 3 / 2, "explicit line break");
+        // a narrower width keeps the lines inside it, around the same centre, and takes more lines
+        let narrow = TextSpec {
+            wrap: Some(0.3),
+            ..long.clone()
+        };
+        let ((nl, nt, nr, nb), _) = ink(&render(&narrow, W, H).unwrap());
+        assert!(
+            nl >= W * 35 / 100 - 2 && nr <= W * 65 / 100 + 2,
+            "inside the narrow box: {nl}..{nr}"
+        );
+        assert!(nb - nt > b - t, "more lines than at the usual width");
+        for bad in [0.0, 0.01, 1.5, f64::NAN] {
+            let spec = TextSpec {
+                wrap: Some(bad),
+                ..long.clone()
+            };
+            assert!(render(&spec, W, H).is_err(), "width {bad} is refused");
+        }
         // text pushed past the edge is cut off, not an error
         let edge = TextSpec {
             x: 1.0,
@@ -1152,6 +1181,7 @@ mod tests {
             shadow: None,
             backdrop: None,
             highlight: None,
+            wrap: None,
             align: TextAlign::Left,
             x: 0.5,
             y: 0.5,
