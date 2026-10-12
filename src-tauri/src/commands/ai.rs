@@ -24,7 +24,7 @@ pub const TRANSCRIBE_EVENT: &str = "ai-transcribe";
 pub struct AiJob(pub Mutex<Option<Arc<AtomicBool>>>);
 
 impl AiJob {
-    fn start(&self) -> AppResult<Arc<AtomicBool>> {
+    pub(crate) fn start(&self) -> AppResult<Arc<AtomicBool>> {
         let mut slot = self.0.lock().unwrap();
         if slot.is_some() {
             return Err(AppError::InvalidInput(
@@ -35,7 +35,7 @@ impl AiJob {
         *slot = Some(flag.clone());
         Ok(flag)
     }
-    fn finish(&self) {
+    pub(crate) fn finish(&self) {
         *self.0.lock().unwrap() = None;
     }
 }
@@ -54,7 +54,7 @@ struct TranscribeProgress {
     percent: i32,
 }
 
-fn models_dir(app: &AppHandle) -> AppResult<PathBuf> {
+pub(crate) fn models_dir(app: &AppHandle) -> AppResult<PathBuf> {
     Ok(app
         .path()
         .app_data_dir()

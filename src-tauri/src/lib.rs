@@ -46,6 +46,7 @@ pub fn run() {
             commands::ai::cancel_ai_job,
             commands::ai::delete_whisper_model,
             commands::ai::transcribe_media,
+            commands::clipper::find_clips_in_media,
             commands::clip_tools::media_details,
             commands::clip_tools::reveal_media,
             commands::clip_tools::text_fonts,

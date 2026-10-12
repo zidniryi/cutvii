@@ -11,7 +11,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
@@ -232,7 +232,7 @@ pub fn read_samples(ffmpeg: &Path, src: &Path, start: f64, seconds: f64) -> AppR
 }
 
 /// One stretch of speech. Times are seconds from the start of the audio that was transcribed.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Segment {
     pub start: f64,
     pub end: f64,

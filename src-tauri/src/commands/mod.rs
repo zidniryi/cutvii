@@ -1,5 +1,6 @@
 pub mod ai;
 pub mod clip_tools;
+pub mod clipper;
 pub mod drop;
 pub mod export;
 pub mod media;
