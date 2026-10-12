@@ -7,3 +7,4 @@ pub mod media;
 pub mod menu;
 pub mod project;
 pub mod recent;
+pub mod upscale;

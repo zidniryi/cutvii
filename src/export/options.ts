@@ -34,6 +34,16 @@ export const QUALITIES: { id: Quality; label: string; hint: string }[] = [
   { id: "high", label: "High", hint: "Slowest, best quality" },
 ];
 
+/** The largest picture the exporter accepts (the same limit as in Rust, `ExportOptions::validate`). */
+export const EXPORT_MAX = { width: 7680, height: 4320 } as const;
+
+/**
+ * A size larger than the project in both directions enlarges the picture. That makes it bigger, not
+ * sharper: no detail is invented (this is plain scaling, not AI upscaling).
+ */
+export const isEnlarged = (size: { width: number; height: number }, project: Project) =>
+  size.width > project.settings.width + 1 && size.height > project.settings.height + 1;
+
 /** H.264 4:2:0 needs even dimensions. */
 const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
 
@@ -43,10 +53,17 @@ export function resolutionPresets(project: Project): ResolutionPreset[] {
   const aspect = width / height;
   const fromHeight = (h: number) => ({ width: even(h * aspect), height: even(h) });
 
+  // 2K and 4K are named after the SHORT side, so a vertical project gets 2160×3840, not a narrow strip
+  const fromShortSide = (s: number) =>
+    width >= height
+      ? { width: even(s * aspect), height: even(s) }
+      : { width: even(s), height: even(s / aspect) };
   const list: ResolutionPreset[] = [
     { id: "project", label: "Project size", width: even(width), height: even(height) },
     ...[1080, 720, 480].map((h) => ({ id: `${h}p`, label: `${h}p`, ...fromHeight(h) })),
-  ];
+    { id: "1440p", label: "2K", ...fromShortSide(1440) },
+    { id: "2160p", label: "4K", ...fromShortSide(2160) },
+  ].filter((p) => p.width <= EXPORT_MAX.width && p.height <= EXPORT_MAX.height);
   const seen = new Set<string>();
   return list.filter((p) => {
     const key = `${p.width}x${p.height}`;

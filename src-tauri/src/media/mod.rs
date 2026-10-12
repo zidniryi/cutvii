@@ -18,6 +18,7 @@ pub mod reverse;
 pub mod text;
 pub mod text_fx;
 pub mod tools;
+pub mod upscale;
 pub mod vocals;
 pub mod waveform;
 pub mod whisper;

@@ -1,0 +1,12 @@
+[package]
+name = "upscale-spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Throwaway feasibility spike (Phase 6c-1). Not part of the app; nothing here is built with CutVii.
+[workspace]
+
+[dependencies]
+ort = { version = "2.0.0-rc.10", features = ["coreml"] }
+image = { version = "0.25", default-features = false, features = ["png"] }

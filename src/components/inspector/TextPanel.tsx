@@ -18,8 +18,11 @@ const chipClass = (selected: boolean) =>
       : "border-border bg-surface-2 text-text-muted hover:text-text",
   );
 
-/** While typing, the text is redrawn this long after the last keystroke (drawing itself takes a few ms). */
-export const TYPING_DELAY_MS = 120;
+/**
+ * While typing, the text is redrawn this long after the last keystroke. Long enough that a redraw (and the
+ * update of the whole project that follows it) does not land between two keystrokes of normal typing.
+ */
+export const TYPING_DELAY_MS = 250;
 
 const ALIGNS = [
   { id: "left", label: "Align left", icon: AlignLeft },
@@ -58,14 +61,42 @@ export function TextPanel({
 
   const apply = (patch: Partial<TextSpec>) => void editText(clipId, patch).then(setProblem);
 
-  function commitContent(value: string | null) {
+  // Typing: the box always shows what was typed (it is never put back to the older text while a redraw is
+  // on its way), one redraw runs at a time, and whatever was typed meanwhile is drawn right after it.
+  const drawing = useRef(false);
+  const waiting = useRef<string | null>(null);
+  async function draw(value: string): Promise<void> {
+    if (drawing.current) {
+      waiting.current = value;
+      return;
+    }
+    drawing.current = true;
+    try {
+      setProblem(await editText(clipId, { content: value }));
+    } finally {
+      drawing.current = false;
+    }
+    const next = waiting.current;
+    waiting.current = null;
+    if (next !== null && next !== value) await draw(next);
+  }
+  /** Redraw with the typed words. `done` (leaving the box) also lets the box follow the clip again. */
+  function commitContent(value: string | null, done = false) {
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
     if (value === null) return;
-    if (value.trim() === "") return setProblem("Text must not be empty");
-    setContent(null);
-    if (value !== spec.content) apply({ content: value });
-    else setProblem(null);
+    if (value.trim() === "") {
+      setProblem("Text must not be empty");
+      if (done) setContent(null);
+      return;
+    }
+    const finish = () => done && setContent((now) => (now === value ? null : now));
+    if (value === spec.content && !drawing.current) {
+      setProblem(null);
+      finish();
+      return;
+    }
+    void draw(value).then(finish);
   }
   function typeContent(value: string) {
     setContent(value);
@@ -121,7 +152,7 @@ export function TextPanel({
           className={cn(fieldClass, "h-auto resize-y py-1.5 leading-snug pointer-coarse:h-auto")}
           value={content ?? spec.content}
           onChange={(e) => typeContent(e.target.value)}
-          onBlur={() => commitContent(content)}
+          onBlur={() => commitContent(content, true)}
           onKeyDown={(e) => {
             if (e.key === "Escape") {
               if (timer.current) clearTimeout(timer.current);

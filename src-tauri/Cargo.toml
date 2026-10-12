@@ -28,6 +28,8 @@ png = "0.18.1"
 whisper-rs = "0.16"
 ureq = "3"
 sha2 = "0.11.0"
+# ONNX Runtime (MIT), for AI upscale. The runtime library is fetched at build time; models never are.
+ort = "=2.0.0-rc.13"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

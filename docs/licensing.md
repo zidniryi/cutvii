@@ -117,5 +117,24 @@ No GPL/LGPL/AGPL crates.
   confirms a dialog that states the size and the source (`huggingface.co/ggerganov/whisper.cpp`). The file is
   checked against the published size and SHA-256 before it is used, kept in the app data folder, and can be
   removed from the AI tab.
-- This download is the **only network request CutVii makes** (`ureq`, MIT OR Apache-2.0; `sha2`, MIT OR
+- This download and the upscale model download (below) are the **only network requests CutVii makes** (`ureq`, MIT OR Apache-2.0; `sha2`, MIT OR
   Apache-2.0). Recognition runs entirely on the user's machine; media and text are never sent anywhere.
+
+## AI upscale (Real-ESRGAN models, ONNX Runtime)
+
+- The engine is **ONNX Runtime** (MIT), linked into the app through the `ort` crate (MIT / Apache-2.0). The
+  runtime library is fetched when CutVii is BUILT (by `ort`'s build script); nothing is fetched at run time
+  except a model the user asked for.
+- Models are **never bundled**. Two are offered, both from the Real-ESRGAN project's own release page
+  (`github.com/xinntao/Real-ESRGAN`, tag `v0.2.5.0`), each pinned by exact size and SHA-256:
+  `realesr-general-x4v3.pth` (4,885,111 bytes) and `realesr-animevideov3.pth` (2,504,012 bytes). A model is
+  downloaded only after the user confirms a dialog that states the size, the source and the licence situation.
+- **Licence of the models: not stated upstream.** The Real-ESRGAN CODE is BSD-3-Clause. Its release page and
+  model list state no licence, and no training data, for the weight files (checked 2026-10-13). CutVii says so
+  in the download dialog and does not redistribute the files; whether a model suits a given use is for the
+  user to judge.
+- CutVii reads the checkpoint as data and writes its own ONNX model from it (`src-tauri/src/media/upscale.rs`):
+  no PyTorch, and nothing inside the checkpoint is executed. The network layout it rebuilds
+  ("SRVGGNetCompact") is described in the BSD-3-Clause Real-ESRGAN repository.
+- Pictures are enlarged on this computer and never uploaded. The result is a new file in the app data folder;
+  the original is not changed.

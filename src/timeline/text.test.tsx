@@ -302,6 +302,34 @@ describe("editing text", () => {
     });
   });
 
+  it("keeps what is typed while a redraw is running, and then draws only the newest text", async () => {
+    const release: ((v: string) => void)[] = [];
+    vi.mocked(invoke).mockImplementation(() => new Promise<string>((r) => release.push(r)) as never);
+    render(<Inspector />);
+    const box = screen.getByRole("textbox", { name: "Text" });
+    const contents = () =>
+      vi.mocked(invoke).mock.calls.map(([, args]) => (args as { spec: TextSpec }).spec.content);
+
+    vi.useFakeTimers();
+    for (const typed of ["A", "AB", "ABC"]) {
+      fireEvent.change(box, { target: { value: typed } });
+      await act(() => vi.advanceTimersByTimeAsync(TYPING_DELAY_MS + 10));
+    }
+    vi.useRealTimers();
+    expect(contents()).toEqual(["A"]); // one redraw at a time
+    expect(box).toHaveValue("ABC");
+
+    await act(async () => release[0]("/data/text/a.png"));
+    await waitFor(() => expect(contents()).toEqual(["A", "ABC"])); // "AB" is never drawn
+    expect(box).toHaveValue("ABC"); // the finished picture of "A" did not reset the box
+    await act(async () => release[1]("/data/text/abc.png"));
+    await waitFor(() =>
+      expect(textOf()).toMatchObject({ path: "/data/text/abc.png", text: { content: "ABC" } }),
+    );
+    expect(box).toHaveValue("ABC");
+    expect(invoke).toHaveBeenCalledTimes(2);
+  });
+
   it("edits from the inspector: typing waits, the other fields apply at once", async () => {
     render(<Inspector />);
     const box = screen.getByRole("textbox", { name: "Text" });

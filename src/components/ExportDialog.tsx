@@ -17,6 +17,7 @@ import {
   fpsChoices,
   isAudioFormat,
   QUALITIES,
+  isEnlarged,
   resolutionPresets,
   type ExportOptions,
 } from "@/export/options";
@@ -170,9 +171,19 @@ function ExportDialogBody() {
                     options={sizes.map((p) => ({
                       value: p.id,
                       title: p.label,
-                      detail: `${p.width}×${p.height}`,
+                      detail: `${p.width}×${p.height}${isEnlarged(p, project) ? " · enlarged" : ""}`,
                     }))}
                   />
+                  {isEnlarged(options, project) && (
+                    <p
+                      role="note"
+                      className="rounded-md border border-dashed px-3 py-2 text-xs text-text-muted"
+                    >
+                      {options.width}×{options.height} is larger than your project ({project.settings.width}×
+                      {project.settings.height}). The picture is enlarged to fit: it gets bigger, not sharper
+                      (no AI upscaling), and the export takes longer and makes a larger file.
+                    </p>
+                  )}
                   <Choices
                     label="Frame rate"
                     columns={Math.min(rates.length, 6)}
