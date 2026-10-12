@@ -13,6 +13,7 @@ pub fn run() {
         .manage(commands::project::CurrentProjectPath::default())
         .manage(commands::export::ExportJob::default())
         .manage(commands::export::LastExport::default())
+        .manage(commands::export::BatchFolder::default())
         .manage(commands::drop::DropState::default())
         .manage(commands::ai::AiJob::default())
         .manage(commands::recent::RecentProjects::default())
@@ -33,6 +34,7 @@ pub fn run() {
             commands::export::export_project,
             commands::export::cancel_export,
             commands::export::export_clips,
+            commands::export::choose_clips_folder,
             commands::export::reveal_last_export,
             commands::drop::import_dropped_file,
             commands::clip_tools::prepare_reverse_preview,

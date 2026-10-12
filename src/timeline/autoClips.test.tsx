@@ -343,8 +343,9 @@ describe("the wizard", () => {
 
     fireEvent.click(dialog.getByRole("button", { name: "Next" }));
     expect(dialog.getByText(/1 clip selected · Vertical 9:16 · with subtitles/)).toBeInTheDocument();
-    expect(dialog.getByRole("button", { name: "Create 1 clip" })).toBeEnabled();
-    expect(dialog.getByRole("radio", { name: /Add to this project/ })).toBeChecked();
+    // two separate things to do: save files (asks for the folder first), or add to the timeline
+    expect(dialog.getByRole("button", { name: "Choose folder and save 1 clip" })).toBeEnabled();
+    expect(dialog.getByRole("button", { name: "Add 1 clip to the timeline" })).toBeEnabled();
     expect(dialog.getByText("Coming soon")).toBeInTheDocument(); // new project per clip
     fireEvent.click(dialog.getByRole("button", { name: "Back" }));
     expect(dialog.getByRole("list", { name: "Suggested clips" })).toBeInTheDocument();

@@ -37,8 +37,8 @@ describe("style ordering", () => {
     expect(ids().slice(0, 3)).toEqual(["boxed", "minimal", "clean-caption"]);
     store().use("minimal"); // choosing it again does not list it twice
     expect(ids().slice(0, 2)).toEqual(["minimal", "boxed"]);
-    expect(ids()).toHaveLength(21);
-    expect(new Set(ids()).size).toBe(21);
+    expect(ids()).toHaveLength(31);
+    expect(new Set(ids()).size).toBe(31);
   });
 
   it("is kept in local preferences, not in the project, and can be reset", () => {
@@ -55,7 +55,7 @@ describe("style ordering", () => {
   it("ignores ids that no longer exist", () => {
     useTextStyleStore.setState({ order: ["gone", "boxed"] });
     expect(ids()[0]).toBe("boxed");
-    expect(ids()).toHaveLength(21);
+    expect(ids()).toHaveLength(31);
   });
 
   it("is shared: choosing in one list reorders every other list", () => {
@@ -85,11 +85,11 @@ describe("style ordering", () => {
     const chosen: string[] = [];
     render(<StyleList isSelected={() => false} onSelect={(p) => chosen.push(p.id)} />);
     expect(document.querySelectorAll("[data-style-id]")).toHaveLength(6);
-    fireEvent.click(screen.getByRole("button", { name: "Show more (21 styles)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show more (31 styles)" }));
     const dialog = screen.getByRole("dialog", { name: "All styles" });
     expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(dialog).toHaveAttribute("data-layout", "modal");
-    expect(dialog.querySelectorAll("[data-style-id]")).toHaveLength(21);
+    expect(dialog.querySelectorAll("[data-style-id]")).toHaveLength(31);
     expect(within(dialog).getByRole("textbox", { name: "Search styles" })).toHaveFocus();
 
     fireEvent.change(within(dialog).getByRole("textbox", { name: "Search styles" }), {
@@ -146,7 +146,7 @@ describe("the shared style system", () => {
     expect(store().mine).toHaveLength(1);
     expect(store().mine[0]).toMatchObject({ name: "Boxed copy", style: boxed.style });
     expect(store().editingId).toBe(store().mine[0].id);
-    expect(ids()).toHaveLength(22);
+    expect(ids()).toHaveLength(32);
   });
 
   it("creates, duplicates, renames, edits and deletes My styles, kept between sessions", () => {

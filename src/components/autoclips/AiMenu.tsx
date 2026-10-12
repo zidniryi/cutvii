@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Captions, Scissors, Sparkles } from "lucide-react";
 import { selectClipsReady, useAutoClipsStore } from "@/store/autoClips";
+import { useClipOutputStore } from "@/store/clipOutput";
 import { openAiTools, openAutoClips } from "@/timeline/ai";
 
 /** Top bar "AI" menu: the same tools as the inspector's AI tab, reachable from anywhere. */
@@ -10,6 +11,7 @@ export function AiMenu() {
   const ready = useAutoClipsStore(selectClipsReady);
   const running = useAutoClipsStore((s) => s.status === "running");
   const reviewing = useAutoClipsStore((s) => s.clips.length > 0);
+  const saving = useClipOutputStore((s) => s.busy === "export");
 
   useEffect(() => {
     if (!open) return;
@@ -58,7 +60,13 @@ export function AiMenu() {
           </button>
           <button role="menuitem" className={item} onClick={run(() => openAutoClips())}>
             <Scissors className="size-4" />
-            {running ? "Finding clips…" : reviewing ? "Review found clips…" : "Find short clips…"}
+            {saving
+              ? "Saving clips… (show progress)"
+              : running
+                ? "Finding clips…"
+                : reviewing
+                  ? "Review found clips…"
+                  : "Find short clips…"}
             {ready && <span className="ml-auto pl-3 text-xs text-accent">Clips ready</span>}
           </button>
         </div>

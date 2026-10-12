@@ -76,10 +76,10 @@ function load() {
 
 describe("text style presets", () => {
   it("are the twenty-one bundled styles, each valid and with its own id and name", () => {
-    expect(STYLE_PRESETS).toHaveLength(21);
+    expect(STYLE_PRESETS).toHaveLength(31);
     expect(STYLE_PRESETS.slice(0, 3).map((p) => p.id)).toEqual(["clean-caption", "two-tone", "outline-pop"]);
-    expect(new Set(STYLE_PRESETS.map((p) => p.id)).size).toBe(21);
-    expect(new Set(STYLE_PRESETS.map((p) => p.name)).size).toBe(21);
+    expect(new Set(STYLE_PRESETS.map((p) => p.id)).size).toBe(31);
+    expect(new Set(STYLE_PRESETS.map((p) => p.name)).size).toBe(31);
     expect(STYLE_PRESETS.every((p) => typeof p.style.font === "string")).toBe(true);
     // the three box shapes, a highlighted line, capitals and a fade are all in use
     expect(preset("boxed").style.box?.shape).toBe("rect");

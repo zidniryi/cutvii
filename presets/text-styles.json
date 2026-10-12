@@ -338,5 +338,175 @@
         "opacity": 0.7
       }
     }
+  },
+  {
+    "id": "hype-bar",
+    "name": "Hype Bar",
+    "style": {
+      "font": "Anton",
+      "color": "#FFFFFF",
+      "uppercase": true,
+      "outline": {
+        "color": "#101012",
+        "width": 0.12
+      }
+    },
+    "tags": ["clipper", "word-timing"]
+  },
+  {
+    "id": "podcast-clean",
+    "name": "Podcast Clean",
+    "style": {
+      "font": "Work Sans",
+      "color": "#FFFFFF",
+      "box": {
+        "color": "#0E0E10",
+        "opacity": 0.62,
+        "shape": "rect",
+        "padding": 0.42,
+        "radius": 0.45
+      }
+    },
+    "tags": ["clipper"]
+  },
+  {
+    "id": "quote-card",
+    "name": "Quote Card",
+    "style": {
+      "font": "Playfair Display",
+      "color": "#FFFFFF",
+      "shadow": {
+        "color": "#000000",
+        "blur": 0.16,
+        "x": 0,
+        "y": 0.05,
+        "opacity": 0.6
+      }
+    },
+    "tags": ["clipper"]
+  },
+  {
+    "id": "money-green",
+    "name": "Money Green",
+    "style": {
+      "font": "Poppins",
+      "bold": true,
+      "color": "#2FD67B",
+      "uppercase": true,
+      "outline": {
+        "color": "#06230F",
+        "width": 0.09
+      }
+    },
+    "tags": ["clipper"]
+  },
+  {
+    "id": "shock-pop",
+    "name": "Shock Pop",
+    "style": {
+      "font": "Luckiest Guy",
+      "color": "#FFB627",
+      "outline": {
+        "color": "#000000",
+        "width": 0.14
+      }
+    },
+    "tags": ["clipper"]
+  },
+  {
+    "id": "orange-cut",
+    "name": "Orange Cut",
+    "style": {
+      "font": "Oswald",
+      "bold": true,
+      "color": "#141416",
+      "uppercase": true,
+      "box": {
+        "color": "#E5733A",
+        "opacity": 1,
+        "shape": "per-line",
+        "padding": 0.3,
+        "radius": 0.08
+      }
+    },
+    "tags": ["clipper"]
+  },
+  {
+    "id": "headline-blue",
+    "name": "Headline Blue",
+    "style": {
+      "font": "Barlow",
+      "bold": true,
+      "color": "#FFFFFF",
+      "uppercase": true,
+      "box": {
+        "color": "#1E5BD8",
+        "opacity": 1,
+        "shape": "rect",
+        "padding": 0.32,
+        "radius": 0.06
+      }
+    },
+    "tags": ["clipper"]
+  },
+  {
+    "id": "glitch-split",
+    "name": "Glitch Split",
+    "style": {
+      "font": "Rubik",
+      "bold": true,
+      "color": "#FFFFFF",
+      "uppercase": true,
+      "outline": {
+        "color": "#19E3FF",
+        "width": 0.03
+      },
+      "shadow": {
+        "color": "#FF2D6F",
+        "blur": 0,
+        "x": 0.07,
+        "y": 0,
+        "opacity": 1
+      }
+    },
+    "tags": ["clipper"]
+  },
+  {
+    "id": "story-time",
+    "name": "Story Time",
+    "style": {
+      "font": "Fraunces",
+      "bold": true,
+      "color": "#FFF4DC",
+      "shadow": {
+        "color": "#3A2412",
+        "blur": 0.1,
+        "x": 0,
+        "y": 0.05,
+        "opacity": 0.8
+      }
+    },
+    "tags": ["clipper"]
+  },
+  {
+    "id": "word-slam",
+    "name": "Word Slam",
+    "style": {
+      "font": "Anton",
+      "color": "#FFE14A",
+      "uppercase": true,
+      "outline": {
+        "color": "#000000",
+        "width": 0.1
+      },
+      "shadow": {
+        "color": "#000000",
+        "blur": 0,
+        "x": 0.05,
+        "y": 0.08,
+        "opacity": 1
+      }
+    },
+    "tags": ["clipper", "word-timing"]
   }
 ]

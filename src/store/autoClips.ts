@@ -31,6 +31,11 @@ import {
 import { useAiStore } from "./ai";
 import { useMediaDetailsStore } from "./mediaDetails";
 import { useProjectStore } from "./project";
+import { useTextStyleStore } from "./textStyles";
+
+/** The subtitle style Auto clips starts with on its first run (Hype Bar would need word timing). */
+export const FIRST_STYLE = "orange-cut";
+export const FIRST_STYLE_KEY = "cutvii.auto-clips.first-style";
 
 export type WizardStep = 1 | 2 | 3;
 export type JobStatus = "idle" | "running" | "ready" | "error";
@@ -161,6 +166,17 @@ export const useAutoClipsStore = create<AutoClipsState>((set, get) => {
 
     openWizard: (clipId) => {
       attach();
+      // the very first time: start with a style made for short clips, unless one was already chosen.
+      // After that the shared subtitle style simply remembers what was used last.
+      try {
+        if (!localStorage.getItem(FIRST_STYLE_KEY)) {
+          localStorage.setItem(FIRST_STYLE_KEY, "1");
+          const styles = useTextStyleStore.getState();
+          if (styles.subtitleStyleId === null) styles.setSubtitleStyle(FIRST_STYLE);
+        }
+      } catch {
+        // no storage (private mode): the default style stays
+      }
       const s = get();
       // a running search keeps its clip; otherwise a different clip starts from empty results
       const target = s.status === "running" ? s.clipId : (clipId ?? s.clipId);

@@ -23,6 +23,11 @@ pub struct ExportJob(pub Mutex<Option<Arc<AtomicBool>>>);
 #[derive(Default)]
 pub struct LastExport(pub Mutex<Option<PathBuf>>);
 
+/// The folder the user picked for a batch of clips. Kept in Rust: the webview asks for the dialog and gets
+/// the name back to show, but the path that is written to never comes from the webview.
+#[derive(Default)]
+pub struct BatchFolder(pub Mutex<Option<PathBuf>>);
+
 #[derive(Clone, Serialize)]
 struct Progress {
     fraction: f64,
@@ -193,14 +198,36 @@ pub fn batch_file_names(
     used
 }
 
-/// Export several small projects (one per clip) into a folder the user picks once. Every project is
-/// validated before the folder is asked for. Files are named from the titles and never overwrite anything.
-/// A file that fails is reported and the rest still run; cancelling keeps the files already written.
-/// Returns `None` when the folder dialog is dismissed.
+/// Ask where a batch of clips should go (native folder dialog). Returns the folder to show the user, or
+/// `None` when the dialog is dismissed. `export_clips` then writes into that folder.
+#[tauri::command]
+pub async fn choose_clips_folder(
+    app: AppHandle,
+    chosen: State<'_, BatchFolder>,
+) -> AppResult<Option<String>> {
+    let picker = app.clone();
+    let folder = tauri::async_runtime::spawn_blocking(move || {
+        picker
+            .dialog()
+            .file()
+            .blocking_pick_folder()
+            .and_then(|p| p.into_path().ok())
+    })
+    .await
+    .map_err(|e| AppError::InvalidInput(format!("folder picker failed: {e}")))?;
+    let shown = folder.as_ref().map(|f| f.to_string_lossy().into_owned());
+    *chosen.0.lock().unwrap() = folder;
+    Ok(shown)
+}
+
+/// Export several small projects (one per clip) into the folder picked with `choose_clips_folder`. Files
+/// are named from the titles and never overwrite anything. A file that fails is reported and the rest
+/// still run; cancelling keeps the files already written.
 #[tauri::command]
 pub async fn export_clips(
     app: AppHandle,
     job: State<'_, ExportJob>,
+    chosen: State<'_, BatchFolder>,
     items: Vec<BatchItem>,
     options: ExportOptions,
 ) -> AppResult<Option<BatchReport>> {
@@ -209,6 +236,12 @@ pub async fn export_clips(
             "a batch exports between 1 and {MAX_BATCH} clips"
         )));
     }
+    let folder = chosen
+        .0
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| AppError::InvalidInput("choose a folder for the clips first".into()))?;
     let cancel = Arc::new(AtomicBool::new(false));
     {
         let mut slot = job.0.lock().unwrap();
@@ -219,7 +252,7 @@ pub async fn export_clips(
         }
         *slot = Some(Arc::clone(&cancel));
     }
-    let result = run_batch(&app, items, options, cancel).await;
+    let result = run_batch(&app, items, options, folder, cancel).await;
     if let Ok(Some(report)) = &result
         && let Some(last) = report.files.iter().rev().find_map(|f| f.report.as_ref())
     {
@@ -233,6 +266,7 @@ async fn run_batch(
     app: &AppHandle,
     items: Vec<BatchItem>,
     options: ExportOptions,
+    folder: PathBuf,
     cancel: Arc<AtomicBool>,
 ) -> AppResult<Option<BatchReport>> {
     let backend = Arc::new(FfmpegBackend::locate()?);
@@ -255,20 +289,6 @@ async fn run_batch(
         .map_err(|e| AppError::InvalidInput(format!("export planning failed: {e}")))??
     };
 
-    let folder: Option<PathBuf> = {
-        let app = app.clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            app.dialog()
-                .file()
-                .blocking_pick_folder()
-                .and_then(|p| p.into_path().ok())
-        })
-        .await
-        .map_err(|e| AppError::InvalidInput(format!("folder picker failed: {e}")))?
-    };
-    let Some(folder) = folder else {
-        return Ok(None);
-    };
     if !folder.is_dir() {
         return Err(AppError::InvalidInput("that folder does not exist".into()));
     }

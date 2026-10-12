@@ -255,6 +255,7 @@ describe("exporting each clip as its own file", () => {
         drawnAt.push([a.width, a.height]);
         return `/data/text/${drawnAt.length}.png`;
       }
+      if (command === "choose_clips_folder") return "/out";
       if (command === "export_clips") {
         sent = args as Sent;
         return {
@@ -351,11 +352,17 @@ describe("exporting each clip as its own file", () => {
   });
 
   it("reports a dismissed folder dialog, a failure, and an empty selection", async () => {
-    vi.mocked(invoke).mockImplementation(async (command) => (command === "export_clips" ? null : "/t.png"));
+    // the folder is asked for first: backing out prepares and exports nothing
+    const asked: string[] = [];
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      asked.push(command);
+      return command === "choose_clips_folder" ? null : "/t.png";
+    });
     expect(await exportSelectedClips(1080, "standard")).toMatchObject({ ok: true, report: null });
+    expect(asked).toEqual(["choose_clips_folder"]);
     vi.mocked(invoke).mockImplementation(async (command) => {
       if (command === "export_clips") throw "an export is already running";
-      return "/t.png";
+      return command === "choose_clips_folder" ? "/out" : "/t.png";
     });
     expect(await exportSelectedClips(1080, "standard")).toEqual({
       ok: false,
@@ -366,5 +373,91 @@ describe("exporting each clip as its own file", () => {
       ok: false,
       reason: "Select at least one clip",
     });
+  });
+});
+
+describe("step 3 state outside the dialog", () => {
+  it("keeps a running save and its result when the wizard is closed, and blocks a second action", async () => {
+    const { useClipOutputStore } = await import("@/store/clipOutput");
+    let finish: (v: unknown) => void = () => {};
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "choose_clips_folder") return "/out";
+      if (command === "export_clips") return new Promise((resolve) => (finish = resolve));
+      return "/t.png";
+    });
+    useProjectStore.setState({ project: project(), past: [], future: [] });
+    useAutoClipsStore.setState({
+      open: true,
+      settings: { ...DEFAULT_SETTINGS, subtitles: false },
+      clips: [clip("a", 40, 52)],
+      sentences: SENTENCES,
+      context: {
+        fps: 30,
+        rangeIn: 0,
+        rangeOut: 600,
+        timelineStart: 5,
+        speed: 1,
+        path: "/m/talk.mp4",
+        video: true,
+      },
+    });
+    const out = () => useClipOutputStore.getState();
+    const running = out().exportFiles();
+    await vi.waitFor(() => expect(out().stage).toBe("Starting…"));
+    expect(out().busy).toBe("export");
+    useAutoClipsStore.getState().hide(); // closing the wizard changes nothing
+    await out().addToTimeline(); // refused while saving
+    expect(useProjectStore.getState().past).toHaveLength(0);
+    finish({
+      folder: "/out",
+      cancelled: false,
+      files: [{ title: "Title a", report: { path: "/out/a.mp4", duration: 12 } }],
+    });
+    await running;
+    expect(out()).toMatchObject({ busy: null, problem: null });
+    expect(out().done?.report.folder).toBe("/out");
+    expect(out().done?.expected).toEqual([12]);
+  });
+});
+
+describe("subtitle size for clips", () => {
+  it("uses the Auto clips size, not the size saved for Auto subtitles, and stays within its limits", async () => {
+    const { useTextStyleStore } = await import("@/store/textStyles");
+    const sizes: number[] = [];
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
+      if (command === "render_text") sizes.push((args as { spec: { fontSize: number } }).spec.fontSize);
+      if (command === "choose_clips_folder") return "/out";
+      if (command === "export_clips") return { folder: "/out", cancelled: false, files: [] };
+      return "/t.png";
+    });
+    useProjectStore.setState({ project: project(), past: [], future: [] });
+    useTextStyleStore.getState().setSubtitleSize(0.2); // huge, chosen for a wide canvas
+    const base = {
+      clips: [clip("b", 200, 206)],
+      sentences: SENTENCES,
+      context: {
+        fps: 30,
+        rangeIn: 0,
+        rangeOut: 600,
+        timelineStart: 5,
+        speed: 1,
+        path: "/m/talk.mp4",
+        video: true,
+      },
+    };
+    useAutoClipsStore.setState({ ...base, settings: DEFAULT_SETTINGS });
+    await exportSelectedClips(1080, "standard");
+    expect(sizes).toEqual([Math.round(1920 * 0.045)]); // 86 px on 1080x1920
+
+    sizes.length = 0;
+    useAutoClipsStore.getState().patchSettings({ subtitleSize: 0.03 });
+    await exportSelectedClips(1080, "standard");
+    expect(sizes).toEqual([Math.round(1920 * 0.03)]);
+
+    sizes.length = 0;
+    useAutoClipsStore.getState().patchSettings({ subtitleSize: 5 });
+    await exportSelectedClips(1080, "standard");
+    expect(sizes).toEqual([Math.round(1920 * 0.1)]);
+    useTextStyleStore.getState().reset();
   });
 });

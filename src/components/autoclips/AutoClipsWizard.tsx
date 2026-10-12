@@ -1,15 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { Check, Scissors, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { cn } from "@/lib/utils";
 import { useAutoClipsStore, usableModel, type WizardStep } from "@/store/autoClips";
 import { useAiStore } from "@/store/ai";
-import { useProjectStore } from "@/store/project";
 import { useUiStore } from "@/store/ui";
-import { createClipsInProject } from "@/timeline/createClips";
-import { lengthRange, OUTPUTS } from "@/timeline/autoClips";
-import { ExportClips } from "./ExportClips";
+import { lengthRange } from "@/timeline/autoClips";
+import { CreateStep } from "./CreateStep";
 import { ReviewStep } from "./ReviewStep";
 import { SettingsStep } from "./SettingsStep";
 
@@ -44,84 +42,6 @@ function Progress() {
       <p className="text-xs text-text-muted">
         You can close this window and keep editing. The AI tab shows “Clips ready” when it is done.
       </p>
-    </div>
-  );
-}
-
-const SHAPE: Record<string, number | null> = { vertical: 9 / 16, square: 1, keep: null };
-
-/** Step 3: put the chosen clips on the timeline, as one step that can be undone. */
-function CreateStep() {
-  const count = useAutoClipsStore((s) => s.clips.filter((c) => c.included).length);
-  const settings = useAutoClipsStore((s) => s.settings);
-  const width = useProjectStore((s) => s.project.settings.width);
-  const height = useProjectStore((s) => s.project.settings.height);
-  const [stage, setStage] = useState<string | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
-  const output = OUTPUTS.find((o) => o.id === settings.output)!;
-  const wanted = SHAPE[settings.output];
-  const canvasDiffers = wanted !== null && Math.abs(width / height - wanted) > 0.01;
-
-  async function create() {
-    setProblem(null);
-    setStage("Preparing…");
-    const result = await createClipsInProject(setStage);
-    setStage(null);
-    if (!result.ok) return setProblem(result.reason);
-    const n = result.clipIds.length;
-    useAutoClipsStore.getState().hide();
-    useUiStore
-      .getState()
-      .setNotice(
-        `Created ${n} clip${n === 1 ? "" : "s"} at the end of the timeline${result.subtitles > 0 ? `, with ${result.subtitles} subtitles` : ""}. They are selected; Undo removes them all.`,
-      );
-  }
-
-  return (
-    <div className="mx-auto max-w-md space-y-4 py-6 text-sm">
-      <p>
-        {count} clip{count === 1 ? "" : "s"} selected · {output.label} ·{" "}
-        {settings.subtitles ? "with subtitles" : "no subtitles"}
-      </p>
-      <fieldset className="space-y-2">
-        <legend className="mb-1 text-xs font-medium text-text-muted">Where</legend>
-        <label className="flex min-h-9 items-start gap-2 pointer-coarse:min-h-11">
-          <input type="radio" className="mt-1 accent-[var(--accent)]" checked readOnly />
-          <span>
-            Add to this project
-            <span className="block text-xs text-text-muted">
-              On new tracks, one after another, after everything already on the timeline. Nothing existing is
-              moved and your original video is not changed.
-            </span>
-          </span>
-        </label>
-        <p aria-disabled className="flex items-center gap-2 pl-6 text-text-muted opacity-70">
-          New project per clip
-          <span className="rounded-sm bg-surface-2 px-1.5 py-0.5 text-[10px]">Coming soon</span>
-        </p>
-      </fieldset>
-      {canvasDiffers && (
-        <p className="rounded-md border border-border px-3 py-2 text-xs text-text-muted">
-          This project's canvas is {width}×{height}, not {output.label}. The clips fill the canvas as it is;
-          to get {output.label}, change the canvas from the top bar (before or after creating).
-        </p>
-      )}
-      {stage ? (
-        <p role="status" className="text-text-muted">
-          {stage}
-        </p>
-      ) : (
-        <Button disabled={count === 0} className="pointer-coarse:h-11" onClick={() => void create()}>
-          Create {count} clip{count === 1 ? "" : "s"}
-        </Button>
-      )}
-      {problem && (
-        <p role="alert" className="rounded-md border border-danger/50 px-3 py-2 text-danger">
-          {problem}
-        </p>
-      )}
-      <p className="text-xs text-text-muted">One step: Undo (Ctrl/⌘ Z) removes all the created clips.</p>
-      <ExportClips />
     </div>
   );
 }

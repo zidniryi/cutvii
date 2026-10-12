@@ -7,6 +7,7 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { cn } from "@/lib/utils";
 import type { StylePreset } from "@/project/model";
 import { isBuiltIn, orderedStyles, useTextStyleStore } from "@/store/textStyles";
+import { CLIPPER_TAG, hasTag, styleLimit } from "@/timeline/textStyles";
 
 /** How many styles a list shows before "Show more". */
 export const VISIBLE_STYLES = 6;
@@ -126,6 +127,7 @@ export function StyleCard({
   disabled?: boolean;
 }) {
   const [menu, setMenu] = useState(false);
+  const limit = styleLimit(preset);
   return (
     <div
       data-style-id={preset.id}
@@ -138,7 +140,7 @@ export function StyleCard({
         type="button"
         aria-label={preset.name}
         aria-pressed={selected}
-        title={preset.name}
+        title={limit ? `${preset.name}. ${limit}` : preset.name}
         disabled={disabled}
         onClick={onSelect}
         className="block w-full overflow-hidden rounded-md text-left focus-visible:outline-accent disabled:opacity-60"
@@ -148,6 +150,11 @@ export function StyleCard({
           <span className="min-w-0 flex-1 truncate">{preset.name}</span>
           {!isBuiltIn(preset.id) && (
             <span className="shrink-0 rounded-sm bg-surface-1 px-1 text-[9px]">Mine</span>
+          )}
+          {limit && (
+            <span className="shrink-0 rounded-sm bg-surface-1 px-1 text-[9px]" aria-label={limit}>
+              Plain for now
+            </span>
           )}
         </span>
       </button>
@@ -242,6 +249,7 @@ function StylePicker({
   const wide = useMediaQuery("(min-width: 1024px)");
   const [query, setQuery] = useState("");
   const [mineOnly, setMineOnly] = useState(false);
+  const [clipsOnly, setClipsOnly] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   useFocusTrap(rootRef, searchRef);
@@ -256,7 +264,12 @@ function StylePicker({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
   const q = query.trim().toLowerCase();
-  const shown = styles.filter((p) => p.name.toLowerCase().includes(q) && (!mineOnly || !isBuiltIn(p.id)));
+  const shown = styles.filter(
+    (p) =>
+      p.name.toLowerCase().includes(q) &&
+      (!mineOnly || !isBuiltIn(p.id)) &&
+      (!clipsOnly || hasTag(p, CLIPPER_TAG)),
+  );
 
   return (
     <div
@@ -301,6 +314,17 @@ function StylePicker({
             )}
           >
             My styles
+          </button>
+          <button
+            type="button"
+            aria-pressed={clipsOnly}
+            onClick={() => setClipsOnly((on) => !on)}
+            className={cn(
+              "h-9 rounded-md border px-3 text-xs pointer-coarse:h-11",
+              clipsOnly ? "border-accent bg-accent-soft text-text" : "text-text-muted hover:text-text",
+            )}
+          >
+            Good for short clips
           </button>
           <button
             type="button"

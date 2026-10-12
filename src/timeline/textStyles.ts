@@ -48,4 +48,15 @@ export function matchesStyle(spec: TextSpec, style: TextStyle): boolean {
   );
 }
 
+/** Tag of the styles made for short vertical clips. */
+export const CLIPPER_TAG = "clipper";
+/** Tag of the styles designed around per-word timing, which CutVii does not have yet. */
+export const WORD_TIMING_TAG = "word-timing";
+export const hasTag = (preset: Pick<StylePreset, "tags">, tag: string) => preset.tags?.includes(tag) === true;
+/** Why a style does less than its design, or null: without word times it shows plain captions. */
+export const styleLimit = (preset: Pick<StylePreset, "tags">): string | null =>
+  hasTag(preset, WORD_TIMING_TAG)
+    ? "Word-by-word highlight is not available yet: this style shows plain captions."
+    : null;
+
 export const findStyle = (id: string) => STYLE_PRESETS.find((p) => p.id === id);

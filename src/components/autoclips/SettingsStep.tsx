@@ -15,6 +15,7 @@ import {
 } from "@/timeline/autoClips";
 import { StyleList } from "@/components/text/StyleList";
 import { StylePreview } from "@/components/text/StylePreview";
+import { SubtitleSize } from "./SubtitleSize";
 
 const chip = (on: boolean) =>
   cn(
@@ -246,6 +247,7 @@ export function SettingsStep() {
             />
             Add subtitles to each clip
           </label>
+          {settings.subtitles && <SubtitleSize disabled={running} />}
           {settings.subtitles && (
             <div className="grid gap-2 sm:grid-cols-[12rem_1fr]">
               <div>

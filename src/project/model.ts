@@ -159,6 +159,8 @@ export const StylePresetSchema = z
     style: TextStyleSchema,
     /** Seconds the text fades in and out over, when the style calls for it. */
     fade: z.number().min(0).max(5).optional(),
+    /** What the style is good for ("clipper" = short vertical clips; "word-timing" = wants per-word times). */
+    tags: z.array(z.string().min(1).max(40)).max(10).optional(),
   })
   .strict();
 

@@ -13,20 +13,35 @@ import { usePlaybackStore } from "@/store/playback";
 import { useProjectStore } from "@/store/project";
 import { useSelectionStore } from "@/store/selection";
 import { DEFAULT_STYLE, subtitleStyleOf, useTextStyleStore } from "@/store/textStyles";
-import { sortedClips, wordsOf, type FoundClip, type OutputShape, type TranscriptSentence } from "./autoClips";
+import {
+  sortedClips,
+  wordsOf,
+  type FoundClip,
+  type OutputShape,
+  type TranscriptSentence,
+  CLIP_SUBTITLE_SIZE,
+} from "./autoClips";
 import { projectDuration } from "./clips";
 import { addClip, addTrack, type EditResult } from "./edit";
 import {
   addSubtitleClips,
   MIN_SUBTITLE_SECONDS,
-  SUBTITLE_FONT_SHARE,
   subtitleSpec,
   subtitleWrap,
   type DrawnSubtitle,
   type Subtitle,
 } from "./subtitles";
-import { DEFAULT_SUBTITLE_POSITION } from "./textPosition";
+import type { Position } from "./textPosition";
 import { withStyle } from "./textStyles";
+
+/** Share of the canvas width a clip's subtitles may take when the picture fills it. */
+export const CLIP_SUBTITLE_WRAP = 0.8;
+
+/**
+ * Where a clip's subtitles go unless the user chose a place: a little higher than ordinary subtitles, so a
+ * three-line caption with a box still ends above the 5 % safe margin of a vertical video.
+ */
+export const CLIP_SUBTITLE_POSITION: Position = { x: 0.5, y: 0.8 };
 
 /** A subtitle shows at most this many words, so it stays readable on a phone. */
 export const SUBTITLE_WORDS = 7;
@@ -156,16 +171,22 @@ async function drawSubtitles(
   asset: MediaAsset,
   video: boolean,
   output: OutputShape,
+  /** Font size as a share of the canvas height. */
+  size: number,
   onLine: (n: number) => void,
 ): Promise<DrawnSubtitle[]> {
   const styles = useTextStyleStore.getState();
   const subtitle = subtitleStyleOf(styles);
   const look = subtitle.id === DEFAULT_STYLE && !subtitle.customised ? undefined : subtitle;
-  const at = styles.subtitlePosition ?? DEFAULT_SUBTITLE_POSITION;
-  const share = styles.subtitleSize ?? SUBTITLE_FONT_SHARE;
+  const at = styles.subtitlePosition ?? CLIP_SUBTITLE_POSITION;
+  // the clips' own size: the size chosen for Auto subtitles was picked for another canvas shape
+  const share = Math.min(CLIP_SUBTITLE_SIZE.max, Math.max(CLIP_SUBTITLE_SIZE.min, size));
   const { width, height } = canvas;
   const fit = video && output !== "keep" ? { fitMode: "fill" as const } : {};
-  const wrap = video ? subtitleWrap({ ...fit } as TimelineClip, asset, width, height) : undefined;
+  // a little narrower than the canvas, so thick outlines and boxes stay inside the 5 % safe margin
+  const wrap =
+    (video ? subtitleWrap({ ...fit } as TimelineClip, asset, width, height) : undefined) ??
+    CLIP_SUBTITLE_WRAP;
   const drawn: DrawnSubtitle[] = [];
   for (const [i, line] of lines.entries()) {
     onLine(i + 1);
@@ -216,8 +237,14 @@ export async function createClipsInProject(
   if (auto.settings.subtitles) {
     const lines = placed.flatMap((p) => subtitlesForPlaced(p, auto.sentences));
     try {
-      drawn = await drawSubtitles(lines, project.settings, asset, ctx.video, auto.settings.output, (i) =>
-        onStage(`Drawing subtitle ${i} of ${lines.length}`),
+      drawn = await drawSubtitles(
+        lines,
+        project.settings,
+        asset,
+        ctx.video,
+        auto.settings.output,
+        auto.settings.subtitleSize,
+        (i) => onStage(`Drawing subtitle ${i} of ${lines.length}`),
       );
     } catch (e) {
       return { ok: false, reason: `Could not draw the subtitles: ${message(e)}` };
@@ -332,6 +359,14 @@ export async function exportSelectedClips(
       ok: false,
       reason: "The original media is no longer in the project. Import or relink it first.",
     };
+  // the folder first: nothing is prepared for an export the user backs out of
+  let folder: string | null;
+  try {
+    folder = (await invoke<string | null>("choose_clips_folder")) ?? null;
+  } catch (e) {
+    return { ok: false, reason: message(e) };
+  }
+  if (!folder) return { ok: true, report: null, expected: [] };
   const output = ctx.video ? auto.settings.output : "keep";
   const canvas = exportCanvas(output, size, project.settings);
   const items: { title: string; project: Project }[] = [];
@@ -344,7 +379,15 @@ export async function exportSelectedClips(
             auto.sentences,
           )
         : [];
-      const drawn = await drawSubtitles(lines, canvas, asset, ctx.video, output, () => {});
+      const drawn = await drawSubtitles(
+        lines,
+        canvas,
+        asset,
+        ctx.video,
+        output,
+        auto.settings.subtitleSize,
+        () => {},
+      );
       const built = clipProject(project, asset, clip, drawn, canvas, output, !ctx.video);
       if (!built.ok) return { ok: false, reason: built.error.message };
       items.push({ title: clip.title, project: built.project });
@@ -358,7 +401,7 @@ export async function exportSelectedClips(
     quality,
     format: ctx.video ? "mp4" : "m4a",
   };
-  onStage("Choose a folder…");
+  onStage("Starting…");
   try {
     const report = await invoke<BatchReport | null>("export_clips", { items, options });
     return { ok: true, report: report ?? null, expected: chosen.map((c) => c.sourceOut - c.sourceIn) };

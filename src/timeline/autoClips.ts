@@ -41,6 +41,8 @@ export interface AutoClipsSettings {
   output: OutputShape;
   /** Burn the subtitle style in when the clips are created (step 3). */
   subtitles: boolean;
+  /** Subtitle font size as a share of the canvas height. */
+  subtitleSize: number;
 }
 
 export const DEFAULT_SETTINGS: AutoClipsSettings = {
@@ -52,7 +54,11 @@ export const DEFAULT_SETTINGS: AutoClipsSettings = {
   model: null,
   output: "vertical",
   subtitles: true,
+  subtitleSize: 0.045,
 };
+
+/** Subtitle size for clips, as a share of the canvas height: 4.5 % is about 86 px on a 1080×1920 video. */
+export const CLIP_SUBTITLE_SIZE = { min: 0.02, max: 0.1, default: 0.045 } as const;
 
 export const COUNT_CHOICES: (number | null)[] = [null, 3, 5, 10];
 

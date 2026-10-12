@@ -5,6 +5,7 @@ import { FileMenu } from "@/components/FileMenu";
 import { IconButton } from "@/components/IconButton";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
+import { useClipOutputStore } from "@/store/clipOutput";
 import { useExportStore } from "@/store/export";
 import { projectDuration } from "@/timeline/clips";
 import { fileName } from "@/lib/media";
@@ -23,6 +24,7 @@ export function TopBar() {
   const saving = useUiStore((s) => s.saving);
   const hasContent = useProjectStore((s) => projectDuration(s.project) > 0);
   const openExport = useExportStore((s) => s.open);
+  const savingClips = useClipOutputStore((s) => s.busy === "export");
   const filePath = useProjectStore((s) => s.filePath);
   const canRedo = useProjectStore(selectCanRedo);
   const undoLabel = useProjectStore((s) => s.past[s.past.length - 1]?.label);
@@ -68,8 +70,14 @@ export function TopBar() {
                 : "New project"}
         </span>
         <Button
-          disabled={!hasContent}
-          title={hasContent ? "Export video" : "Add clips to the timeline to export"}
+          disabled={!hasContent || savingClips}
+          title={
+            savingClips
+              ? "Clips are being saved (AI menu shows the progress); export when that is done"
+              : hasContent
+                ? "Export video"
+                : "Add clips to the timeline to export"
+          }
           className="pointer-coarse:h-11"
           onClick={openExport}
         >

@@ -800,6 +800,9 @@ pub struct StylePreset {
     /// Seconds the text fades in and out over, when the style calls for it.
     #[serde(default)]
     pub fade: f64,
+    /// What the style is good for ("clipper", "word-timing"). Absent in older files and own styles.
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 #[cfg(test)]
@@ -1256,19 +1259,75 @@ mod tests {
     }
 
     #[test]
+    fn the_ten_short_clip_styles_are_tagged_and_stay_inside_the_safe_zone_on_a_vertical_canvas() {
+        shipped_fonts();
+        let presets = style_presets().unwrap();
+        let clipper: Vec<&StylePreset> = presets
+            .iter()
+            .filter(|p| p.tags.iter().any(|t| t == "clipper"))
+            .collect();
+        assert_eq!(clipper.len(), 10);
+        assert_eq!(clipper[0].id, "hype-bar");
+        assert_eq!(clipper[9].id, "word-slam");
+        // the first 21 carry no tags, and an older file without the field still loads
+        assert!(presets[..21].iter().all(|p| p.tags.is_empty()));
+        let timed: Vec<&str> = presets
+            .iter()
+            .filter(|p| p.tags.iter().any(|t| t == "word-timing"))
+            .map(|p| p.id.as_str())
+            .collect();
+        assert_eq!(timed, ["hype-bar", "word-slam"]);
+
+        // the longest line Auto clips makes (seven words), at the place Auto clips puts subtitles on 1080x1920 and
+        // wrapped the way Auto clips wraps it: nothing within 5 % of an edge
+        let (w, h) = (1080u32, 1920u32);
+        for preset in clipper {
+            let mut s = spec("Why does this simple habit work so");
+            s.wrap = Some(0.8);
+            s.font_size = (h as f64 * 0.045).round();
+            s.x = 0.5;
+            s.y = 0.8;
+            let picture = render(&preset.style.on(&s), w, h).unwrap();
+            let painted: Vec<(u32, u32)> = (0..h)
+                .flat_map(|y| (0..w).map(move |x| (x, y)))
+                .filter(|(x, y)| picture[((y * w + x) * 4 + 3) as usize] > 0)
+                .collect();
+            assert!(!painted.is_empty(), "{} draws", preset.id);
+            let (x0, x1) = (
+                painted.iter().map(|p| p.0).min().unwrap(),
+                painted.iter().map(|p| p.0).max().unwrap(),
+            );
+            let (y0, y1) = (
+                painted.iter().map(|p| p.1).min().unwrap(),
+                painted.iter().map(|p| p.1).max().unwrap(),
+            );
+            let (mx, my) = ((w as f64 * 0.05) as u32, (h as f64 * 0.05) as u32);
+            assert!(
+                x0 >= mx && x1 <= w - mx && y0 >= my && y1 <= h - my,
+                "{}: ink {x0}..{x1} x {y0}..{y1} leaves the safe zone",
+                preset.id
+            );
+        }
+    }
+
+    #[test]
     fn all_style_presets_are_valid_and_each_draws_its_own_look() {
         shipped_fonts();
         let presets = style_presets().unwrap();
         let ids: Vec<&str> = presets.iter().map(|p| p.id.as_str()).collect();
-        assert_eq!(ids.len(), 21, "eleven first styles and ten more");
+        assert_eq!(
+            ids.len(),
+            31,
+            "eleven first styles, ten more, ten for short clips"
+        );
         assert_eq!(&ids[..3], ["clean-caption", "two-tone", "outline-pop"]);
         assert_eq!(
             ids.iter().collect::<HashSet<_>>().len(),
-            21,
+            31,
             "every id is its own"
         );
         let names: HashSet<&str> = presets.iter().map(|p| p.name.as_str()).collect();
-        assert_eq!(names.len(), 21, "and so is every name");
+        assert_eq!(names.len(), 31, "and so is every name");
         let installed: Vec<String> = list_fonts().into_iter().map(|f| f.family).collect();
         let dir = std::env::temp_dir().join(format!("cutvii-styles-{}", std::process::id()));
         let mut pictures = Vec::new();
