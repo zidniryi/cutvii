@@ -9,6 +9,9 @@ import { DEFAULT_SETTINGS, type ReviewClip, type TranscriptSentence } from "./au
 import { projectDuration } from "./clips";
 import {
   addAutoClips,
+  clipProject,
+  exportCanvas,
+  exportSelectedClips,
   createClipsInProject,
   placeClips,
   SUBTITLE_WORDS,
@@ -235,6 +238,133 @@ describe("creating from the review", () => {
     expect(await createClipsInProject()).toMatchObject({
       ok: false,
       reason: expect.stringMatching(/no longer in the project/),
+    });
+  });
+});
+
+describe("exporting each clip as its own file", () => {
+  type Sent = { items: { title: string; project: Project }[]; options: Record<string, unknown> };
+  let sent: Sent | null = null;
+  const drawnAt: [number, number][] = [];
+  beforeEach(() => {
+    sent = null;
+    drawnAt.length = 0;
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
+      if (command === "render_text") {
+        const a = args as { width: number; height: number };
+        drawnAt.push([a.width, a.height]);
+        return `/data/text/${drawnAt.length}.png`;
+      }
+      if (command === "export_clips") {
+        sent = args as Sent;
+        return {
+          folder: "/out",
+          cancelled: false,
+          files: sent.items.map((item) => ({
+            title: item.title,
+            report: { path: `/out/${item.title}.mp4`, duration: projectDuration(item.project) },
+          })),
+        };
+      }
+      return undefined;
+    });
+    useProjectStore.setState({ project: project(), past: [], future: [] });
+    useAutoClipsStore.setState({
+      clipId: "talk",
+      settings: DEFAULT_SETTINGS,
+      status: "ready",
+      clips: [clip("b", 200, 206), clip("a", 40, 52), clip("c", 300, 305, false)],
+      sentences: SENTENCES,
+      context: {
+        fps: 30,
+        rangeIn: 0,
+        rangeOut: 600,
+        timelineStart: 5,
+        speed: 1,
+        path: "/m/talk.mp4",
+        video: true,
+      },
+    });
+  });
+
+  it("sizes the canvas for the chosen shape, always with even numbers", () => {
+    const p = { width: 1920, height: 1080 };
+    expect(exportCanvas("vertical", 1080, p)).toEqual({ width: 1080, height: 1920 });
+    expect(exportCanvas("vertical", 720, p)).toEqual({ width: 720, height: 1280 });
+    expect(exportCanvas("square", 720, p)).toEqual({ width: 720, height: 720 });
+    expect(exportCanvas("keep", 720, p)).toEqual({ width: 1280, height: 720 });
+    const odd = exportCanvas("keep", 720, { width: 1000, height: 333 });
+    expect(odd.width % 2 === 0 && odd.height % 2 === 0).toBe(true);
+  });
+
+  it("builds a valid one-clip project that starts at 0 and lasts exactly as long as the clip", () => {
+    const p = project();
+    const asset = p.assets.find((a) => a.id === "long")!;
+    const r = clipProject(
+      p,
+      asset,
+      { title: "Hook", sourceIn: 40, sourceOut: 52.5 },
+      [],
+      { width: 1080, height: 1920 },
+      "vertical",
+      false,
+    );
+    if (!r.ok) throw new Error(r.error.message);
+    expectValid(r.project);
+    expect(r.project.name).toBe("Hook");
+    expect(r.project.settings).toMatchObject({ width: 1080, height: 1920, fps: 30 });
+    expect(r.project.assets).toEqual([asset]);
+    expect(r.project.tracks).toHaveLength(1);
+    expect(r.project.tracks[0].clips).toMatchObject([
+      { timelineStart: 0, sourceIn: 40, sourceOut: 52.5, fitMode: "fill" },
+    ]);
+    expect(projectDuration(r.project)).toBe(12.5);
+  });
+
+  it("sends one project per included clip, in spoken order, with subtitles drawn for the export canvas", async () => {
+    const before = useProjectStore.getState().project;
+    const result = await exportSelectedClips(720, "high");
+    if (!result.ok) throw new Error(result.reason);
+    expect(sent!.options).toEqual({ width: 720, height: 1280, fps: 30, quality: "high", format: "mp4" });
+    expect(sent!.items.map((i) => i.title)).toEqual(["Title a", "Title b"]);
+    for (const item of sent!.items) expectValid(item.project);
+    expect(sent!.items.map((i) => projectDuration(i.project))).toEqual([12, 6]);
+    // subtitles: 3 lines for "a", 1 for "b", each inside its own clip, drawn at the export size
+    expect(drawnAt).toEqual([
+      [720, 1280],
+      [720, 1280],
+      [720, 1280],
+      [720, 1280],
+    ]);
+    const subs = sent!.items.map((i) => [...i.project.tracks].sort((x, y) => y.order - x.order)[0].clips);
+    expect(subs.map((s) => s.length)).toEqual([3, 1]);
+    expect(subs[1][0].timelineStart).toBeGreaterThanOrEqual(0);
+    expect(subs[1][0].timelineStart + (subs[1][0].sourceOut - subs[1][0].sourceIn)).toBeLessThanOrEqual(
+      6 + 1e-6,
+    );
+    // what the files should last, to hold against FFprobe's answer
+    expect(result.expected).toEqual([12, 6]);
+    expect(result.report?.files.map((f) => f.report?.duration)).toEqual([12, 6]);
+    // exporting never touches the open project
+    expect(useProjectStore.getState().project).toBe(before);
+    expect(useProjectStore.getState().past).toHaveLength(0);
+  });
+
+  it("reports a dismissed folder dialog, a failure, and an empty selection", async () => {
+    vi.mocked(invoke).mockImplementation(async (command) => (command === "export_clips" ? null : "/t.png"));
+    expect(await exportSelectedClips(1080, "standard")).toMatchObject({ ok: true, report: null });
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "export_clips") throw "an export is already running";
+      return "/t.png";
+    });
+    expect(await exportSelectedClips(1080, "standard")).toEqual({
+      ok: false,
+      reason: "an export is already running",
+    });
+    useAutoClipsStore.getState().setAllIncluded(false);
+    expect(await exportSelectedClips(1080, "standard")).toMatchObject({
+      ok: false,
+      reason: "Select at least one clip",
     });
   });
 });

@@ -9,6 +9,7 @@ import { useProjectStore } from "@/store/project";
 import { useUiStore } from "@/store/ui";
 import { createClipsInProject } from "@/timeline/createClips";
 import { lengthRange, OUTPUTS } from "@/timeline/autoClips";
+import { ExportClips } from "./ExportClips";
 import { ReviewStep } from "./ReviewStep";
 import { SettingsStep } from "./SettingsStep";
 
@@ -120,6 +121,7 @@ function CreateStep() {
         </p>
       )}
       <p className="text-xs text-text-muted">One step: Undo (Ctrl/⌘ Z) removes all the created clips.</p>
+      <ExportClips />
     </div>
   );
 }

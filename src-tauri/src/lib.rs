@@ -32,6 +32,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::export::export_project,
             commands::export::cancel_export,
+            commands::export::export_clips,
             commands::export::reveal_last_export,
             commands::drop::import_dropped_file,
             commands::clip_tools::prepare_reverse_preview,

@@ -4,7 +4,10 @@
  * timeline (so nothing existing moves), and the whole batch is ONE undoable step.
  */
 import { invoke } from "@tauri-apps/api/core";
-import type { Project, TimelineClip } from "@/project/model";
+import { createProject } from "@/project/factory";
+import type { MediaAsset, Project, TimelineClip } from "@/project/model";
+import type { ExportOptions, Quality } from "@/export/options";
+import type { ExportReport } from "@/lib/exportApi";
 import { useAutoClipsStore } from "@/store/autoClips";
 import { usePlaybackStore } from "@/store/playback";
 import { useProjectStore } from "@/store/project";
@@ -146,6 +149,41 @@ export function addAutoClips(
 const message = (e: unknown) =>
   typeof e === "string" ? e : e instanceof Error ? e.message : "unknown error";
 
+/** Draw subtitle lines for a canvas, in the shared subtitle style (the same look Auto subtitles uses). */
+async function drawSubtitles(
+  lines: Subtitle[],
+  canvas: { width: number; height: number },
+  asset: MediaAsset,
+  video: boolean,
+  output: OutputShape,
+  onLine: (n: number) => void,
+): Promise<DrawnSubtitle[]> {
+  const styles = useTextStyleStore.getState();
+  const subtitle = subtitleStyleOf(styles);
+  const look = subtitle.id === DEFAULT_STYLE && !subtitle.customised ? undefined : subtitle;
+  const at = styles.subtitlePosition ?? DEFAULT_SUBTITLE_POSITION;
+  const share = styles.subtitleSize ?? SUBTITLE_FONT_SHARE;
+  const { width, height } = canvas;
+  const fit = video && output !== "keep" ? { fitMode: "fill" as const } : {};
+  const wrap = video ? subtitleWrap({ ...fit } as TimelineClip, asset, width, height) : undefined;
+  const drawn: DrawnSubtitle[] = [];
+  for (const [i, line] of lines.entries()) {
+    onLine(i + 1);
+    const plain = subtitleSpec(line.text, height, at, share, wrap);
+    const spec = look ? withStyle(plain, look.style) : plain;
+    const picture = await invoke<string>("render_text", { spec, width, height });
+    drawn.push({
+      ...line,
+      spec,
+      picture,
+      assetId: crypto.randomUUID(),
+      clipId: crypto.randomUUID(),
+      fade: look?.fade,
+    });
+  }
+  return drawn;
+}
+
 export type CreateResult = { ok: true; clipIds: string[]; subtitles: number } | { ok: false; reason: string };
 
 /**
@@ -174,32 +212,13 @@ export async function createClipsInProject(
     chosen,
     chosen.map(() => crypto.randomUUID()),
   );
-  const drawn: DrawnSubtitle[] = [];
+  let drawn: DrawnSubtitle[] = [];
   if (auto.settings.subtitles) {
-    const styles = useTextStyleStore.getState();
-    const subtitle = subtitleStyleOf(styles);
-    const look = subtitle.id === DEFAULT_STYLE && !subtitle.customised ? undefined : subtitle;
-    const at = styles.subtitlePosition ?? DEFAULT_SUBTITLE_POSITION;
-    const share = styles.subtitleSize ?? SUBTITLE_FONT_SHARE;
-    const { width, height } = project.settings;
-    const fit = ctx.video && auto.settings.output !== "keep" ? { fitMode: "fill" as const } : {};
-    const wrap = ctx.video ? subtitleWrap({ ...fit } as TimelineClip, asset, width, height) : undefined;
     const lines = placed.flatMap((p) => subtitlesForPlaced(p, auto.sentences));
     try {
-      for (const [i, line] of lines.entries()) {
-        onStage(`Drawing subtitle ${i + 1} of ${lines.length}`);
-        const plain = subtitleSpec(line.text, height, at, share, wrap);
-        const spec = look ? withStyle(plain, look.style) : plain;
-        const picture = await invoke<string>("render_text", { spec, width, height });
-        drawn.push({
-          ...line,
-          spec,
-          picture,
-          assetId: crypto.randomUUID(),
-          clipId: crypto.randomUUID(),
-          fade: look?.fade,
-        });
-      }
+      drawn = await drawSubtitles(lines, project.settings, asset, ctx.video, auto.settings.output, (i) =>
+        onStage(`Drawing subtitle ${i} of ${lines.length}`),
+      );
     } catch (e) {
       return { ok: false, reason: `Could not draw the subtitles: ${message(e)}` };
     }
@@ -216,4 +235,134 @@ export async function createClipsInProject(
   useSelectionStore.getState().setSelection(clipIds);
   usePlaybackStore.getState().setPlayhead(placed[0].start);
   return { ok: true, clipIds, subtitles: drawn.length };
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Export each clip as its own file
+// ---------------------------------------------------------------------------------------------------
+
+/** Export sizes on offer: the short side of the picture. */
+export const EXPORT_SIZES = [1080, 720] as const;
+export type ExportSize = (typeof EXPORT_SIZES)[number];
+
+const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
+
+/** The canvas a clip is exported on: 9:16, 1:1, or the project's own shape, `size` on the short side. */
+export function exportCanvas(
+  output: OutputShape,
+  size: ExportSize,
+  project: Pick<Project["settings"], "width" | "height">,
+): { width: number; height: number } {
+  if (output === "vertical") return { width: size, height: even((size * 16) / 9) };
+  if (output === "square") return { width: size, height: size };
+  const scale = size / Math.min(project.width, project.height);
+  return { width: even(project.width * scale), height: even(project.height * scale) };
+}
+
+/**
+ * A small project holding just one clip from 0 (and its subtitles), on the export canvas. It is never
+ * opened or saved: it only tells the exporter what to render.
+ */
+export function clipProject(
+  source: Project,
+  asset: MediaAsset,
+  clip: Pick<FoundClip, "title" | "sourceIn" | "sourceOut">,
+  subtitles: DrawnSubtitle[],
+  canvas: { width: number; height: number },
+  output: OutputShape,
+  soundOnly: boolean,
+): EditResult {
+  const base = createProject(clip.title || "Clip", {
+    ...canvas,
+    fps: source.settings.fps,
+    backgroundColor: source.settings.backgroundColor,
+  });
+  const placed: PlacedClip = {
+    id: crypto.randomUUID(),
+    title: clip.title,
+    sourceIn: clip.sourceIn,
+    sourceOut: clip.sourceOut,
+    start: 0,
+  };
+  return addAutoClips(
+    { ...base, tracks: [], assets: [asset] },
+    asset.id,
+    [placed],
+    subtitles,
+    output,
+    { clipTrack: crypto.randomUUID(), subtitleTrack: crypto.randomUUID() },
+    soundOnly,
+  );
+}
+
+export interface BatchFile {
+  title: string;
+  report?: ExportReport;
+  error?: string;
+}
+export interface BatchReport {
+  folder: string;
+  files: BatchFile[];
+  cancelled: boolean;
+}
+export type ExportClipsResult =
+  { ok: true; report: BatchReport | null; expected: number[] } | { ok: false; reason: string };
+
+/**
+ * Export every included clip as its own MP4. Rust asks for the folder once, names the files from the titles
+ * and never overwrites. `expected` holds each clip's length, to compare with what FFprobe measured.
+ * Resolves with `report: null` when the folder dialog was dismissed. The open project is not changed.
+ */
+export async function exportSelectedClips(
+  size: ExportSize,
+  quality: Quality,
+  onStage: (stage: string) => void = () => {},
+): Promise<ExportClipsResult> {
+  const auto = useAutoClipsStore.getState();
+  const ctx = auto.context;
+  const chosen = sortedClips(
+    auto.clips.filter((c) => c.included),
+    "time",
+  );
+  if (!ctx || chosen.length === 0) return { ok: false, reason: "Select at least one clip" };
+  const project = useProjectStore.getState().project;
+  const asset = project.assets.find((a) => a.path === ctx.path);
+  if (!asset)
+    return {
+      ok: false,
+      reason: "The original media is no longer in the project. Import or relink it first.",
+    };
+  const output = ctx.video ? auto.settings.output : "keep";
+  const canvas = exportCanvas(output, size, project.settings);
+  const items: { title: string; project: Project }[] = [];
+  try {
+    for (const [i, clip] of chosen.entries()) {
+      onStage(`Preparing clip ${i + 1} of ${chosen.length}`);
+      const lines = auto.settings.subtitles
+        ? subtitlesForPlaced(
+            { id: "", title: clip.title, sourceIn: clip.sourceIn, sourceOut: clip.sourceOut, start: 0 },
+            auto.sentences,
+          )
+        : [];
+      const drawn = await drawSubtitles(lines, canvas, asset, ctx.video, output, () => {});
+      const built = clipProject(project, asset, clip, drawn, canvas, output, !ctx.video);
+      if (!built.ok) return { ok: false, reason: built.error.message };
+      items.push({ title: clip.title, project: built.project });
+    }
+  } catch (e) {
+    return { ok: false, reason: `Could not draw the subtitles: ${message(e)}` };
+  }
+  const options: ExportOptions = {
+    ...canvas,
+    fps: project.settings.fps,
+    quality,
+    format: ctx.video ? "mp4" : "m4a",
+  };
+  onStage("Choose a folder…");
+  try {
+    const report = await invoke<BatchReport | null>("export_clips", { items, options });
+    return { ok: true, report: report ?? null, expected: chosen.map((c) => c.sourceOut - c.sourceIn) };
+  } catch (e) {
+    return { ok: false, reason: message(e) };
+  }
 }

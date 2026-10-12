@@ -965,6 +965,44 @@ mod tests {
         }
     }
 
+    /// Auto clips export: each clip is its own small 9:16 project holding one trimmed, canvas-filling clip.
+    #[test]
+    fn a_trimmed_clip_alone_exports_vertical_with_exactly_its_length() {
+        let Some(e) = env("autoclip") else { return };
+        let red = e.red();
+        let vertical = ExportOptions {
+            width: 360,
+            height: 640,
+            fps: 30.0,
+            quality: Quality::Draft,
+            format: ExportFormat::Mp4,
+        };
+        for (n, (sin, sout)) in [(0.5, 2.5), (1.0, 2.2)].into_iter().enumerate() {
+            let mut c = clip("c", "red", "v1", 0.0, sin, sout, 1.0);
+            c["fitMode"] = json!("fill");
+            let mut p = project(
+                vec![asset("red", &red, "video", Some(4.0))],
+                vec![track("v1", "video", 0, false, false, vec![c])],
+            );
+            p.settings.width = 360;
+            p.settings.height = 640;
+            let out = e.dir.join(format!("clip{n}.mp4"));
+            let r = e.export(&p, &vertical, &out).0.unwrap();
+            // the report comes from FFprobe reading the finished file
+            assert_eq!((r.width, r.height), (360, 640));
+            assert!(
+                (r.duration - (sout - sin)).abs() < 0.08,
+                "clip {n}: {} s, wanted {}",
+                r.duration,
+                sout - sin
+            );
+            assert!(r.has_audio);
+            assert!(e.decodes_cleanly(&out));
+            // filled, not letterboxed: the top edge is the red picture
+            assert!(near(e.region(&out, 0.5, "360:20:0:0"), (254, 0, 0), 40));
+        }
+    }
+
     #[test]
     fn exports_the_requested_size_and_letterboxes_with_the_background() {
         let Some(e) = env("size") else { return };
