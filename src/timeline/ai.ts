@@ -4,6 +4,9 @@ import { usePlaybackStore } from "@/store/playback";
 import { useProjectStore } from "@/store/project";
 import { useSelectionStore } from "@/store/selection";
 import { useUiStore, type ClipKind } from "@/store/ui";
+import { useAutoClipsStore } from "@/store/autoClips";
+import { useMediaDetailsStore } from "@/store/mediaDetails";
+import { autoClipsBlocker } from "./autoClips";
 import { clipEnd, EPS, findClip } from "./clips";
 
 /** The kind of inspector a clip gets if it can use AI tools (it has sound), otherwise null. */
@@ -53,5 +56,36 @@ export function openAiTools(clipId?: string): boolean {
   ui.setInspectorTab(kind, "ai");
   ui.setSidePanel("inspector"); // on narrow screens the inspector is behind a tab
   ui.focusInspectorTab("ai");
+  return true;
+}
+
+/**
+ * Open the Auto clips wizard for `clipId`, or for the clip the AI tools would pick. A clip that cannot be
+ * searched (no sound, under a minute, reversed) gets its reason as a notice instead.
+ */
+export function openAutoClips(clipId?: string): boolean {
+  const project = useProjectStore.getState().project;
+  const auto = useAutoClipsStore.getState();
+  // results or a running search are shown again as they are
+  if (!clipId && (auto.status === "running" || auto.clips.length > 0)) {
+    auto.openWizard();
+    return true;
+  }
+  const selection = useSelectionStore.getState();
+  const target = clipId ?? aiTarget(project, selection.selectedClipIds, usePlaybackStore.getState().playhead);
+  const ui = useUiStore.getState();
+  if (!target) {
+    ui.setNotice("Add a video or audio clip to the timeline to find short clips");
+    return false;
+  }
+  const found = findClip(project, target);
+  const asset = found && project.assets.find((a) => a.id === found.clip.assetId);
+  const entry = asset ? useMediaDetailsStore.getState().entries[asset.path] : undefined;
+  const blocker = autoClipsBlocker(project, target, entry?.status === "ready" ? entry.details : undefined);
+  if (blocker) {
+    ui.setNotice(blocker);
+    return false;
+  }
+  auto.openWizard(target);
   return true;
 }

@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { AboutDialog } from "@/components/AboutDialog";
 import { AppDialog } from "@/components/AppDialog";
+import { AutoClipsWizard } from "@/components/autoclips/AutoClipsWizard";
 import { CanvasDialog } from "@/components/canvas/CanvasDialog";
 import { CanvasNotice } from "@/components/canvas/CanvasNotice";
 import { NewProjectDialog } from "@/components/canvas/NewProjectDialog";
@@ -84,6 +85,7 @@ export default function App() {
       </div>
       <DragChip />
       <ExportDialog />
+      <AutoClipsWizard />
       <NewProjectDialog />
       <CanvasDialog />
       <AppDialog />

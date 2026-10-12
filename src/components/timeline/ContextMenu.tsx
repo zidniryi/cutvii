@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { ClipboardCopy, Copy, Scissors, Snowflake, Sparkles, Trash2 } from "lucide-react";
+import { ClipboardCopy, Copy, Film, Scissors, Snowflake, Sparkles, Trash2 } from "lucide-react";
 
 export interface MenuState {
   x: number;
@@ -16,10 +16,22 @@ interface Props {
   onFreeze: () => void;
   /** Present when the clip can use the AI tools (it has sound). */
   onAi?: () => void;
+  /** Present with `onAi`: open Auto clips for this clip (it explains itself when the clip is too short). */
+  onClips?: () => void;
   onClose: () => void;
 }
 
-export function ContextMenu({ menu, onSplit, onDelete, onCut, onCopy, onFreeze, onAi, onClose }: Props) {
+export function ContextMenu({
+  menu,
+  onSplit,
+  onDelete,
+  onCut,
+  onCopy,
+  onFreeze,
+  onAi,
+  onClips,
+  onClose,
+}: Props) {
   useEffect(() => {
     const onDown = (e: PointerEvent) => {
       if (!(e.target as HTMLElement | null)?.closest("[data-context-menu]")) onClose();
@@ -64,6 +76,11 @@ export function ContextMenu({ menu, onSplit, onDelete, onCut, onCopy, onFreeze, 
       {onAi && (
         <button role="menuitem" className={item} onClick={onAi}>
           <Sparkles className="size-4 text-accent" /> Subtitles with AI…
+        </button>
+      )}
+      {onClips && (
+        <button role="menuitem" className={item} onClick={onClips}>
+          <Film className="size-4 text-accent" /> Find short clips…
         </button>
       )}
       <button role="menuitem" className={item} onClick={onDelete}>

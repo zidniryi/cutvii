@@ -26,7 +26,7 @@ import { useProjectStore } from "@/store/project";
 import { useSelectionStore } from "@/store/selection";
 import { useTimelineViewStore } from "@/store/timelineView";
 import { clipDuration, projectDuration } from "@/timeline/clips";
-import { aiKindOf, openAiTools } from "@/timeline/ai";
+import { aiKindOf, openAiTools, openAutoClips } from "@/timeline/ai";
 import { copySelected, cutSelected } from "@/timeline/clipboard";
 import { freezeFrameAtPlayhead } from "@/timeline/freeze";
 import { deleteSelected, report, splitAtPlayhead, toggleTrackFlag } from "@/timeline/editor";
@@ -388,6 +388,14 @@ export function Timeline() {
               ? () => {
                   closeMenu();
                   openAiTools(menu.clipId);
+                }
+              : undefined
+          }
+          onClips={
+            aiKindOf(project, menu.clipId)
+              ? () => {
+                  closeMenu();
+                  openAutoClips(menu.clipId);
                 }
               : undefined
           }

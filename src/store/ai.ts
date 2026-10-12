@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
+import { confirmDialog } from "@/lib/dialog";
 
 /** A speech model on offer (see `src-tauri/src/media/whisper.rs`). Models are never bundled. */
 export interface SpeechModel {
@@ -129,3 +130,34 @@ export const SPEECH_LANGUAGES: { code: string | null; name: string }[] = [
   { code: "tr", name: "Turkish" },
   { code: "vi", name: "Vietnamese" },
 ];
+
+export interface AiNote {
+  kind: "ok" | "problem";
+  text: string;
+}
+
+/**
+ * Ask the user, then download `model`. The one place that words the consent: nothing is downloaded unless
+ * they agree. Returns null when they decline, otherwise a note to show.
+ */
+export async function downloadWithConsent(model: SpeechModel): Promise<AiNote | null> {
+  const host = new URL(model.source).host;
+  const agreed = await confirmDialog({
+    title: "Download the speech model?",
+    lines: [
+      `${model.label}: about ${model.approxMb} MB, downloaded once from ${host} (the whisper.cpp project).`,
+      "It is kept on this computer. Your media is never uploaded: speech is recognised here.",
+    ],
+    confirmLabel: "Download",
+  });
+  if (!agreed) return null;
+  try {
+    await useAiStore.getState().downloadModel(model.id);
+    return { kind: "ok", text: "The speech model is ready." };
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e);
+    return /cancel/i.test(reason)
+      ? { kind: "ok", text: "The download was cancelled." }
+      : { kind: "problem", text: `Could not download the model: ${reason}` };
+  }
+}

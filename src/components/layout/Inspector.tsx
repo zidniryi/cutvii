@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { useProjectStore } from "@/store/project";
 import { useSelectionStore } from "@/store/selection";
 import { useUiStore, type ClipKind, type InspectorTab } from "@/store/ui";
+import { selectClipsReady, useAutoClipsStore } from "@/store/autoClips";
 import { canvasLabel, canvasOf, formatFps } from "@/project/canvas";
 import type { FitBackground, MediaAsset, Project, TimelineClip, TimelineTrack } from "@/project/model";
 import { projectDuration } from "@/timeline/clips";
@@ -655,6 +656,7 @@ function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset;
   }, [active, clip.id]);
   // something outside (the AI button, the clip menu) asked for a tab: put the keyboard focus on it
   const focusRequest = useUiStore((s) => s.inspectorFocus);
+  const clipsReady = useAutoClipsStore(selectClipsReady);
   useEffect(() => {
     if (!focusRequest || focusRequest.tab !== active) return;
     document.getElementById(`${uid}-tab-${active}`)?.focus();
@@ -707,6 +709,9 @@ function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset;
           >
             {t === "ai" && <Sparkles aria-hidden />}
             {TAB_LABEL[t]}
+            {t === "ai" && clipsReady && (
+              <span className="rounded-sm bg-accent-soft px-1 text-[10px] text-accent">Clips ready</span>
+            )}
           </button>
         ))}
       </div>

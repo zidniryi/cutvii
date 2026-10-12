@@ -1,5 +1,6 @@
 import { Redo2, Undo2, Upload } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
+import { AiMenu } from "@/components/autoclips/AiMenu";
 import { FileMenu } from "@/components/FileMenu";
 import { IconButton } from "@/components/IconButton";
 import { Logo } from "@/components/Logo";
@@ -31,6 +32,7 @@ export function TopBar() {
       <Logo />
       <span className="mx-2 hidden truncate text-sm text-text-muted sm:inline">{name}</span>
       <FileMenu />
+      <AiMenu />
       <IconButton
         label={undoLabel ? `Undo ${undoLabel}` : "Undo"}
         icon={<Undo2 />}

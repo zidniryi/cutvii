@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 import { Captions, Check, Download, Eraser, Layers, ScanFace, Sparkles, Trash2 } from "lucide-react";
-import { confirmDialog } from "@/lib/dialog";
 import { cn } from "@/lib/utils";
 import type { TimelineClip } from "@/project/model";
-import { SPEECH_LANGUAGES, useAiStore, type SpeechModel } from "@/store/ai";
+import { downloadWithConsent, SPEECH_LANGUAGES, useAiStore, type SpeechModel } from "@/store/ai";
 import { DEFAULT_STYLE, subtitleStyleOf, useTextStyleStore } from "@/store/textStyles";
 import { useProjectStore } from "@/store/project";
 import {
@@ -16,6 +15,7 @@ import { DEFAULT_SUBTITLE_POSITION } from "@/timeline/textPosition";
 import { StyleEditor } from "@/components/text/StyleEditor";
 import { StyleList } from "@/components/text/StyleList";
 import { StylePreview } from "@/components/text/StylePreview";
+import { AutoClipsSection } from "@/components/autoclips/AutoClipsSection";
 
 const fieldClass =
   "h-9 w-full rounded-md border bg-surface-2 px-2 text-sm pointer-coarse:h-11 focus-visible:outline-accent";
@@ -155,27 +155,7 @@ export function AiPanel({ clip }: { clip: TimelineClip }) {
   async function downloadChosen() {
     if (!model) return;
     setNote(null);
-    const host = new URL(model.source).host;
-    const agreed = await confirmDialog({
-      title: "Download the speech model?",
-      lines: [
-        `${model.label}: about ${model.approxMb} MB, downloaded once from ${host} (the whisper.cpp project).`,
-        "It is kept on this computer. Your media is never uploaded: speech is recognised here.",
-      ],
-      confirmLabel: "Download",
-    });
-    if (!agreed) return;
-    try {
-      await useAiStore.getState().downloadModel(model.id);
-      setNote({ kind: "ok", text: "The speech model is ready." });
-    } catch (e) {
-      const reason = e instanceof Error ? e.message : String(e);
-      setNote(
-        /cancel/i.test(reason)
-          ? { kind: "ok", text: "The download was cancelled." }
-          : { kind: "problem", text: `Could not download the model: ${reason}` },
-      );
-    }
+    setNote(await downloadWithConsent(model));
   }
   async function removeChosen() {
     if (!model) return;
@@ -447,6 +427,8 @@ export function AiPanel({ clip }: { clip: TimelineClip }) {
           </p>
         )}
       </div>
+
+      <AutoClipsSection clip={clip} />
 
       <div role="group" aria-label="More AI tools" className="space-y-1.5 border-t pt-3">
         <p className="text-text-muted">More AI tools</p>
