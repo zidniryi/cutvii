@@ -10,7 +10,13 @@ import { COLOR_FIELDS, colorOf, isGraded, NO_COLOR, sameColor, setClipColor } fr
 import type { EditResult } from "./edit";
 
 export const LookSchema = z
-  .object({ id: z.string().min(1).max(80), name: z.string().min(1).max(40), adjust: ColorAdjustSchema })
+  .object({
+    id: z.string().min(1).max(80),
+    name: z.string().min(1).max(40),
+    adjust: ColorAdjustSchema,
+    /** Set on a preset that came from someone else's file or pack. */
+    source: z.literal("imported").optional(),
+  })
   .strict();
 export type Look = z.infer<typeof LookSchema>;
 

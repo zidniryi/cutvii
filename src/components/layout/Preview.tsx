@@ -122,10 +122,12 @@ export function Preview() {
           currentTime: el.currentTime,
           desired: layer.role === "active" ? sourceTimeFor(layer.clip, playhead) : restTimeFor(layer.clip),
           lead: layer === lead,
+          nudging: base > 0 ? el.playbackRate / base : 1,
         });
         // clip speed times the small catch-up nudge
         const rate = base * (plan.rate ?? 1);
-        if (el.playbackRate !== rate) el.playbackRate = rate;
+        // only on a real change: assigning a rate, even nearly the same one, makes the webview hitch
+        if (Math.abs(el.playbackRate - rate) > 0.0005) el.playbackRate = rate;
         if (plan.seekTo !== undefined) {
           // while playing, never re-seek the same element more than once a second (a seek costs frames)
           const nowMs = performance.now();

@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Check, Download, ShieldCheck, Timer } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { downloadWithConsent, SPEECH_LANGUAGES, useAiStore } from "@/store/ai";
+import { downloadWithConsent, modelSize, SPEECH_LANGUAGES, useAiStore } from "@/store/ai";
 import { usableModel, useAutoClipsStore } from "@/store/autoClips";
 import { subtitleStyleOf, useTextStyleStore } from "@/store/textStyles";
 import { useUiStore } from "@/store/ui";
@@ -176,7 +176,7 @@ export function SettingsStep() {
               type="button"
               role="radio"
               aria-checked={chosen?.id === m.id}
-              aria-label={`${m.label}, ${m.approxMb} MB${m.installed ? ", downloaded" : ""}`}
+              aria-label={`${m.label}, ${modelSize(m.approxMb)}${m.installed ? ", downloaded" : ""}`}
               disabled={running || download !== null}
               className={cn(chip(chosen?.id === m.id), "flex items-center gap-1.5")}
               onClick={() => set("model", m.id)}
@@ -200,7 +200,7 @@ export function SettingsStep() {
             <Download />
             {download
               ? `Downloading… ${Math.round(download.received / 1048576)} MB`
-              : `Download model (about ${chosen.approxMb} MB)…`}
+              : `Download model (about ${modelSize(chosen.approxMb)})…`}
           </button>
         )}
         <p className="text-xs text-text-muted">

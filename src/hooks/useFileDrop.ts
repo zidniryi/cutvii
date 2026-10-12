@@ -1,5 +1,7 @@
 import { useEffect } from "react";
 import { onFileDrop } from "@/lib/dropApi";
+import { useStylePackStore } from "@/store/stylePacks";
+import { isPackFile } from "@/timeline/stylePack";
 import { enqueueDroppedFiles } from "@/import/dropImport";
 import { useDragDropStore } from "@/store/dragDrop";
 import { useImportsStore } from "@/store/imports";
@@ -38,8 +40,13 @@ export function useFileDrop() {
       onDrop: (drop) => {
         const target = dropTargetAt(drop.x, drop.y);
         useDragDropStore.getState().clear();
+        // a style pack is not media: it opens its import preview (the first one, if several were dropped)
+        const packs = drop.files.filter((f) => isPackFile(f.name));
+        const media = drop.files.filter((f) => !isPackFile(f.name));
+        if (packs.length > 0) void useStylePackStore.getState().openDropped(packs[0].id);
+        if (media.length === 0) return;
         if (!target) useUiStore.getState().setSidePanel("library"); // narrow layouts: show where the files land
-        enqueueDroppedFiles(drop.files, target ? newDropPlacement(target) : undefined);
+        enqueueDroppedFiles(media, target ? newDropPlacement(target) : undefined);
       },
       onHover: (active) => {
         if (active) useUiStore.getState().setSidePanel("library");

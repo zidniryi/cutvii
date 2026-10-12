@@ -12,11 +12,13 @@ pub mod color;
 pub mod ffmpeg;
 pub mod import;
 pub mod looks;
+pub mod pack;
 pub mod probe;
 pub mod reverse;
 pub mod text;
 pub mod text_fx;
 pub mod tools;
+pub mod vocals;
 pub mod waveform;
 pub mod whisper;
 

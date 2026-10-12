@@ -4,6 +4,7 @@ import {
   EyeOff,
   Magnet,
   Maximize2,
+  MicVocal,
   Film,
   Scissors,
   Sparkles,
@@ -28,7 +29,7 @@ import { useSelectionStore } from "@/store/selection";
 import { useTimelineViewStore } from "@/store/timelineView";
 import { clipDuration, projectDuration } from "@/timeline/clips";
 import { selectClipsReady, useAutoClipsStore } from "@/store/autoClips";
-import { aiKindOf, openAiTools, openAutoClips } from "@/timeline/ai";
+import { aiKindOf, openAiTools, openAutoClips, openKaraoke } from "@/timeline/ai";
 import { copySelected, cutSelected } from "@/timeline/clipboard";
 import { freezeFrameAtPlayhead } from "@/timeline/freeze";
 import { deleteSelected, report, splitAtPlayhead, toggleTrackFlag } from "@/timeline/editor";
@@ -188,6 +189,16 @@ export function Timeline() {
                 className="absolute -top-1 -right-1 size-2.5 rounded-full border border-black bg-success"
               />
             )}
+          </button>
+          <button
+            type="button"
+            aria-label="Karaoke Maker"
+            title="Karaoke Maker: put a song's lyrics on screen, line by line"
+            onClick={() => openKaraoke()}
+            className="mr-1 flex h-8 items-center gap-1.5 rounded-md border border-accent/60 bg-accent-soft px-2.5 text-xs font-medium text-text hover:border-accent focus-visible:outline-accent pointer-coarse:h-11 [&_svg]:size-3.5 [&_svg]:text-accent"
+          >
+            <MicVocal />
+            Karaoke
           </button>
           <IconButton label="Add text at playhead" icon={<Type />} onClick={() => void addTextAtPlayhead()} />
           <IconButton

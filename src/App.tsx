@@ -2,6 +2,8 @@ import { useEffect } from "react";
 import { AboutDialog } from "@/components/AboutDialog";
 import { AppDialog } from "@/components/AppDialog";
 import { AutoClipsWizard } from "@/components/autoclips/AutoClipsWizard";
+import { KaraokeDialog } from "@/components/karaoke/KaraokeDialog";
+import { StylePacksDialog } from "@/components/packs/StylePacksDialog";
 import { CanvasDialog } from "@/components/canvas/CanvasDialog";
 import { CanvasNotice } from "@/components/canvas/CanvasNotice";
 import { NewProjectDialog } from "@/components/canvas/NewProjectDialog";
@@ -88,6 +90,8 @@ export default function App() {
       <DragChip />
       <ExportDialog />
       <AutoClipsWizard />
+      <KaraokeDialog />
+      <StylePacksDialog />
       <NewProjectDialog />
       <CanvasDialog />
       <AppDialog />

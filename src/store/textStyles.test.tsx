@@ -225,6 +225,7 @@ describe("the shared style system", () => {
       "Edit",
       "Duplicate",
       "Rename",
+      "Export as a file…",
       "Delete",
     ]);
     fireEvent.click(menu.getByRole("menuitem", { name: "Rename" }));

@@ -73,6 +73,33 @@ pub const MODELS: &[ModelSpec] = &[
         bytes: 487_601_967,
         sha256: "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
     },
+    ModelSpec {
+        id: "medium",
+        label: "Medium (slow, accurate; better for singing and accents)",
+        approx_mb: 1463,
+        file: "ggml-medium.bin",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin",
+        bytes: 1_533_763_059,
+        sha256: "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208",
+    },
+    ModelSpec {
+        id: "large-turbo",
+        label: "Large Turbo (near the accuracy of Large, much faster)",
+        approx_mb: 1549,
+        file: "ggml-large-v3-turbo.bin",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
+        bytes: 1_624_555_275,
+        sha256: "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69",
+    },
+    ModelSpec {
+        id: "large",
+        label: "Large (slowest, most accurate; needs a lot of memory)",
+        approx_mb: 2952,
+        file: "ggml-large-v3.bin",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
+        bytes: 3_095_033_483,
+        sha256: "64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2",
+    },
 ];
 
 pub fn model_spec(id: &str) -> AppResult<&'static ModelSpec> {
@@ -403,7 +430,7 @@ mod tests {
     fn models_are_known_by_id_and_recognised_by_their_first_bytes() {
         assert_eq!(
             MODELS.iter().map(|m| m.id).collect::<Vec<_>>(),
-            ["tiny", "base", "small"]
+            ["tiny", "base", "small", "medium", "large-turbo", "large"]
         );
         assert!(
             MODELS

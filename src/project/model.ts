@@ -161,6 +161,8 @@ export const StylePresetSchema = z
     fade: z.number().min(0).max(5).optional(),
     /** What the style is good for ("clipper" = short vertical clips; "word-timing" = wants per-word times). */
     tags: z.array(z.string().min(1).max(40)).max(10).optional(),
+    /** Set on a style that came from someone else's file or pack. */
+    source: z.literal("imported").optional(),
   })
   .strict();
 

@@ -1,5 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Copy, MoreHorizontal, Pencil, Plus, Search, TextCursorInput, Trash2 } from "lucide-react";
+import {
+  Copy,
+  FolderInput,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Search,
+  TextCursorInput,
+  Trash2,
+  Upload,
+} from "lucide-react";
+import { useFontStore } from "@/store/fonts";
+import { useUiStore } from "@/store/ui";
 import { StylePreview } from "@/components/text/StylePreview";
 import { Button } from "@/components/ui/button";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
@@ -8,6 +20,27 @@ import { cn } from "@/lib/utils";
 import type { StylePreset } from "@/project/model";
 import { isBuiltIn, orderedStyles, useTextStyleStore } from "@/store/textStyles";
 import { CLIPPER_TAG, hasTag, styleLimit } from "@/timeline/textStyles";
+
+/** Import style files into My styles and say what happened, including fonts this computer lacks. */
+export async function importStyles() {
+  useFontStore.getState().ensure();
+  const fonts = useFontStore.getState().fonts.map((f) => f.family);
+  const notice = useUiStore.getState().setNotice;
+  try {
+    const { added, skipped, problems, missingFonts } = await useTextStyleStore.getState().importFiles(fonts);
+    const parts = [
+      added.length > 0 ? `Imported ${added.join(", ")}.` : "",
+      skipped.length > 0 ? `Already had ${skipped.join(", ")}.` : "",
+      missingFonts.length > 0
+        ? `Font not on this computer: ${missingFonts.join(", ")}. Those styles use the default font until you import it (Text tab, font list).`
+        : "",
+      ...problems.map((p) => `${p.file}: ${p.message}.`),
+    ].filter(Boolean);
+    if (parts.length > 0) notice(parts.join(" "));
+  } catch (e) {
+    notice(`Could not import: ${e instanceof Error ? e.message : e}`);
+  }
+}
 
 /** How many styles a list shows before "Show more". */
 export const VISIBLE_STYLES = 6;
@@ -98,6 +131,18 @@ function CardMenu({ preset, onClose }: { preset: StylePreset; onClose: () => voi
             <>
               <button role="menuitem" className={menuItem} onClick={() => setRenaming(true)}>
                 <TextCursorInput /> Rename
+              </button>
+              <button
+                role="menuitem"
+                className={menuItem}
+                onClick={act(() => {
+                  void store.exportFile(preset.id).then(
+                    (path) => path && useUiStore.getState().setNotice(`Style saved as ${path}`),
+                    (e: Error) => useUiStore.getState().setNotice(`Could not export the style: ${e.message}`),
+                  );
+                })}
+              >
+                <Upload /> Export as a file…
               </button>
               <button
                 role="menuitem"
@@ -335,6 +380,13 @@ function StylePicker({
             className="flex h-9 items-center gap-1 rounded-md border px-3 text-xs text-text-muted hover:text-text pointer-coarse:h-11 [&_svg]:size-3.5"
           >
             <Plus /> New style
+          </button>
+          <button
+            type="button"
+            onClick={() => void importStyles()}
+            className="flex h-9 items-center gap-1 rounded-md border px-3 text-xs text-text-muted hover:text-text pointer-coarse:h-11 [&_svg]:size-3.5"
+          >
+            <FolderInput /> Import style…
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-3">

@@ -14,6 +14,10 @@ export const DRIFT_SECONDS = 0.75;
 /** Smaller differences are closed smoothly by playing slightly faster or slower. */
 export const RATE_DEADBAND = 0.04;
 export const MAX_RATE_NUDGE = 0.08;
+/** A follower is only corrected once it is this far (seconds) from where it should be... */
+export const NUDGE_START = 0.08;
+/** ...and then by this fixed share of its speed, until it is back within half the deadband. */
+export const NUDGE_STEP = 0.05;
 /** While paused/scrubbing, seek when further than this (about half a frame at 24fps). */
 export const SEEK_EPSILON = 0.02;
 
@@ -97,6 +101,11 @@ export interface SyncInput {
   desired: number;
   /** This element drives the playhead: it is never corrected while it plays. */
   lead?: boolean;
+  /**
+   * The catch-up factor the element is playing with right now (its rate divided by the clip's own speed);
+   * 1 when it is not being corrected. Lets a correction, once started, run until it is done.
+   */
+  nudging?: number;
 }
 
 export interface SyncPlan {
@@ -107,7 +116,15 @@ export interface SyncPlan {
   rate?: number;
 }
 
-export function planSync({ role, playing, paused, currentTime, desired, lead = false }: SyncInput): SyncPlan {
+export function planSync({
+  role,
+  playing,
+  paused,
+  currentTime,
+  desired,
+  lead = false,
+  nudging = 1,
+}: SyncInput): SyncPlan {
   const ahead = currentTime - desired; // > 0: the element is ahead of the clock
   const off = Math.abs(ahead);
   const plan: SyncPlan = {};
@@ -123,12 +140,19 @@ export function planSync({ role, playing, paused, currentTime, desired, lead = f
     // far away (the user seeked, or it fell badly behind): jump once, then play normally
     plan.seekTo = desired;
     plan.rate = 1;
-  } else if (lead || off <= RATE_DEADBAND) {
+  } else if (lead) {
     plan.rate = 1;
   } else {
-    // close the gap over about two seconds, never by more than a few percent (inaudible, invisible)
-    const nudge = Math.max(-MAX_RATE_NUDGE, Math.min(MAX_RATE_NUDGE, -ahead * 0.5));
-    plan.rate = Math.round((1 + nudge) * 1000) / 1000;
+    // A follower catches up by playing a few percent faster or slower. The rate is changed as RARELY as
+    // possible: every change of a video's playback rate costs the webview a hitch, and a rate that
+    // followed the gap frame by frame made the picture stutter whenever sound led (music under a video,
+    // the karaoke track). So: one fixed step, started only when the gap is clearly there, and kept until
+    // the gap is closed.
+    const correcting = Math.abs(nudging - 1) > 0.001;
+    const sameWay = correcting && nudging < 1 === ahead > 0;
+    if (sameWay && off > RATE_DEADBAND / 2) plan.rate = nudging;
+    else if (off > NUDGE_START) plan.rate = ahead > 0 ? 1 - NUDGE_STEP : 1 + NUDGE_STEP;
+    else plan.rate = 1;
   }
   if (paused) plan.play = true;
   return plan;

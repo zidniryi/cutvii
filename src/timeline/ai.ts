@@ -7,6 +7,8 @@ import { useUiStore, type ClipKind } from "@/store/ui";
 import { useAutoClipsStore } from "@/store/autoClips";
 import { useMediaDetailsStore } from "@/store/mediaDetails";
 import { autoClipsBlocker } from "./autoClips";
+import { karaokeBlocker } from "./karaoke";
+import { useKaraokeStore } from "@/store/karaoke";
 import { clipEnd, EPS, findClip } from "./clips";
 
 /** The kind of inspector a clip gets if it can use AI tools (it has sound), otherwise null. */
@@ -126,4 +128,26 @@ export function watchLongClips(): () => void {
       run: () => void openAutoClips(id),
     });
   });
+}
+
+/**
+ * Open Karaoke Maker for `clipId`, or for the clip the AI tools would pick (the song). A clip that cannot
+ * be used gets its reason as a notice instead.
+ */
+export function openKaraoke(clipId?: string): boolean {
+  const project = useProjectStore.getState().project;
+  const selection = useSelectionStore.getState();
+  const target = clipId ?? aiTarget(project, selection.selectedClipIds, usePlaybackStore.getState().playhead);
+  const ui = useUiStore.getState();
+  if (!target) {
+    ui.setNotice("Add a song (a video or audio clip) to the timeline to make karaoke lyrics");
+    return false;
+  }
+  const blocker = karaokeBlocker(project, target);
+  if (blocker) {
+    ui.setNotice(blocker);
+    return false;
+  }
+  useKaraokeStore.getState().openFor(target);
+  return true;
 }

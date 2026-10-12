@@ -13,6 +13,10 @@ export interface SpeechModel {
   installed: boolean;
 }
 
+/** A download size for people: "142 MB", "1.5 GB". */
+export const modelSize = (approxMb: number) =>
+  approxMb < 1000 ? `${approxMb} MB` : `${(approxMb / 1024).toFixed(1)} GB`;
+
 export interface Download {
   id: string;
   received: number;
@@ -145,7 +149,7 @@ export async function downloadWithConsent(model: SpeechModel): Promise<AiNote | 
   const agreed = await confirmDialog({
     title: "Download the speech model?",
     lines: [
-      `${model.label}: about ${model.approxMb} MB, downloaded once from ${host} (the whisper.cpp project).`,
+      `${model.label}: about ${modelSize(model.approxMb)}, downloaded once from ${host} (the whisper.cpp project).`,
       "It is kept on this computer. Your media is never uploaded: speech is recognised here.",
     ],
     confirmLabel: "Download",

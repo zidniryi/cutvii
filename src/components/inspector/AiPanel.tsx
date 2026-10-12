@@ -1,8 +1,18 @@
 import { useEffect, useState } from "react";
-import { Captions, Check, Download, Eraser, Layers, ScanFace, Sparkles, Trash2 } from "lucide-react";
+import {
+  Captions,
+  Check,
+  Download,
+  Eraser,
+  Layers,
+  ScanFace,
+  Sparkles,
+  Trash2,
+  MicVocal,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { TimelineClip } from "@/project/model";
-import { downloadWithConsent, SPEECH_LANGUAGES, useAiStore, type SpeechModel } from "@/store/ai";
+import { downloadWithConsent, modelSize, SPEECH_LANGUAGES, useAiStore, type SpeechModel } from "@/store/ai";
 import { DEFAULT_STYLE, subtitleStyleOf, useTextStyleStore } from "@/store/textStyles";
 import { useProjectStore } from "@/store/project";
 import {
@@ -16,6 +26,7 @@ import { StyleEditor } from "@/components/text/StyleEditor";
 import { StyleList } from "@/components/text/StyleList";
 import { StylePreview } from "@/components/text/StylePreview";
 import { AutoClipsSection } from "@/components/autoclips/AutoClipsSection";
+import { openKaraoke } from "@/timeline/ai";
 
 const fieldClass =
   "h-9 w-full rounded-md border bg-surface-2 px-2 text-sm pointer-coarse:h-11 focus-visible:outline-accent";
@@ -94,7 +105,7 @@ function ModelTile({
       type="button"
       role="radio"
       aria-checked={selected}
-      aria-label={`${name}, ${model.approxMb} MB${model.installed ? ", downloaded" : ""}`}
+      aria-label={`${name}, ${modelSize(model.approxMb)}${model.installed ? ", downloaded" : ""}`}
       title={hint}
       disabled={disabled}
       onClick={onSelect}
@@ -106,7 +117,7 @@ function ModelTile({
       )}
     >
       <span className="text-sm text-text">{name}</span>
-      <span className="text-[11px] tabular-nums">{model.approxMb} MB</span>
+      <span className="text-[11px] tabular-nums">{modelSize(model.approxMb)}</span>
       {model.installed && (
         <span className="absolute top-1.5 right-1.5 text-success [&_svg]:size-3.5" aria-hidden>
           <Check />
@@ -199,6 +210,24 @@ export function AiPanel({ clip }: { clip: TimelineClip }) {
   return (
     <div className="space-y-4 text-xs">
       <AutoClipsSection clip={clip} />
+      <div role="group" aria-label="Karaoke Maker" className="space-y-2 rounded-lg border border-border p-3">
+        <p className="flex items-center gap-2 text-sm font-medium text-text [&_svg]:size-4 [&_svg]:text-accent">
+          <MicVocal />
+          Karaoke Maker
+        </p>
+        <p className="text-text-muted">
+          Puts a song's lyrics on screen, line by line: recognised from the song, pasted, or from an .lrc /
+          .srt file.
+        </p>
+        <button
+          type="button"
+          onClick={() => openKaraoke(clip.id)}
+          className="flex h-10 w-full items-center justify-center gap-2 rounded-md border border-accent/60 bg-accent-soft px-2 text-sm font-medium text-text hover:border-accent pointer-coarse:h-11 [&_svg]:size-4"
+        >
+          <MicVocal />
+          Make karaoke lyrics
+        </button>
+      </div>
       <div role="group" aria-label="Subtitles from speech" className="space-y-3">
         <div className="rounded-lg border border-accent/30 bg-accent-soft p-3">
           <p className="flex items-center gap-2 text-sm font-medium text-text [&_svg]:size-4 [&_svg]:text-accent">
@@ -274,7 +303,7 @@ export function AiPanel({ clip }: { clip: TimelineClip }) {
                       className="flex h-9 w-full items-center justify-center gap-2 rounded-md border border-accent/60 bg-accent-soft px-2 text-xs text-text hover:border-accent disabled:opacity-40 pointer-coarse:h-11 [&_svg]:size-4"
                     >
                       <Download />
-                      Download model (about {model.approxMb} MB)…
+                      Download model (about {modelSize(model.approxMb)})…
                     </button>
                     <p className="text-text-muted">
                       A speech model is needed first. You will be asked before anything is downloaded.

@@ -5,6 +5,7 @@
  * agree. The user's part is a local UI preference of this machine: it is never written into a project.
  */
 import { z } from "zod";
+import { invoke } from "@tauri-apps/api/core";
 import { create } from "zustand";
 import { StylePresetSchema, TextStyleSchema, type StylePreset, type TextStyle } from "@/project/model";
 import { STYLE_PRESETS } from "@/timeline/textStyles";
@@ -75,6 +76,20 @@ function writePrefs(prefs: Prefs) {
   }
 }
 
+export interface StyleImportSummary {
+  added: string[];
+  skipped: string[];
+  problems: { file: string; message: string }[];
+  missingFonts: string[];
+}
+
+const StyleImportSchema = z.object({
+  styles: z
+    .array(z.object({ name: z.string(), style: z.unknown(), fade: z.number().optional() }).passthrough())
+    .max(50),
+  problems: z.array(z.tuple([z.string().max(300), z.string().max(300)])).max(50),
+});
+
 interface StyleState extends Prefs {
   /** The style being edited in the editor sheet (always one of the user's own), if any. */
   editingId: string | null;
@@ -95,6 +110,17 @@ interface StyleState extends Prefs {
   setSubtitlePosition: (at: { x: number; y: number } | null) => void;
   setSubtitleSize: (share: number | null) => void;
   setSafeMargin: (on: boolean) => void;
+  /** Replace the whole list of the user's styles (a pack import). Each one is checked; bad ones are dropped. */
+  setMine: (mine: StylePreset[]) => void;
+  /** Write one of the user's styles to a `.cutvii-textstyle` file they pick. Path, or null if cancelled. */
+  exportFile: (id: string) => Promise<string | null>;
+  /**
+   * Pick `.cutvii-textstyle` files (native dialog, in Rust) and add them to My styles. Rust checks every
+   * file as untrusted input and each style is checked again here. A taken name gets a number; a style the
+   * user already has, name and look, is not added twice. Fonts are never in the file: `missingFonts` names
+   * the ones this computer does not have (those texts are drawn in the default font until it is installed).
+   */
+  importFiles: (installedFonts: string[]) => Promise<StyleImportSummary>;
   /** For tests: forget everything of the user's. */
   reset: () => void;
 }
@@ -158,6 +184,85 @@ export const useTextStyleStore = create<StyleState>((set, get) => {
       if (!parsed.success) return { problem: "This look cannot be saved as a style" };
       keep((s) => ({ mine: [...s.mine, parsed.data], order: [parsed.data.id, ...s.order] }));
       return { id: parsed.data.id };
+    },
+    setMine: (list) => {
+      const seen = new Set(BUILT_IN);
+      const mine = list.slice(0, MAX_OWN_STYLES).flatMap((p) => {
+        const r = StylePresetSchema.safeParse(p);
+        return r.success && !seen.has(r.data.id) && seen.add(r.data.id) ? [r.data] : [];
+      });
+      const fresh = mine.filter((p) => !get().mine.some((old) => old.id === p.id)).map((p) => p.id);
+      // new arrivals go to the front of every list, like a style that was just made
+      keep((s) => ({
+        mine,
+        order: [...fresh, ...s.order.filter((id) => !fresh.includes(id))].slice(0, 500),
+      }));
+    },
+    exportFile: async (id) => {
+      const preset = get().mine.find((p) => p.id === id);
+      if (!preset) throw new Error("Only your own styles can be exported; duplicate a built-in one first.");
+      try {
+        const path = await invoke<string | null>("export_text_style", {
+          name: preset.name,
+          style: preset.style,
+          fade: preset.fade ?? null,
+        });
+        return path ?? null;
+      } catch (e) {
+        throw new Error(typeof e === "string" ? e : e instanceof Error ? e.message : "Failed", { cause: e });
+      }
+    },
+    importFiles: async (installedFonts) => {
+      let raw: unknown;
+      try {
+        raw = await invoke("import_text_styles");
+      } catch (e) {
+        throw new Error(typeof e === "string" ? e : e instanceof Error ? e.message : "Failed", { cause: e });
+      }
+      const found = StyleImportSchema.safeParse(raw);
+      if (!found.success) throw new Error("The import returned something unexpected.");
+      const summary: StyleImportSummary = {
+        added: [],
+        skipped: [],
+        problems: found.data.problems.map(([file, message]) => ({ file, message })),
+        missingFonts: [],
+      };
+      const have = new Set(installedFonts.map((f) => f.toLowerCase()));
+      for (const item of found.data.styles) {
+        const name = item.name.trim().slice(0, MAX_STYLE_NAME);
+        const parsed = StylePresetSchema.safeParse({
+          id: `my-${crypto.randomUUID()}`,
+          name: name || "Style",
+          style: item.style,
+          ...(item.fade && item.fade > 0 ? { fade: item.fade } : {}),
+        });
+        if (!parsed.success) {
+          summary.problems.push({ file: name || "style", message: "not a valid text style" });
+          continue;
+        }
+        const same = [...STYLE_PRESETS, ...get().mine].find(
+          (p) =>
+            p.name.toLowerCase() === parsed.data.name.toLowerCase() &&
+            JSON.stringify(p.style) === JSON.stringify(parsed.data.style),
+        );
+        if (same) {
+          summary.skipped.push(same.name);
+          continue;
+        }
+        if (get().mine.length >= MAX_OWN_STYLES) {
+          summary.problems.push({ file: parsed.data.name, message: "you have the most styles CutVii keeps" });
+          continue;
+        }
+        // keep both: nothing built in or of the user's is ever replaced
+        const style = { ...parsed.data, name: freeName(parsed.data.name), source: "imported" as const };
+        keep((s) => ({ mine: [...s.mine, style], order: [style.id, ...s.order] }));
+        summary.added.push(style.name);
+        const font = style.style.font;
+        if (font && !have.has(font.toLowerCase()) && !summary.missingFonts.includes(font)) {
+          summary.missingFonts.push(font);
+        }
+      }
+      return summary;
     },
     rename: (id, name) => {
       const wanted = name.trim();

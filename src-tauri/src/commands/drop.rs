@@ -274,3 +274,19 @@ mod tests {
         std::fs::remove_dir_all(dir).ok();
     }
 }
+
+/// Read a dropped `.cutvii-pack` file by its drop id (the path stays in Rust). The file is checked as
+/// untrusted input like any other pack.
+#[tauri::command]
+pub async fn read_dropped_pack(
+    state: State<'_, DropState>,
+    id: u64,
+) -> AppResult<crate::media::pack::CheckedPack> {
+    let path =
+        state.0.lock().unwrap().take(id).ok_or_else(|| {
+            AppError::InvalidInput("that dropped file is no longer available".into())
+        })?;
+    tauri::async_runtime::spawn_blocking(move || crate::media::pack::read_pack(&path))
+        .await
+        .map_err(|e| AppError::InvalidInput(format!("pack task failed: {e}")))?
+}

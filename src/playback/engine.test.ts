@@ -8,6 +8,8 @@ import {
   MAX_RATE_NUDGE,
   mediaErrorMessage,
   pickLead,
+  NUDGE_START,
+  NUDGE_STEP,
   planSync,
   RATE_DEADBAND,
   sourceTimeFor,
@@ -156,5 +158,46 @@ describe("mediaErrorMessage", () => {
     expect(mediaErrorMessage(4)).toMatch(/missing|not supported/);
     expect(mediaErrorMessage(3)).toMatch(/decoded/);
     expect(mediaErrorMessage(undefined)).toMatch(/could not be played/);
+  });
+});
+
+describe("a follower's playback rate changes as rarely as possible", () => {
+  const base = { role: "active" as const, playing: true, paused: false, desired: 10 };
+
+  it("leaves a small gap alone, starts one fixed step when the gap is clear, and keeps it until closed", () => {
+    // inside the start threshold: no correction, even outside the deadband
+    expect(planSync({ ...base, currentTime: 10 + NUDGE_START - 0.01 }).rate).toBe(1);
+    // clearly behind: one step faster
+    expect(planSync({ ...base, currentTime: 10 - 0.2 }).rate).toBe(1 + NUDGE_STEP);
+    // still behind, already correcting: the SAME rate, not a new one
+    expect(planSync({ ...base, currentTime: 10 - 0.1, nudging: 1 + NUDGE_STEP }).rate).toBe(1 + NUDGE_STEP);
+    expect(planSync({ ...base, currentTime: 10 - 0.03, nudging: 1 + NUDGE_STEP }).rate).toBe(1 + NUDGE_STEP);
+    // closed: back to normal
+    expect(planSync({ ...base, currentTime: 10 - 0.01, nudging: 1 + NUDGE_STEP }).rate).toBe(1);
+    // overshot to the other side while speeding up: stop, do not keep pushing
+    expect(planSync({ ...base, currentTime: 10 + 0.05, nudging: 1 + NUDGE_STEP }).rate).toBe(1);
+    // ahead: one step slower
+    expect(planSync({ ...base, currentTime: 10 + 0.3 }).rate).toBe(1 - NUDGE_STEP);
+    // the leader is never corrected
+    expect(planSync({ ...base, currentTime: 10 + 0.3, lead: true, nudging: 1 }).rate).toBe(1);
+  });
+
+  it("a whole catch-up from 0.3 s behind takes two rate changes, not one per frame", () => {
+    let position = 9.7; // the follower's own time
+    let clock = 10; // where the leader says it should be
+    let rate = 1;
+    let changes = 0;
+    for (let frame = 0; frame < 60 * 20; frame++) {
+      const plan = planSync({ ...base, currentTime: position, desired: clock, nudging: rate });
+      if (plan.rate !== rate) {
+        changes += 1;
+        rate = plan.rate!;
+      }
+      clock += 1 / 60;
+      position += rate / 60;
+    }
+    expect(changes).toBe(2); // on, then off
+    expect(Math.abs(position - clock)).toBeLessThan(RATE_DEADBAND);
+    expect(rate).toBe(1);
   });
 });

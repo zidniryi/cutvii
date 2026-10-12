@@ -201,3 +201,102 @@ describe("saving a text's look as a style", () => {
     expect(screen.getByRole("button", { name: "Save as style" })).toBeDisabled();
   });
 });
+
+describe("sharing a text style as a file", () => {
+  const yellow = { color: "#FFE14A", bold: true, font: "Anton", outline: { color: "#000000", width: 0.1 } };
+
+  it("round-trips: an exported style comes back identical, and is not added twice", async () => {
+    const saved = store().saveAs("My yellow", yellow, 0.4) as { id: string };
+    let file: unknown = null;
+    vi.mocked(invoke).mockImplementation((async (cmd: string, args: Record<string, unknown>) => {
+      if (cmd === "export_text_style") {
+        file = { cutviiTextStyle: 1, name: args.name, style: args.style, fade: args.fade };
+        return "/out/My yellow.cutvii-textstyle";
+      }
+      if (cmd === "import_text_styles") return { styles: [file], problems: [] };
+      return undefined;
+    }) as never);
+    expect(await store().exportFile(saved.id)).toBe("/out/My yellow.cutvii-textstyle");
+    // only the name, the look and the fade leave: a font NAME, never font data
+    expect(file).toEqual({ cutviiTextStyle: 1, name: "My yellow", style: yellow, fade: 0.4 });
+    await expect(store().exportFile("orange-cut")).rejects.toThrow(/own styles/);
+
+    store().remove(saved.id);
+    const summary = await store().importFiles(["Anton", "Noto Sans"]);
+    expect(summary).toEqual({ added: ["My yellow"], skipped: [], problems: [], missingFonts: [] });
+    expect(store().mine).toMatchObject([{ name: "My yellow", style: yellow, fade: 0.4 }]);
+    expect(orderedStyles(store())[0].name).toBe("My yellow"); // shows up first in every style list
+    expect(await store().importFiles(["Anton"])).toMatchObject({ added: [], skipped: ["My yellow"] });
+    expect(store().mine).toHaveLength(1);
+  });
+
+  it("keeps both on a name clash, never replaces a built-in, and names fonts this computer lacks", async () => {
+    store().saveAs("Mine", yellow);
+    vi.mocked(invoke).mockImplementation((async (cmd: string) =>
+      cmd === "import_text_styles"
+        ? {
+            styles: [
+              { cutviiTextStyle: 1, name: "Mine", style: { color: "#00FF88", font: "Some Rare Font" } },
+              { cutviiTextStyle: 1, name: "Orange Cut", style: { color: "#123456" } },
+            ],
+            problems: [],
+          }
+        : undefined) as never);
+    const summary = await store().importFiles(["Anton", "Noto Sans"]);
+    expect(summary.added).toEqual(["Mine 2", "Orange Cut 2"]);
+    expect(summary.missingFonts).toEqual(["Some Rare Font"]);
+    expect(store().mine.map((p) => p.name)).toEqual(["Mine", "Mine 2", "Orange Cut 2"]);
+    expect(store().mine[0].style).toEqual(yellow);
+    expect(STYLE_PRESETS.find((p) => p.id === "orange-cut")?.style.color).toBe("#141416");
+    expect(store().mine.every((p) => p.id.startsWith("my-"))).toBe(true);
+  });
+
+  it("skips an invalid style, keeps the valid ones and passes on why a file was refused", async () => {
+    vi.mocked(invoke).mockImplementation((async (cmd: string) =>
+      cmd === "import_text_styles"
+        ? {
+            styles: [
+              { name: "Bad colour", style: { color: "yellow" } },
+              { name: "Unknown part", style: { color: "#FFFFFF", script: "alert(1)" } },
+              { name: "Good", style: { color: "#FFFFFF" } },
+            ],
+            problems: [["x.cutvii-textstyle", "invalid input: the file is too large to be a text style"]],
+          }
+        : undefined) as never);
+    const summary = await store().importFiles([]);
+    expect(summary.added).toEqual(["Good"]);
+    expect(summary.problems.map((p) => p.file)).toEqual(["x.cutvii-textstyle", "Bad colour", "Unknown part"]);
+    expect(store().mine.map((p) => p.name)).toEqual(["Good"]);
+    vi.mocked(invoke).mockImplementation((async () => "nonsense") as never);
+    await expect(store().importFiles([])).rejects.toThrow(/unexpected/);
+  });
+
+  it("has Import in the style picker and Export in a style's own menu", async () => {
+    const { useUiStore } = await import("@/store/ui");
+    store().saveAs("Mine", yellow);
+    vi.mocked(invoke).mockImplementation((async (cmd: string, args?: { label?: string }) => {
+      if (cmd === "text_style_preview") return `/cache/styles/${args?.label}.png`;
+      if (cmd === "text_fonts") return [{ family: "Noto Sans", bundled: true }];
+      if (cmd === "export_text_style") return "/out/Mine.cutvii-textstyle";
+      if (cmd === "import_text_styles")
+        return { styles: [{ name: "Shared", style: { color: "#FFFFFF", font: "Rare" } }], problems: [] };
+      return undefined;
+    }) as never);
+    render(<StyleList isSelected={() => false} onSelect={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /Show more/ }));
+    const dialog = within(screen.getByRole("dialog", { name: "All styles" }));
+    fireEvent.click(dialog.getByRole("button", { name: "Import style…" }));
+    await vi.waitFor(() => expect(useUiStore.getState().notice).toMatch(/Imported Shared\./));
+    expect(useUiStore.getState().notice).toMatch(/Font not on this computer: Rare/);
+    expect(dialog.getByRole("button", { name: "Shared" })).toBeInTheDocument();
+
+    fireEvent.click(dialog.getByRole("button", { name: "Mine options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Export as a file/ }));
+    await vi.waitFor(() =>
+      expect(useUiStore.getState().notice).toBe("Style saved as /out/Mine.cutvii-textstyle"),
+    );
+    // a built-in style has no Export: duplicate it first
+    fireEvent.click(dialog.getByRole("button", { name: "Orange Cut options" }));
+    expect(screen.queryByRole("menuitem", { name: /Export as a file/ })).toBeNull();
+  });
+});

@@ -67,6 +67,8 @@ interface PresetState {
    * a number; a preset the user already has, name and values, is not added twice.
    */
   importFiles: () => Promise<ImportSummary>;
+  /** Replace the whole list of the user's presets (a pack import). Each one is checked; bad ones are dropped. */
+  setMine: (mine: Look[]) => void;
   /** For tests: forget everything and read the stored presets again. */
   reset: () => void;
 }
@@ -180,11 +182,22 @@ export const useColorPresetStore = create<PresetState>((set, get) => {
           continue;
         }
         // keep both: a taken name gets a number, nothing of the user's or built in is replaced
-        const preset = { ...parsed.data, name: freeName(parsed.data.name) };
+        const preset = { ...parsed.data, name: freeName(parsed.data.name), source: "imported" as const };
         keep([...get().mine, preset]);
         summary.added.push(preset.name);
       }
       return summary;
+    },
+    setMine: (list) => {
+      const seen = new Set(BUILT_IN);
+      keep(
+        list.slice(0, MAX_OWN_PRESETS).flatMap((p) => {
+          const r = LookSchema.safeParse(p);
+          return r.success && !seen.has(r.data.id) && seen.add(r.data.id) && isGraded(r.data.adjust)
+            ? [r.data]
+            : [];
+        }),
+      );
     },
     reset: () => set({ mine: read() }),
   };

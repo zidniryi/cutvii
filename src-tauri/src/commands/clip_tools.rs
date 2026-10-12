@@ -19,12 +19,15 @@ use crate::media::import::{ImportedMedia, cache_key, import_one};
 use crate::media::looks::{
     PRESET_EXTENSION, ensure_look_previews, preset_file_text, read_frame, read_preset, write_preset,
 };
+use crate::media::pack::{CheckedPack, PACK_EXTENSION, PackFile, pack_text, read_pack};
 use crate::media::probe::MediaDetails;
 use crate::media::text::{
-    FONT_EXTENSIONS, FontInfo, TextSpec, TextStyle, ensure_font_preview, ensure_style_preview,
-    ensure_text_picture, import_font, list_fonts, load_bundled_fonts, load_user_fonts,
+    FONT_EXTENSIONS, FontInfo, STYLE_FILE_EXTENSION, StyleFile, TextSpec, TextStyle,
+    checked_style_file, ensure_font_preview, ensure_style_preview, ensure_text_picture,
+    import_font, list_fonts, load_bundled_fonts, load_user_fonts, read_style_file,
 };
 use crate::media::tools::{FFMPEG_ENV, locate_tool};
+use crate::media::vocals::{merge_ranges, reduce_vocals};
 use crate::media::waveform::{FORMAT_VERSION, write_waveform};
 
 pub const REVERSE_PROGRESS_EVENT: &str = "reverse-progress";
@@ -335,6 +338,266 @@ pub async fn export_color_preset(
     .map_err(|e| AppError::InvalidInput(format!("preset task failed: {e}")))?
 }
 
+/// Save one of the user's text styles as a `.cutvii-textstyle` file to share. The native dialog picks the
+/// place; the name only suggests the file name. Returns the path written, or `None` when dismissed.
+#[tauri::command]
+pub async fn export_text_style(
+    app: AppHandle,
+    name: String,
+    style: serde_json::Value,
+    fade: Option<f64>,
+) -> AppResult<Option<String>> {
+    let file = checked_style_file(&name, &style, fade)?;
+    let text = serde_json::to_string_pretty(&file)
+        .map_err(|e| AppError::InvalidInput(format!("style file: {e}")))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(mut out) = app
+            .dialog()
+            .file()
+            .add_filter("CutVii text style", &[STYLE_FILE_EXTENSION])
+            .set_file_name(format!(
+                "{}.{STYLE_FILE_EXTENSION}",
+                safe_file_stem(&file.name)
+            ))
+            .blocking_save_file()
+            .and_then(|p| p.into_path().ok())
+        else {
+            return Ok(None);
+        };
+        if out.extension().is_none() {
+            out.set_extension(STYLE_FILE_EXTENSION);
+        }
+        write_preset(&out, &text)?;
+        Ok(Some(out.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(|e| AppError::InvalidInput(format!("style task failed: {e}")))?
+}
+
+/// What a text style import found: the styles that are fine, and for each refused file its name and why.
+#[derive(Debug, Serialize)]
+pub struct StyleImport {
+    pub styles: Vec<StyleFile>,
+    pub problems: Vec<(String, String)>,
+}
+
+/// Native "Import style" dialog: read the chosen `.cutvii-textstyle` files. Every file is checked as
+/// untrusted input (see `read_style_file`); a bad one is reported and the others still load. The webview
+/// never supplies a path. Empty when the user cancels.
+#[tauri::command]
+pub async fn import_text_styles(app: AppHandle) -> AppResult<StyleImport> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let picked = app
+            .dialog()
+            .file()
+            .add_filter("CutVii text style", &[STYLE_FILE_EXTENSION])
+            .blocking_pick_files()
+            .unwrap_or_default();
+        let mut found = StyleImport {
+            styles: Vec::new(),
+            problems: Vec::new(),
+        };
+        for file in picked.into_iter().take(MAX_PRESET_FILES) {
+            let Ok(path) = file.into_path() else {
+                continue;
+            };
+            let shown = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            match read_style_file(&path) {
+                Ok(style) => found.styles.push(style),
+                Err(e) => found.problems.push((shown, e.to_string())),
+            }
+        }
+        Ok(found)
+    })
+    .await
+    .map_err(|e| AppError::InvalidInput(format!("style task failed: {e}")))?
+}
+
+/// Save a style pack (`.cutvii-pack`). The pack is checked like one being read; the native dialog picks the
+/// place. Returns the path written, or `None` when the dialog is dismissed.
+#[tauri::command]
+pub async fn export_style_pack(app: AppHandle, pack: PackFile) -> AppResult<Option<String>> {
+    let text = pack_text(&pack)?;
+    let suggested = safe_file_stem(&pack.name);
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(mut out) = app
+            .dialog()
+            .file()
+            .add_filter("CutVii style pack", &[PACK_EXTENSION])
+            .set_file_name(format!("{suggested}.{PACK_EXTENSION}"))
+            .blocking_save_file()
+            .and_then(|p| p.into_path().ok())
+        else {
+            return Ok(None);
+        };
+        if out.extension().is_none() {
+            out.set_extension(PACK_EXTENSION);
+        }
+        write_preset(&out, &text)?;
+        Ok(Some(out.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(|e| AppError::InvalidInput(format!("pack task failed: {e}")))?
+}
+
+/// Native "Open style pack" dialog: read and check the chosen file (untrusted input, see `media/pack.rs`).
+/// `None` when the user cancels. The webview never supplies a path.
+#[tauri::command]
+pub async fn open_style_pack(app: AppHandle) -> AppResult<Option<CheckedPack>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(path) = app
+            .dialog()
+            .file()
+            .add_filter("CutVii style pack", &[PACK_EXTENSION])
+            .blocking_pick_file()
+            .and_then(|p| p.into_path().ok())
+        else {
+            return Ok(None);
+        };
+        read_pack(&path).map(Some)
+    })
+    .await
+    .map_err(|e| AppError::InvalidInput(format!("pack task failed: {e}")))?
+}
+
+/// A new audio file made from a clip's sound.
+#[derive(Debug, Serialize)]
+pub struct MadeAudio {
+    pub path: String,
+    /// Seconds.
+    pub duration: f64,
+}
+
+/// Most sung ranges one request may name.
+const MAX_SUNG_RANGES: usize = 5000;
+
+/// Make (or reuse) a copy of `[source_in, source_out)` of an imported file's sound with the singer lowered
+/// while lyrics are sung (`ranges`, seconds from `source_in`). No model: centre cancelling, see
+/// `media/vocals.rs`. The copy lives in the app data folder; the original file is never changed. A mono
+/// recording is refused, because there is no middle to remove.
+#[tauri::command]
+pub async fn make_instrumental(
+    app: AppHandle,
+    path: String,
+    source_in: f64,
+    source_out: f64,
+    ranges: Vec<(f64, f64)>,
+) -> AppResult<MadeAudio> {
+    let src = allowed_source(&app, &path)?;
+    if !(source_in.is_finite()
+        && source_out.is_finite()
+        && source_in >= 0.0
+        && source_out > source_in)
+    {
+        return Err(AppError::InvalidInput("invalid range".into()));
+    }
+    if ranges.len() > MAX_SUNG_RANGES {
+        return Err(AppError::InvalidInput("too many lyric lines".into()));
+    }
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::InvalidInput(format!("no data directory: {e}")))?
+        .join("karaoke");
+    let scope = app.asset_protocol_scope();
+    tauri::async_runtime::spawn_blocking(move || {
+        let backend = FfmpegBackend::locate()?;
+        match backend.details(&src)?.audio_channels {
+            None => {
+                return Err(AppError::InvalidInput("this clip has no sound".into()));
+            }
+            Some(1) => {
+                return Err(AppError::InvalidInput(
+                    "this recording is mono, so the voice cannot be lowered this way".into(),
+                ));
+            }
+            _ => {}
+        }
+        let seconds = source_out - source_in;
+        let merged = merge_ranges(&ranges, seconds);
+        let mut params = format!("instrumental-v2|{source_in:.3}|{source_out:.3}");
+        for (a, b) in &merged {
+            params.push_str(&format!("|{a:.2}-{b:.2}"));
+        }
+        let out = dir.join(format!("{}.m4a", derived_key(&src, &params)?));
+        if !out.is_file() {
+            reduce_vocals(
+                &locate_tool("ffmpeg", FFMPEG_ENV)?,
+                &src,
+                source_in,
+                seconds,
+                &ranges,
+                &out,
+            )?;
+        }
+        scope.allow_file(&out).map_err(|e| {
+            AppError::InvalidInput(format!("could not enable playback of the new sound: {e}"))
+        })?;
+        let duration = backend.probe(&out)?.duration.unwrap_or(seconds);
+        Ok(MadeAudio {
+            path: out.to_string_lossy().into_owned(),
+            duration,
+        })
+    })
+    .await
+    .map_err(|e| AppError::InvalidInput(format!("sound task failed: {e}")))?
+}
+
+/// A lyrics file larger than this is not read.
+const MAX_LYRICS_BYTES: u64 = 1024 * 1024;
+
+/// A lyrics file the user picked: its name (to show) and its text. The text is only ever parsed as lyrics.
+#[derive(Debug, Serialize)]
+pub struct LyricsFile {
+    pub name: String,
+    pub text: String,
+}
+
+/// Read a text file as lyrics: at most 1 MB, and it must be text (UTF-8, with or without a byte-order
+/// mark; no NUL bytes). Untrusted input: nothing in it is run or followed.
+pub fn read_lyrics(path: &Path) -> AppResult<String> {
+    let bad = |m: &str| AppError::InvalidInput(m.to_string());
+    if std::fs::metadata(path)?.len() > MAX_LYRICS_BYTES {
+        return Err(bad("the file is too large to be lyrics (1 MB at most)"));
+    }
+    let bytes = std::fs::read(path)?;
+    let text = String::from_utf8(bytes).map_err(|_| bad("this is not a text file"))?;
+    if text.contains('\0') {
+        return Err(bad("this is not a text file"));
+    }
+    Ok(text.trim_start_matches('\u{feff}').to_string())
+}
+
+/// Native "Open lyrics" dialog (`.lrc`, `.srt`, `.txt`). The webview never supplies a path. `None` when the
+/// user cancels.
+#[tauri::command]
+pub async fn open_lyrics_file(app: AppHandle) -> AppResult<Option<LyricsFile>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(path) = app
+            .dialog()
+            .file()
+            .add_filter("Lyrics", &["lrc", "srt", "txt"])
+            .blocking_pick_file()
+            .and_then(|p| p.into_path().ok())
+        else {
+            return Ok(None);
+        };
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        Ok(Some(LyricsFile {
+            name,
+            text: read_lyrics(&path)?,
+        }))
+    })
+    .await
+    .map_err(|e| AppError::InvalidInput(format!("lyrics task failed: {e}")))?
+}
+
 /// A colour preset read from a file the user picked.
 #[derive(Debug, Serialize)]
 pub struct ImportedPreset {
@@ -496,6 +759,35 @@ pub async fn import_text_font(app: AppHandle) -> AppResult<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lyrics_files_are_read_as_text_only_and_within_a_size_limit() {
+        let dir = std::env::temp_dir().join(format!("cutvii-lyrics-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let good = dir.join("song.lrc");
+        std::fs::write(&good, "\u{feff}[00:01.00]Halo dunia\n").unwrap();
+        assert_eq!(read_lyrics(&good).unwrap(), "[00:01.00]Halo dunia\n");
+        let binary = dir.join("song.srt");
+        std::fs::write(&binary, [0xff, 0xfe, 0x00, 0x41]).unwrap();
+        assert!(
+            read_lyrics(&binary)
+                .unwrap_err()
+                .to_string()
+                .contains("not a text file")
+        );
+        std::fs::write(&binary, b"abc\0def").unwrap();
+        assert!(read_lyrics(&binary).is_err());
+        let big = dir.join("big.txt");
+        std::fs::write(&big, vec![b'a'; MAX_LYRICS_BYTES as usize + 1]).unwrap();
+        assert!(
+            read_lyrics(&big)
+                .unwrap_err()
+                .to_string()
+                .contains("too large")
+        );
+        assert!(read_lyrics(&dir.join("missing.lrc")).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn derived_keys_depend_on_file_and_parameters() {

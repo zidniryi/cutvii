@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Captions, Scissors, Sparkles } from "lucide-react";
+import { Captions, MicVocal, Scissors, Sparkles } from "lucide-react";
 import { selectClipsReady, useAutoClipsStore } from "@/store/autoClips";
 import { useClipOutputStore } from "@/store/clipOutput";
-import { openAiTools, openAutoClips } from "@/timeline/ai";
+import { openAiTools, openAutoClips, openKaraoke } from "@/timeline/ai";
 
 /** Top bar "AI" menu: the same tools as the inspector's AI tab, reachable from anywhere. */
 export function AiMenu() {
@@ -68,6 +68,9 @@ export function AiMenu() {
                   ? "Review found clips…"
                   : "Find short clips…"}
             {ready && <span className="ml-auto pl-3 text-xs text-accent">Clips ready</span>}
+          </button>
+          <button role="menuitem" className={item} onClick={run(() => openKaraoke())}>
+            <MicVocal className="size-4" /> Karaoke Maker…
           </button>
         </div>
       )}

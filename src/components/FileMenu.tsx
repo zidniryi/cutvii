@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { FilePlus2, FolderOpen, Save, SaveAll } from "lucide-react";
+import { FilePlus2, FolderOpen, Package, Save, SaveAll } from "lucide-react";
+import { useStylePackStore } from "@/store/stylePacks";
 import { IconButton } from "@/components/IconButton";
 import { newProjectFlow, openProjectFlow, saveFlow } from "@/project/fileActions";
 
@@ -8,6 +9,13 @@ const ITEMS = [
   { id: "open", label: "Open…", Icon: FolderOpen, keys: "Ctrl/⌘ O", run: () => openProjectFlow() },
   { id: "save", label: "Save", Icon: Save, keys: "Ctrl/⌘ S", run: () => saveFlow(false) },
   { id: "saveAs", label: "Save as…", Icon: SaveAll, keys: "Ctrl/⌘ Shift S", run: () => saveFlow(true) },
+  {
+    id: "packs",
+    label: "Style packs…",
+    Icon: Package,
+    keys: "",
+    run: () => useStylePackStore.getState().openDialog(),
+  },
 ] as const;
 
 export function FileMenu() {

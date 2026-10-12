@@ -788,6 +788,83 @@ impl TextStyle {
     }
 }
 
+/// File extension of a text style shared between CutVii users.
+pub const STYLE_FILE_EXTENSION: &str = "cutvii-textstyle";
+/// Format number written into a style file.
+pub const STYLE_FILE_FORMAT: u32 = 1;
+/// A style file larger than this is not read (a real one is a few hundred bytes).
+pub const MAX_STYLE_FILE_BYTES: u64 = 64 * 1024;
+/// Longest style name.
+pub const MAX_STYLE_NAME: usize = 40;
+
+/// A text style as a file: a name, the look, and an optional fade. The font is only named, never embedded.
+/// Unknown fields are refused, so a file is exactly this or not a style.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StyleFile {
+    pub cutvii_text_style: u32,
+    pub name: String,
+    /// Kept as the JSON the UI uses; checked by reading it as a [`TextStyle`] and validating that.
+    pub style: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fade: Option<f64>,
+}
+
+/// Check a style that came from outside: the name, the fade, and every value of the look (by drawing
+/// rules, the same ones every text passes). Returns the cleaned-up file content.
+pub fn checked_style_file(
+    name: &str,
+    style: &serde_json::Value,
+    fade: Option<f64>,
+) -> AppResult<StyleFile> {
+    let bad = |m: &str| AppError::InvalidInput(m.to_string());
+    let name = name.trim();
+    if name.is_empty()
+        || name.chars().count() > MAX_STYLE_NAME
+        || name.chars().any(char::is_control)
+    {
+        return Err(bad("a style needs a name of at most 40 characters"));
+    }
+    if fade.is_some_and(|f| !(f.is_finite() && (0.0..=5.0).contains(&f))) {
+        return Err(bad("a fade must be 0 to 5 seconds"));
+    }
+    let look: TextStyle =
+        serde_json::from_value(style.clone()).map_err(|_| bad("this is not a valid text style"))?;
+    if look
+        .font
+        .as_deref()
+        .is_some_and(|f| f.chars().count() > 80 || f.chars().any(char::is_control))
+    {
+        return Err(bad("this is not a valid text style"));
+    }
+    look.on(&sample_spec("Aa".into()))
+        .validate()
+        .map_err(|_| bad("this is not a valid text style"))?;
+    Ok(StyleFile {
+        cutvii_text_style: STYLE_FILE_FORMAT,
+        name: name.to_string(),
+        style: style.clone(),
+        fade: fade.filter(|f| *f > 0.0),
+    })
+}
+
+/// Read a `.cutvii-textstyle` file. UNTRUSTED input: size capped before reading, must be exactly a style
+/// file of our format, and everything in it is checked. Nothing in it is a path and nothing is run.
+pub fn read_style_file(path: &Path) -> AppResult<StyleFile> {
+    let bad = |m: &str| AppError::InvalidInput(m.to_string());
+    if fs::metadata(path)?.len() > MAX_STYLE_FILE_BYTES {
+        return Err(bad("the file is too large to be a text style"));
+    }
+    let text =
+        String::from_utf8(fs::read(path)?).map_err(|_| bad("this is not a CutVii text style"))?;
+    let file: StyleFile =
+        serde_json::from_str(&text).map_err(|_| bad("this is not a CutVii text style"))?;
+    if file.cutvii_text_style != STYLE_FILE_FORMAT {
+        return Err(bad("this style was made by a newer CutVii"));
+    }
+    checked_style_file(&file.name, &file.style, file.fade)
+}
+
 /// A ready-made text style from `presets/text-styles.json` (the file the UI reads). The app itself only
 /// draws styles the UI sends; this is how the tests check that the bundled file is valid for Rust too.
 #[cfg(test)]
@@ -1308,6 +1385,83 @@ mod tests {
                 preset.id
             );
         }
+    }
+
+    #[test]
+    fn style_files_round_trip_and_untrusted_ones_are_refused() {
+        let style = serde_json::json!({
+            "color": "#FFE14A", "bold": true, "font": "A Font Nobody Has",
+            "outline": {"color": "#000000", "width": 0.1}
+        });
+        let file = checked_style_file("  My yellow ", &style, Some(0.4)).unwrap();
+        assert_eq!(file.name, "My yellow");
+        let text = serde_json::to_string_pretty(&file).unwrap();
+        assert!(text.contains("\"cutviiTextStyle\": 1"));
+        // only a font NAME travels: no font data, no paths
+        assert!(text.len() < 400 && !text.contains('/'));
+        let dir = std::env::temp_dir().join(format!("cutvii-stylefile-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("my.cutvii-textstyle");
+        fs::write(&path, &text).unwrap();
+        assert_eq!(read_style_file(&path).unwrap(), file);
+        // no fade is not written, and 0 means none
+        assert_eq!(
+            checked_style_file("Plain", &style, Some(0.0)).unwrap().fade,
+            None
+        );
+
+        let refuse = |name: &str, body: &[u8], says: &str| {
+            let p = dir.join(name);
+            fs::write(&p, body).unwrap();
+            let e = read_style_file(&p).unwrap_err().to_string();
+            assert!(e.contains(says), "{name}: {e}");
+        };
+        refuse("garbage", b"\x00\xff", "not a CutVii text style");
+        refuse(
+            "other-json",
+            br##"{"cutviiPreset": 1, "name": "x", "adjust": {}}"##,
+            "not a CutVii text style",
+        );
+        refuse(
+            "extra",
+            text.replace("\"name\"", "\"run\": \"rm -rf\", \"name\"")
+                .as_bytes(),
+            "not a CutVii text style",
+        );
+        refuse(
+            "newer",
+            text.replace("\"cutviiTextStyle\": 1", "\"cutviiTextStyle\": 9")
+                .as_bytes(),
+            "newer",
+        );
+        refuse(
+            "colour",
+            text.replace("#FFE14A", "yellow").as_bytes(),
+            "not a valid text style",
+        );
+        refuse(
+            "range",
+            text.replace("0.1", "99").as_bytes(),
+            "not a valid text style",
+        );
+        refuse(
+            "field",
+            text.replace("\"bold\"", "\"script\"").as_bytes(),
+            "not a valid text style",
+        );
+        refuse(
+            "noname",
+            text.replace("My yellow", " ").as_bytes(),
+            "needs a name",
+        );
+        refuse("fade", text.replace("0.4", "60").as_bytes(), "fade must be");
+        refuse(
+            "big",
+            &vec![b' '; MAX_STYLE_FILE_BYTES as usize + 1],
+            "too large",
+        );
+        assert!(read_style_file(&dir.join("missing")).is_err());
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

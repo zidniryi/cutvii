@@ -1,3 +1,4 @@
+import { ExportPresets } from "@/components/ExportPresets";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AudioLines,
@@ -110,8 +111,14 @@ function ExportDialogBody() {
   const duration = projectDuration(project);
   const audioOnly = isAudioFormat(options.format);
   const format = FORMATS.find((f) => f.id === options.format)!;
-  const presetId =
-    presets.find((p) => p.width === options.width && p.height === options.height)?.id ?? "project";
+  // A preset of the user's may hold a size or frame rate that is not among the usual choices: it is
+  // shown as its own choice, so what is selected is always what will be exported.
+  const listed = presets.find((p) => p.width === options.width && p.height === options.height);
+  const sizes = listed
+    ? presets
+    : [...presets, { id: "preset-size", label: "Preset size", width: options.width, height: options.height }];
+  const presetId = listed?.id ?? "preset-size";
+  const rates = fpsList.includes(options.fps) ? fpsList : [...fpsList, options.fps].sort((a, b) => a - b);
   const pct = Math.round(progress * 100);
   const fpsLabel = (f: number) => (Number.isInteger(f) ? String(f) : String(Math.round(f * 100) / 100));
 
@@ -141,6 +148,7 @@ function ExportDialogBody() {
         {phase === "settings" && (
           <>
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
+              <ExportPresets options={options} onApply={setOptions} />
               <Choices
                 label="Format"
                 columns={3}
@@ -153,13 +161,13 @@ function ExportDialogBody() {
                 <>
                   <Choices
                     label="Resolution"
-                    columns={Math.min(presets.length, 3)}
+                    columns={Math.min(sizes.length, 3)}
                     value={presetId}
                     onChange={(id) => {
-                      const p = presets.find((r) => r.id === id)!;
+                      const p = sizes.find((r) => r.id === id)!;
                       setOptions((o) => ({ ...o, width: p.width, height: p.height }));
                     }}
-                    options={presets.map((p) => ({
+                    options={sizes.map((p) => ({
                       value: p.id,
                       title: p.label,
                       detail: `${p.width}×${p.height}`,
@@ -167,10 +175,10 @@ function ExportDialogBody() {
                   />
                   <Choices
                     label="Frame rate"
-                    columns={Math.min(fpsList.length, 6)}
+                    columns={Math.min(rates.length, 6)}
                     value={options.fps}
                     onChange={(f) => setOptions((o) => ({ ...o, fps: f }))}
-                    options={fpsList.map((f) => ({
+                    options={rates.map((f) => ({
                       value: f,
                       title: `${fpsLabel(f)} fps`,
                       detail: f === project.settings.fps ? "project" : undefined,
