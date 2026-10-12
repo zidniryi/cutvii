@@ -42,6 +42,7 @@
           "$APPCACHE/waveforms/**",
           "$APPCACHE/font-previews/**",
           "$APPCACHE/luts/**",
+          "$APPCACHE/look-previews/**",
           "$APPCACHE/text-style-previews/**"
         ]
       },

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ClipboardCopy, ClipboardPaste, CopyCheck } from "lucide-react";
+import { ClipboardCopy, ClipboardPaste, CopyCheck, FolderInput, MoreHorizontal, Save } from "lucide-react";
 import { confirmDialog } from "@/lib/dialog";
 import { thumbnailUrl } from "@/lib/media";
 import { cn } from "@/lib/utils";
@@ -9,7 +9,8 @@ import { useProjectStore } from "@/store/project";
 import { useUiStore } from "@/store/ui";
 import { colorOf, isGraded, NO_COLOR, sameColor } from "@/timeline/color";
 import { applyColorToAll, changeColor, report } from "@/timeline/editor";
-import { colourClipCount, lookAt, LOOKS, matchLook } from "@/timeline/looks";
+import { isOwnPreset, MAX_PRESET_NAME, useColorPresetStore } from "@/store/colorPresets";
+import { colourClipCount, lookAt, LOOKS, matchLook, type Look } from "@/timeline/looks";
 
 const quiet =
   "flex h-8 items-center gap-1 rounded-md border px-2 text-xs text-text-muted hover:text-text disabled:opacity-40 pointer-coarse:h-11 [&_svg]:size-3.5";
@@ -19,36 +20,205 @@ function Card({
   picture,
   selected,
   onSelect,
+  menu,
 }: {
   name: string;
   picture?: string;
   selected: boolean;
   onSelect: () => void;
+  /** A menu button over the card (the user's own presets). */
+  menu?: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      aria-label={name}
-      aria-pressed={selected}
-      title={name}
-      onClick={onSelect}
-      className={cn(
-        "overflow-hidden rounded-md border bg-surface-2 text-left focus-visible:outline-accent pointer-coarse:min-h-11",
-        selected ? "border-accent ring-1 ring-accent" : "border-border",
+    <div className="relative">
+      <button
+        type="button"
+        aria-label={name}
+        aria-pressed={selected}
+        title={name}
+        onClick={onSelect}
+        className={cn(
+          "block w-full overflow-hidden rounded-md border bg-surface-2 text-left focus-visible:outline-accent pointer-coarse:min-h-11",
+          selected ? "border-accent ring-1 ring-accent" : "border-border",
+        )}
+      >
+        {picture ? (
+          <img
+            src={thumbnailUrl(picture)}
+            alt=""
+            draggable={false}
+            className="aspect-video w-full object-cover"
+          />
+        ) : (
+          <span aria-hidden className="block aspect-video w-full bg-surface-1" />
+        )}
+        <span className="block truncate px-1.5 py-1 text-[11px] text-text-muted">{name}</span>
+      </button>
+      {menu}
+    </div>
+  );
+}
+
+const menuItem =
+  "flex h-9 w-full items-center rounded-sm px-2 text-left text-xs hover:bg-accent-soft pointer-coarse:h-11";
+
+/** Rename, duplicate, export and delete for one of the user's presets. */
+function PresetMenu({ preset }: { preset: Look }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const store = useColorPresetStore.getState;
+  const close = () => {
+    setOpen(false);
+    setName(null);
+    setProblem(null);
+  };
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+  async function exportIt() {
+    close();
+    try {
+      const path = await store().exportFile(preset.id);
+      if (path) useUiStore.getState().setNotice(`Preset saved as ${path}`);
+    } catch (e) {
+      useUiStore.getState().setNotice(`Could not export the preset: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+  return (
+    <>
+      <button
+        type="button"
+        aria-label={`${preset.name} options`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => (open ? close() : setOpen(true))}
+        className="absolute top-1 right-1 flex size-6 items-center justify-center rounded-md bg-black/60 text-text-muted hover:text-text pointer-coarse:size-11 [&_svg]:size-3.5"
+      >
+        <MoreHorizontal />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          aria-label={`${preset.name} preset`}
+          className="absolute top-8 right-0 z-20 w-40 rounded-md border bg-popover p-1 shadow-lg"
+        >
+          {name !== null ? (
+            <form
+              className="space-y-1 p-1"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const failed = store().rename(preset.id, name);
+                if (failed) setProblem(failed);
+                else close();
+              }}
+            >
+              <input
+                autoFocus
+                aria-label="New name"
+                maxLength={MAX_PRESET_NAME}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="h-9 w-full rounded-md border bg-surface-2 px-2 text-xs focus-visible:outline-accent pointer-coarse:h-11"
+              />
+              {problem && (
+                <p role="alert" className="text-[11px] text-danger">
+                  {problem}
+                </p>
+              )}
+              <button type="submit" className={cn(menuItem, "justify-center border")}>
+                Rename
+              </button>
+            </form>
+          ) : (
+            <>
+              <button role="menuitem" className={menuItem} onClick={() => setName(preset.name)}>
+                Rename
+              </button>
+              <button
+                role="menuitem"
+                className={menuItem}
+                onClick={() => {
+                  store().duplicate(preset.id);
+                  close();
+                }}
+              >
+                Duplicate
+              </button>
+              <button role="menuitem" className={menuItem} onClick={() => void exportIt()}>
+                Export as a file…
+              </button>
+              <button
+                role="menuitem"
+                className={cn(menuItem, "text-danger")}
+                onClick={() => {
+                  store().remove(preset.id);
+                  close();
+                }}
+              >
+                Delete
+              </button>
+            </>
+          )}
+        </div>
       )}
+    </>
+  );
+}
+
+/** "Save as preset": a name, then the clip's current colour becomes one of the user's presets. */
+function SavePreset({ adjust }: { adjust: ColorAdjust }) {
+  const [name, setName] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  if (name === null) {
+    return (
+      <button
+        type="button"
+        className={quiet}
+        disabled={!isGraded(adjust)}
+        title={isGraded(adjust) ? undefined : "Change a colour slider or choose a look first"}
+        onClick={() => setName("")}
+      >
+        <Save /> Save as preset
+      </button>
+    );
+  }
+  return (
+    <form
+      className="flex w-full flex-wrap items-center gap-1"
+      onSubmit={(e) => {
+        e.preventDefault();
+        const result = useColorPresetStore.getState().save(name, adjust);
+        if ("problem" in result) return setProblem(result.problem);
+        setName(null);
+        setProblem(null);
+      }}
     >
-      {picture ? (
-        <img
-          src={thumbnailUrl(picture)}
-          alt=""
-          draggable={false}
-          className="aspect-video w-full object-cover"
-        />
-      ) : (
-        <span aria-hidden className="block aspect-video w-full bg-surface-1" />
+      <input
+        autoFocus
+        aria-label="Preset name"
+        placeholder="Preset name"
+        maxLength={MAX_PRESET_NAME}
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => e.key === "Escape" && (setName(null), setProblem(null))}
+        className="h-8 min-w-0 flex-1 rounded-md border bg-surface-2 px-2 text-xs focus-visible:outline-accent pointer-coarse:h-11"
+      />
+      <button type="submit" className={quiet}>
+        Save
+      </button>
+      <button type="button" className={quiet} onClick={() => (setName(null), setProblem(null))}>
+        Cancel
+      </button>
+      {problem && (
+        <p role="alert" className="w-full text-[11px] text-danger">
+          {problem}
+        </p>
       )}
-      <span className="block truncate px-1.5 py-1 text-[11px] text-text-muted">{name}</span>
-    </button>
+    </form>
   );
 }
 
@@ -59,8 +229,10 @@ function Card({
  */
 export function LooksPanel({ clip, asset }: { clip: TimelineClip; asset: MediaAsset }) {
   const stored = colorOf(clip);
-  const match = matchLook(stored);
-  const look = LOOKS.find((l) => l.id === match?.id);
+  const mine = useColorPresetStore((s) => s.mine);
+  const all = [...LOOKS, ...mine];
+  const match = matchLook(stored, all);
+  const look = all.find((l) => l.id === match?.id);
   const [dragging, setDragging] = useState<number | null>(null);
   // Neighbouring percents can give the same values; keep showing the one the user let go of, as long as
   // it still describes the clip, so the slider does not jump by one after a drag.
@@ -74,8 +246,10 @@ export function LooksPanel({ clip, asset }: { clip: TimelineClip; asset: MediaAs
   const frameAt = asset.type === "image" ? 0 : at;
   const pictures = useLookPreviewStore((s) => s.pictures);
   useEffect(() => {
-    useLookPreviewStore.getState().ensure(asset.path, frameAt, [NO_COLOR, ...LOOKS.map((l) => l.adjust)]);
-  }, [asset.path, frameAt]);
+    useLookPreviewStore
+      .getState()
+      .ensure(asset.path, frameAt, [NO_COLOR, ...LOOKS.map((l) => l.adjust), ...mine.map((l) => l.adjust)]);
+  }, [asset.path, frameAt, mine]);
   useEffect(() => () => useUiStore.getState().setColorDraft(null), [clip.id]);
   const picture = (adjust: ColorAdjust) => pictures[lookPreviewKey(asset.path, frameAt, adjust)];
 
@@ -97,6 +271,19 @@ export function LooksPanel({ clip, asset }: { clip: TimelineClip; asset: MediaAs
     report(changeColor(clip.id, value === 0 ? null : lookAt(look.adjust, value), true));
     useUiStore.getState().setColorDraft(null);
   }
+  async function importPresets() {
+    try {
+      const { added, skipped, problems } = await useColorPresetStore.getState().importFiles();
+      const parts = [
+        added.length > 0 ? `Imported ${added.join(", ")}.` : "",
+        skipped.length > 0 ? `Already had ${skipped.join(", ")}.` : "",
+        ...problems.map((p) => `${p.file}: ${p.message}.`),
+      ].filter(Boolean);
+      if (parts.length > 0) useUiStore.getState().setNotice(parts.join(" "));
+    } catch (e) {
+      useUiStore.getState().setNotice(`Could not import: ${e instanceof Error ? e.message : e}`);
+    }
+  }
   async function applyToAll() {
     const others = total - 1;
     const agreed = await confirmDialog({
@@ -111,8 +298,8 @@ export function LooksPanel({ clip, asset }: { clip: TimelineClip; asset: MediaAs
   }
 
   return (
-    <div role="group" aria-label="Looks" className="space-y-2">
-      <p className="text-xs text-text-muted">Looks</p>
+    <div role="group" aria-label="Presets" className="space-y-2">
+      <p className="text-xs text-text-muted">Presets</p>
       <div className="grid grid-cols-3 gap-1.5">
         <Card
           name="None"
@@ -130,6 +317,23 @@ export function LooksPanel({ clip, asset }: { clip: TimelineClip; asset: MediaAs
           />
         ))}
       </div>
+      {mine.length > 0 && (
+        <div role="group" aria-label="My presets" className="space-y-1">
+          <p className="text-xs text-text-muted">My presets</p>
+          <div className="grid grid-cols-3 gap-1.5">
+            {mine.map((l) => (
+              <Card
+                key={l.id}
+                name={l.name}
+                picture={picture(l.adjust)}
+                selected={match?.id === l.id}
+                onSelect={() => choose(l.adjust)}
+                menu={isOwnPreset(l.id) ? <PresetMenu preset={l} /> : undefined}
+              />
+            ))}
+          </div>
+        </div>
+      )}
       <div>
         <div className="mb-1 flex items-center justify-between text-xs text-text-muted">
           <label htmlFor="look-intensity">Intensity{look ? ` of ${look.name}` : ""}</label>
@@ -185,6 +389,10 @@ export function LooksPanel({ clip, asset }: { clip: TimelineClip; asset: MediaAs
           onClick={() => void applyToAll()}
         >
           <CopyCheck /> Apply to all clips
+        </button>
+        <SavePreset adjust={stored} />
+        <button type="button" className={quiet} onClick={() => void importPresets()}>
+          <FolderInput /> Import preset…
         </button>
       </div>
     </div>

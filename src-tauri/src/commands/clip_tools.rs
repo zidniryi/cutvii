@@ -10,12 +10,15 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::commands::export::reveal_command;
+use crate::commands::export::safe_file_stem;
 use crate::errors::{AppError, AppResult};
 use crate::media::MediaBackend;
 use crate::media::color::{ColorAdjust, ensure_lut};
 use crate::media::ffmpeg::FfmpegBackend;
 use crate::media::import::{ImportedMedia, cache_key, import_one};
-use crate::media::looks::{ensure_look_previews, read_frame};
+use crate::media::looks::{
+    PRESET_EXTENSION, ensure_look_previews, preset_file_text, read_frame, read_preset, write_preset,
+};
 use crate::media::probe::MediaDetails;
 use crate::media::text::{
     FONT_EXTENSIONS, FontInfo, TextSpec, TextStyle, ensure_font_preview, ensure_style_preview,
@@ -299,6 +302,92 @@ pub async fn look_previews(
     })
     .await
     .map_err(|e| AppError::InvalidInput(format!("look preview task failed: {e}")))?
+}
+
+/// Save one of the user's colour presets as a `.cutviipreset` file to share. The native dialog picks the
+/// place (the webview never supplies a path); the name only suggests the file name. Returns the path
+/// written, or `None` when the dialog is dismissed.
+#[tauri::command]
+pub async fn export_color_preset(
+    app: AppHandle,
+    name: String,
+    adjust: ColorAdjust,
+) -> AppResult<Option<String>> {
+    let text = preset_file_text(&name, &adjust)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(mut out) = app
+            .dialog()
+            .file()
+            .add_filter("CutVii colour preset", &[PRESET_EXTENSION])
+            .set_file_name(format!("{}.{PRESET_EXTENSION}", safe_file_stem(&name)))
+            .blocking_save_file()
+            .and_then(|p| p.into_path().ok())
+        else {
+            return Ok(None);
+        };
+        if out.extension().is_none() {
+            out.set_extension(PRESET_EXTENSION);
+        }
+        write_preset(&out, &text)?;
+        Ok(Some(out.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(|e| AppError::InvalidInput(format!("preset task failed: {e}")))?
+}
+
+/// A colour preset read from a file the user picked.
+#[derive(Debug, Serialize)]
+pub struct ImportedPreset {
+    pub name: String,
+    pub adjust: ColorAdjust,
+}
+
+/// What an import found: the presets that are fine, and for each refused file its name and the reason.
+#[derive(Debug, Serialize)]
+pub struct PresetImport {
+    pub presets: Vec<ImportedPreset>,
+    pub problems: Vec<(String, String)>,
+}
+
+/// Most files one import reads.
+const MAX_PRESET_FILES: usize = 50;
+
+/// Native "Import preset" dialog: read the chosen `.cutviipreset` files and return what is in them. Every
+/// file is checked as untrusted input (see `read_preset`); a bad file is reported and the others still
+/// load. The webview never supplies a path. Empty when the user cancels.
+#[tauri::command]
+pub async fn import_color_presets(app: AppHandle) -> AppResult<PresetImport> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let picked = app
+            .dialog()
+            .file()
+            .add_filter("CutVii colour preset", &[PRESET_EXTENSION])
+            .blocking_pick_files()
+            .unwrap_or_default();
+        let mut found = PresetImport {
+            presets: Vec::new(),
+            problems: Vec::new(),
+        };
+        for file in picked.into_iter().take(MAX_PRESET_FILES) {
+            let Ok(path) = file.into_path() else {
+                continue;
+            };
+            let shown = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            match read_preset(&path) {
+                Ok(p) => found.presets.push(ImportedPreset {
+                    name: p.name,
+                    adjust: p.adjust,
+                }),
+                Err(e) => found.problems.push((shown, e.to_string())),
+            }
+        }
+        Ok(found)
+    })
+    .await
+    .map_err(|e| AppError::InvalidInput(format!("preset task failed: {e}")))?
 }
 
 /// The sample picture of a text style (a bundled one or the user's own), drawn by the same rasterizer as

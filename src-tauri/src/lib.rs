@@ -45,6 +45,8 @@ pub fn run() {
             commands::clip_tools::text_style_preview,
             commands::clip_tools::bake_color_lut,
             commands::clip_tools::look_previews,
+            commands::clip_tools::export_color_preset,
+            commands::clip_tools::import_color_presets,
             commands::ai::whisper_models,
             commands::ai::download_whisper_model,
             commands::ai::cancel_ai_job,

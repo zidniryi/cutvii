@@ -30,6 +30,19 @@ export function withStyle(spec: TextSpec, style: TextStyle): TextSpec {
   };
 }
 
+/** The look of a text, without its words, size or place: what "Save as style" keeps. */
+export function styleOfSpec(spec: TextSpec): TextStyle {
+  return {
+    color: spec.color,
+    ...Object.fromEntries(
+      STYLE_KEYS.filter((k) => k !== "color" && spec[k] !== undefined && spec[k] !== false).map((k) => [
+        k,
+        spec[k],
+      ]),
+    ),
+  };
+}
+
 const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 /** `false` and "not set" are the same look. */
 const flag = (v: boolean | undefined) => v === true;

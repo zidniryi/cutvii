@@ -127,10 +127,192 @@ pub fn ensure_look_previews(
     Ok(paths)
 }
 
+/// File extension of a colour preset shared between CutVii users.
+pub const PRESET_EXTENSION: &str = "cutviipreset";
+/// Format number written into a preset file.
+pub const PRESET_FORMAT: u32 = 1;
+/// Longest preset name.
+pub const MAX_PRESET_NAME: usize = 40;
+
+/// A colour preset as a file: a name and the Adjust values, nothing else. Unknown fields are refused when
+/// reading, so a file is either exactly this or not a preset.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PresetFile {
+    pub cutvii_preset: u32,
+    pub name: String,
+    pub adjust: ColorAdjust,
+}
+
+/// The text of a preset file for `name` and `adjust`, after checking both.
+pub fn preset_file_text(name: &str, adjust: &ColorAdjust) -> AppResult<String> {
+    let name = name.trim();
+    if name.is_empty()
+        || name.chars().count() > MAX_PRESET_NAME
+        || name.chars().any(char::is_control)
+    {
+        return Err(AppError::InvalidInput(
+            "a preset needs a name of at most 40 characters".into(),
+        ));
+    }
+    if !adjust.is_valid() {
+        return Err(AppError::InvalidInput(
+            "colour values must be between -1 and 1".into(),
+        ));
+    }
+    serde_json::to_string_pretty(&PresetFile {
+        cutvii_preset: PRESET_FORMAT,
+        name: name.to_string(),
+        adjust: *adjust,
+    })
+    .map_err(|e| AppError::InvalidInput(format!("preset file: {e}")))
+}
+
+/// A preset file larger than this is not read (a real one is a few hundred bytes).
+pub const MAX_PRESET_BYTES: u64 = 64 * 1024;
+
+/// Read a `.cutviipreset` file. It is UNTRUSTED input: the size is capped before reading, the text must be
+/// exactly a preset (unknown fields are refused), the format number must be ours, and the name and every
+/// value are checked. Nothing in the file is a path, and nothing in it is run.
+pub fn read_preset(path: &Path) -> AppResult<PresetFile> {
+    let bad = |m: &str| AppError::InvalidInput(m.to_string());
+    let size = fs::metadata(path)?.len();
+    if size > MAX_PRESET_BYTES {
+        return Err(bad("the file is too large to be a colour preset"));
+    }
+    let text = String::from_utf8(fs::read(path)?)
+        .map_err(|_| bad("this is not a CutVii colour preset"))?;
+    let preset: PresetFile =
+        serde_json::from_str(&text).map_err(|_| bad("this is not a CutVii colour preset"))?;
+    if preset.cutvii_preset != PRESET_FORMAT {
+        return Err(bad("this preset was made by a newer CutVii"));
+    }
+    // the same checks a preset passes before it is written
+    preset_file_text(&preset.name, &preset.adjust)?;
+    if preset.adjust.is_identity() {
+        return Err(bad("this preset changes nothing"));
+    }
+    Ok(PresetFile {
+        name: preset.name.trim().to_string(),
+        ..preset
+    })
+}
+
+/// Write `text` to `out` through a temporary file, so a failed write never leaves half a preset.
+pub fn write_preset(out: &Path, text: &str) -> AppResult<()> {
+    let tmp = out.with_extension(format!("part-{}", std::process::id()));
+    if let Err(e) = fs::write(&tmp, text) {
+        fs::remove_file(&tmp).ok();
+        return Err(e.into());
+    }
+    fs::rename(&tmp, out)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::cell::Cell;
+
+    #[test]
+    fn a_preset_file_holds_the_name_and_values_and_bad_input_is_refused() {
+        let adjust = ColorAdjust {
+            exposure: 0.25,
+            tint: -0.5,
+            ..ColorAdjust::default()
+        };
+        let text = preset_file_text("  My warm look ", &adjust).unwrap();
+        let back: PresetFile = serde_json::from_str(&text).unwrap();
+        assert_eq!(
+            back,
+            PresetFile {
+                cutvii_preset: PRESET_FORMAT,
+                name: "My warm look".into(),
+                adjust
+            }
+        );
+        assert!(text.contains("\"cutviiPreset\": 1"));
+        assert!(preset_file_text("", &adjust).is_err());
+        assert!(preset_file_text(&"x".repeat(41), &adjust).is_err());
+        assert!(preset_file_text("line\nbreak", &adjust).is_err());
+        let wild = ColorAdjust {
+            exposure: 9.0,
+            ..adjust
+        };
+        assert!(preset_file_text("Bad", &wild).is_err());
+
+        let dir = std::env::temp_dir().join(format!("cutvii-preset-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("look.cutviipreset");
+        write_preset(&out, &text).unwrap();
+        // what was exported reads back as exactly the same preset
+        assert_eq!(read_preset(&out).unwrap(), back);
+
+        // untrusted files: each of these is refused with a message, never a panic
+        let refuse = |name: &str, body: &[u8], says: &str| {
+            let file = dir.join(name);
+            fs::write(&file, body).unwrap();
+            let e = read_preset(&file).unwrap_err().to_string();
+            assert!(e.contains(says), "{name}: {e}");
+            fs::remove_file(&file).unwrap();
+        };
+        refuse(
+            "garbage",
+            b"\x00\xff not json",
+            "not a CutVii colour preset",
+        );
+        refuse("json", br#"{"hello": 1}"#, "not a CutVii colour preset");
+        refuse(
+            "extra",
+            text.replace("\"name\"", "\"path\": \"/etc/passwd\", \"name\"")
+                .as_bytes(),
+            "not a CutVii colour preset",
+        );
+        refuse(
+            "newer",
+            text.replace("\"cutviiPreset\": 1", "\"cutviiPreset\": 2")
+                .as_bytes(),
+            "newer",
+        );
+        refuse(
+            "range",
+            text.replace("0.25", "25").as_bytes(),
+            "between -1 and 1",
+        );
+        refuse(
+            "nan",
+            text.replace("0.25", "NaN").as_bytes(),
+            "not a CutVii colour preset",
+        );
+        refuse(
+            "noname",
+            text.replace("My warm look", "  ").as_bytes(),
+            "needs a name",
+        );
+        refuse(
+            "big",
+            &vec![b' '; MAX_PRESET_BYTES as usize + 1],
+            "too large",
+        );
+        let nothing = preset_file_text(
+            "Flat",
+            &ColorAdjust {
+                exposure: 0.1,
+                ..ColorAdjust::default()
+            },
+        )
+        .unwrap()
+        .replace("0.1", "0.0");
+        refuse("identity", nothing.as_bytes(), "changes nothing");
+        assert!(read_preset(&dir.join("missing")).is_err());
+        assert_eq!(fs::read_to_string(&out).unwrap(), text);
+        assert_eq!(
+            fs::read_dir(&dir).unwrap().count(),
+            1,
+            "no temporary file left"
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
 
     /// The bundled looks file, read the way the UI reads it.
     #[derive(serde::Deserialize)]

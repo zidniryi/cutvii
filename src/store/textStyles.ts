@@ -84,6 +84,8 @@ interface StyleState extends Prefs {
   resetOrder: () => void;
   /** Make a new style of the user's, starting from `from` (or a plain one). Returns its id. */
   create: (from?: StylePreset) => string | null;
+  /** Save a look under a name as one of the user's styles. Returns its id, or why it could not be saved. */
+  saveAs: (name: string, style: TextStyle, fade?: number) => { id: string } | { problem: string };
   rename: (id: string, name: string) => string | null;
   update: (id: string, change: CustomStyle) => void;
   remove: (id: string) => void;
@@ -138,6 +140,24 @@ export const useTextStyleStore = create<StyleState>((set, get) => {
         : { id, name: freeName("My style"), style: { color: "#FFFFFF", bold: true } };
       keep((s) => ({ mine: [...s.mine, style], order: [id, ...s.order] }));
       return id;
+    },
+    saveAs: (name, style, fade) => {
+      const wanted = name.trim();
+      if (!wanted) return { problem: "A style needs a name" };
+      if (wanted.length > MAX_STYLE_NAME)
+        return { problem: `A name can be ${MAX_STYLE_NAME} characters at most` };
+      if ([...STYLE_PRESETS, ...get().mine].some((p) => p.name.toLowerCase() === wanted.toLowerCase()))
+        return { problem: "Another style already has that name" };
+      if (get().mine.length >= MAX_OWN_STYLES) return { problem: "You have the most styles CutVii keeps" };
+      const parsed = StylePresetSchema.safeParse({
+        id: `my-${crypto.randomUUID()}`,
+        name: wanted,
+        style,
+        ...(fade && fade > 0 ? { fade: Math.min(5, fade) } : {}),
+      });
+      if (!parsed.success) return { problem: "This look cannot be saved as a style" };
+      keep((s) => ({ mine: [...s.mine, parsed.data], order: [parsed.data.id, ...s.order] }));
+      return { id: parsed.data.id };
     },
     rename: (id, name) => {
       const wanted = name.trim();

@@ -132,3 +132,72 @@ describe("the Auto clips default style", () => {
     expect(subtitleStyleOf(store()).id).toBe("boxed");
   });
 });
+
+describe("saving a text's look as a style", () => {
+  it("keeps the look, not the words, size or place, and refuses bad or taken names", async () => {
+    const { styleOfSpec, matchesStyle } = await import("@/timeline/textStyles");
+    const spec = {
+      content: "Hello",
+      fontSize: 80,
+      color: "#FFE14A",
+      bold: true,
+      uppercase: false,
+      font: "Anton",
+      outline: { color: "#000000", width: 0.1 },
+      align: "center" as const,
+      x: 0.3,
+      y: 0.7,
+    };
+    const style = styleOfSpec(spec);
+    expect(style).toEqual({
+      color: "#FFE14A",
+      bold: true,
+      font: "Anton",
+      outline: { color: "#000000", width: 0.1 },
+    });
+    expect(matchesStyle(spec, style)).toBe(true);
+
+    const saved = store().saveAs("  My yellow  ", style, 0.4);
+    expect("id" in saved).toBe(true);
+    expect(store().mine).toMatchObject([{ name: "My yellow", style, fade: 0.4 }]);
+    // newest first in every list, and kept between sessions
+    expect(orderedStyles(store())[0].name).toBe("My yellow");
+    expect(JSON.parse(localStorage.getItem(PREFS_KEY)!).mine).toHaveLength(1);
+
+    expect(store().saveAs("", style)).toEqual({ problem: "A style needs a name" });
+    expect(store().saveAs("my yellow", style)).toMatchObject({
+      problem: expect.stringMatching(/already has that name/),
+    });
+    expect(store().saveAs("Orange Cut", style)).toMatchObject({
+      problem: expect.stringMatching(/already has that name/),
+    });
+    expect(store().saveAs("x".repeat(41), style)).toMatchObject({
+      problem: expect.stringMatching(/40 characters/),
+    });
+    expect(store().saveAs("Broken", { color: "yellow" })).toEqual({
+      problem: "This look cannot be saved as a style",
+    });
+    expect(store().mine).toHaveLength(1);
+  });
+
+  it("is offered in the Text tab for a look that is not a style yet", async () => {
+    const { StyleGallery } = await import("@/components/inspector/StyleGallery");
+    const spec = { content: "Hi", fontSize: 60, color: "#12AB34", bold: true, x: 0.5, y: 0.5 };
+    const view = render(<StyleGallery clipId="t" spec={spec} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save as style" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Style name" }), {
+      target: { value: "Green note" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(store().mine.map((p) => p.name)).toEqual(["Green note"]);
+    // now it IS a style: there is nothing new to save
+    expect(screen.getByRole("button", { name: "Save as style" })).toBeDisabled();
+    view.unmount();
+
+    const plain = STYLE_PRESETS[0];
+    render(
+      <StyleGallery clipId="t" spec={{ content: "Hi", fontSize: 60, x: 0.5, y: 0.5, ...plain.style }} />,
+    );
+    expect(screen.getByRole("button", { name: "Save as style" })).toBeDisabled();
+  });
+});

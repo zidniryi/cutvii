@@ -109,6 +109,9 @@ function setup(canvas: HTMLCanvasElement): Gl | null {
   return { gl, sizeUniform: gl.getUniformLocation(program, "size"), srcTexture, lutTexture };
 }
 
+/** Canvases whose context is about to be released, unless they are set up again first. */
+const releasing = new WeakMap<HTMLCanvasElement, ReturnType<typeof setTimeout>>();
+
 /**
  * The picture of `source` with a colour table applied, drawn over that element (which stays in place: a
  * video keeps decoding there). `source` must be loaded with CORS (`crossOrigin="anonymous"`), or the
@@ -139,10 +142,25 @@ export function ColorCanvas({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    // the canvas is in use (again): it keeps its context
+    clearTimeout(releasing.get(canvas));
+    releasing.delete(canvas);
     state.current = setup(canvas);
     return () => {
-      state.current?.gl.getExtension("WEBGL_lose_context")?.loseContext();
+      const gl = state.current?.gl;
       state.current = null;
+      // Free the GPU context only once the canvas is really gone. React's development mode runs every
+      // effect, its cleanup and the effect again on the same canvas; losing the context in that cleanup
+      // left the canvas dead (a canvas only ever has one context), so no colour was ever drawn in dev.
+      if (gl) {
+        releasing.set(
+          canvas,
+          setTimeout(() => {
+            releasing.delete(canvas);
+            gl.getExtension("WEBGL_lose_context")?.loseContext();
+          }, 0),
+        );
+      }
     };
   }, []);
 
