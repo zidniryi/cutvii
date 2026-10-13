@@ -280,17 +280,31 @@ impl MediaBackend for FfmpegBackend {
         require_file(path)?;
         // Render to a temp file and rename, so a failed run never leaves a corrupt cache entry.
         let tmp = out.with_extension("tmp");
-        let result = command(&self.ffmpeg)
-            .args(["-y", "-v", "error", "-ss"])
-            .arg(format!("{:.3}", at_seconds.max(0.0)))
-            .arg("-i")
-            .arg(path)
-            .args(["-frames:v", "1", "-vf"])
-            .arg(format!("scale={THUMBNAIL_WIDTH}:-2"))
-            .args(["-q:v", "4", "-f", "image2"])
-            .arg(&tmp)
-            .output()?;
-        if !result.status.success() || !tmp.is_file() {
+        // Seeking is asked for only when there is somewhere to seek to, and a run that gives no picture is
+        // tried again without it: with `-ss`, even `-ss 0`, FFmpeg reads NOTHING from a JPEG still
+        // (measured with FFmpeg 9.0.2; a PNG is fine) and still reports success.
+        let run = |seek: bool| {
+            let mut cmd = command(&self.ffmpeg);
+            cmd.args(["-y", "-v", "error"]);
+            if seek {
+                cmd.arg("-ss").arg(format!("{at_seconds:.3}"));
+            }
+            cmd.arg("-i")
+                .arg(path)
+                .args(["-frames:v", "1", "-vf"])
+                .arg(format!("scale={THUMBNAIL_WIDTH}:-2"))
+                .args(["-q:v", "4", "-f", "image2"])
+                .arg(&tmp)
+                .output()
+        };
+        let made = |r: &std::process::Output| {
+            r.status.success() && fs::metadata(&tmp).is_ok_and(|m| m.len() > 0)
+        };
+        let mut result = run(at_seconds > 0.0)?;
+        if !made(&result) && at_seconds > 0.0 {
+            result = run(false)?;
+        }
+        if !made(&result) {
             fs::remove_file(&tmp).ok();
             return Err(AppError::InvalidInput(format!(
                 "thumbnail failed: {}",

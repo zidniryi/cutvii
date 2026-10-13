@@ -5,7 +5,7 @@
  */
 import { TRANSFORM_LIMITS, type Project, type TimelineClip } from "@/project/model";
 import { findClip } from "./clips";
-import { remainingAt, transitionOf } from "./transitions";
+import { remainingAt, transitionOf, transitionOutOf } from "./transitions";
 import type { EditResult } from "./edit";
 
 export { TRANSFORM_LIMITS };
@@ -36,7 +36,16 @@ export const NO_TRANSFORM: Transform = {
 
 type Transformable = Pick<
   TimelineClip,
-  "x" | "y" | "scale" | "opacity" | "rotation" | "flipH" | "flipV" | "keyframes" | "transitionIn"
+  | "x"
+  | "y"
+  | "scale"
+  | "opacity"
+  | "rotation"
+  | "flipH"
+  | "flipV"
+  | "keyframes"
+  | "transitionIn"
+  | "transitionOut"
 >;
 
 export interface Key {
@@ -96,6 +105,19 @@ export function transformAt(clip: Timed, time: number): Transform {
       t.opacity *= 1 + (coming.from.opacity - 1) * left;
     }
   }
+  const going = transitionOutOf(clip);
+  if (going) {
+    // the same ease the other way: nothing of `from` until the last seconds, all of it at the end
+    const length = (clip.sourceOut - clip.sourceIn) / (clip.speed ?? 1);
+    const gone = 1 - remainingAt((time - clip.timelineStart - (length - going.seconds)) / going.seconds);
+    if (gone > 0) {
+      t.x += going.from.x * gone;
+      t.y += going.from.y * gone;
+      t.rotation += going.from.rotation * gone;
+      t.scale *= 1 + (going.from.scale - 1) * gone;
+      t.opacity *= 1 + (going.from.opacity - 1) * gone;
+    }
+  }
   return t;
 }
 
@@ -114,7 +136,10 @@ const same = (a: Transform, b: Transform) =>
 
 /** A transformed layer no longer covers the canvas, so whatever is on the tracks below shows too. */
 export const isTransformed = (clip: Transformable) =>
-  clip.keyframes !== undefined || clip.transitionIn !== undefined || !same(transformOf(clip), NO_TRANSFORM);
+  clip.keyframes !== undefined ||
+  clip.transitionIn !== undefined ||
+  clip.transitionOut !== undefined ||
+  !same(transformOf(clip), NO_TRANSFORM);
 
 const tidy = (v: number) => Number(v.toFixed(4));
 

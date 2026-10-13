@@ -20,28 +20,42 @@ pub const MAX_LOOKS: usize = 64;
 /// orientation: FFmpeg applies the file's rotation).
 pub fn read_frame(ffmpeg: &Path, src: &Path, at: f64) -> AppResult<Vec<u8>> {
     let (w, h) = THUMB_SIZE;
-    let mut child = command(ffmpeg)
-        .args(["-v", "error", "-nostdin", "-ss"])
-        .arg(format!("{:.3}", at.max(0.0)))
-        .arg("-i")
-        .arg(src)
-        .args(["-frames:v", "1", "-an", "-vf"])
-        .arg(format!(
-            "scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
-        ))
-        .args(["-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()?;
-    let mut bytes = Vec::new();
-    let read = child
-        .stdout
-        .take()
-        .map(|mut out| out.read_to_end(&mut bytes));
-    let status = child.wait()?;
-    read.transpose()?;
-    if !status.success() || bytes.len() != (w * h * 3) as usize {
+    let wanted = (w * h * 3) as usize;
+    // Seeking is asked for only when there is somewhere to seek to, and a run that gives no frame is tried
+    // again without it: with `-ss`, even `-ss 0`, FFmpeg reads NOTHING from a JPEG still (measured with
+    // FFmpeg 9.0.2; a PNG is fine) and still reports success.
+    let run = |seek: bool| -> AppResult<Vec<u8>> {
+        let mut cmd = command(ffmpeg);
+        cmd.args(["-v", "error", "-nostdin"]);
+        if seek {
+            cmd.arg("-ss").arg(format!("{at:.3}"));
+        }
+        let mut child = cmd
+            .arg("-i")
+            .arg(src)
+            .args(["-frames:v", "1", "-an", "-vf"])
+            .arg(format!(
+                "scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
+            ))
+            .args(["-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()?;
+        let mut bytes = Vec::new();
+        let read = child
+            .stdout
+            .take()
+            .map(|mut out| out.read_to_end(&mut bytes));
+        child.wait()?;
+        read.transpose()?;
+        Ok(bytes)
+    };
+    let mut bytes = run(at > 0.0)?;
+    if bytes.len() != wanted && at > 0.0 {
+        bytes = run(false)?;
+    }
+    if bytes.len() != wanted {
         return Err(AppError::InvalidInput(
             "could not read a frame of that clip".into(),
         ));

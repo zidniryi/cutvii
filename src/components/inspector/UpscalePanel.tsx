@@ -27,6 +27,7 @@ export function UpscalePanel({ clip, asset }: { clip: TimelineClip; asset: Media
   const download = useUpscaleStore((s) => s.download);
   const running = useUpscaleStore((s) => s.running);
   const blocker = useProjectStore((s) => upscaleBlocker(s.project, clip.id));
+  const video = asset.type === "video";
   const [chosen, setChosen] = useState<string | null>(null);
   const [factor, setFactor] = useState<UpscaleFactor>(2);
   const [note, setNote] = useState<{ kind: "ok" | "problem"; text: string } | null>(null);
@@ -60,7 +61,7 @@ export function UpscalePanel({ clip, asset }: { clip: TimelineClip; asset: Media
         ? { kind: /^Stopped/.test(problem) ? "ok" : "problem", text: problem }
         : {
             kind: "ok",
-            text: "Done. The clip now uses the enlarged picture; Undo brings the original back.",
+            text: `Done. The clip now uses the enlarged ${video ? "video" : "picture"}; Undo brings the original back.`,
           },
     );
   }
@@ -74,6 +75,8 @@ export function UpscalePanel({ clip, asset }: { clip: TimelineClip; asset: Media
       <p className="text-text-muted">
         Makes the picture larger and sharper with a small model that runs on this computer. Your original file
         is not changed.
+        {video &&
+          " For video only the part this clip uses is treated, frame by frame: expect seconds per frame, so trim the clip first."}
       </p>
       {blocker ? (
         <p className="rounded-md border border-dashed px-2 py-1.5 text-text-muted">{blocker}</p>
@@ -194,8 +197,9 @@ export function UpscalePanel({ clip, asset }: { clip: TimelineClip; asset: Media
                 </div>
               )}
               <p className="text-text-muted">
-                A large picture can take a while on the processor; the time left is shown once it starts.
-                Transparent areas become opaque.
+                {video
+                  ? "Video takes long on the processor (a few seconds per frame); the time left is shown once it starts, and Stop leaves nothing behind."
+                  : "A large picture can take a while on the processor; the time left is shown once it starts. Transparent areas become opaque."}
               </p>
             </>
           )}

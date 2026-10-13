@@ -19,6 +19,7 @@ use crate::media::tools::{FFMPEG_ENV, command, locate_tool};
 use crate::media::upscale::{
     MAX_INPUT_SIDE, MODELS, SCALE, UpscaleModel, Upscaler, halve_rgb, model, onnx_from_pth,
 };
+use crate::media::upscale_video::{VideoJob, refusal, upscale_video as run_video};
 use crate::media::whisper::download_model;
 
 pub const UPSCALE_EVENT: &str = "upscale-progress";
@@ -172,6 +173,118 @@ fn write_png(out: &Path, rgb: &[u8], width: u32, height: u32) -> AppResult<()> {
     }
     fs::rename(&tmp, out)?;
     Ok(())
+}
+
+#[derive(Debug, Serialize)]
+pub struct UpscaledVideo {
+    pub path: String,
+    pub width: u32,
+    pub height: u32,
+    /// Seconds: the stretch that was treated, as the new file has it.
+    pub duration: f64,
+}
+
+/// Make (or reuse) an enlarged copy of `[source_in, source_out)` of an imported video, frame by frame, with
+/// the downloaded model (`media/upscale_video.rs`). `factor` is 2 or 4. Progress arrives as
+/// `upscale-progress` events; `cancel_ai_job` stops it and leaves nothing behind. The new file starts at
+/// 0 and carries the stretch's sound.
+#[tauri::command]
+pub async fn upscale_video(
+    app: AppHandle,
+    job: State<'_, AiJob>,
+    path: String,
+    model_id: String,
+    factor: u32,
+    source_in: f64,
+    source_out: f64,
+) -> AppResult<UpscaledVideo> {
+    let src = allowed_source(&app, &path)?;
+    let spec = model(&model_id)?;
+    let model_file = dir(&app)?.join(spec.file);
+    if !installed(spec, &model_file) {
+        return Err(AppError::InvalidInput(
+            "that upscale model is not downloaded yet".into(),
+        ));
+    }
+    if !(source_in.is_finite()
+        && source_out.is_finite()
+        && source_in >= 0.0
+        && source_out > source_in)
+    {
+        return Err(AppError::InvalidInput("invalid range".into()));
+    }
+    let out = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::InvalidInput(format!("no data directory: {e}")))?
+        .join("upscaled")
+        .join(format!(
+            "{}.mp4",
+            derived_key(
+                &src,
+                &format!(
+                    "upscale-video-v1|{}|{factor}|{source_in:.3}|{source_out:.3}",
+                    spec.id
+                )
+            )?
+        ));
+    let scope = app.asset_protocol_scope();
+    let cancel = job.start()?;
+    let events = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let backend = FfmpegBackend::locate()?;
+        if !out.is_file() {
+            let info = backend.probe(&src)?;
+            let ffmpeg = locate_tool("ffmpeg", FFMPEG_ENV)?;
+            let video = VideoJob {
+                ffmpeg: &ffmpeg,
+                src: &src,
+                start: source_in,
+                seconds: source_out - source_in,
+                width: info.width.unwrap_or(0),
+                height: info.height.unwrap_or(0),
+                fps: (info.fps_num.unwrap_or(0), info.fps_den.unwrap_or(0)),
+                factor,
+                out: &out,
+            };
+            // refused before the model is even read
+            if let Some(reason) = refusal(&video) {
+                return Err(AppError::InvalidInput(reason));
+            }
+            let mut upscaler = Upscaler::new(&onnx_from_pth(&fs::read(&model_file)?)?)?;
+            run_video(
+                &video,
+                &mut upscaler,
+                &mut |done, total| {
+                    let fraction = done as f64 / total.max(1) as f64;
+                    events
+                        .emit(UPSCALE_EVENT, UpscaleProgress { fraction })
+                        .ok();
+                },
+                &cancel,
+            )?;
+        }
+        scope.allow_file(&out).map_err(|e| {
+            AppError::InvalidInput(format!(
+                "could not enable preview of the upscaled video: {e}"
+            ))
+        })?;
+        let made = backend.probe(&out)?;
+        let (Some(width), Some(height)) = (made.width, made.height) else {
+            return Err(AppError::InvalidInput(
+                "the upscaled video could not be read back".into(),
+            ));
+        };
+        Ok(UpscaledVideo {
+            path: out.to_string_lossy().into_owned(),
+            width,
+            height,
+            duration: made.duration.unwrap_or(source_out - source_in),
+        })
+    })
+    .await;
+    job.finish();
+    result.map_err(|e| AppError::InvalidInput(format!("upscale task failed: {e}")))?
 }
 
 #[derive(Debug, Serialize)]

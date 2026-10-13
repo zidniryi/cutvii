@@ -179,6 +179,9 @@ pub struct TimelineClip {
     /// The transition this clip comes in with. Absent means a plain cut.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transition_in: Option<ClipTransition>,
+    /// The transition this clip leaves with. Absent means a plain cut.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transition_out: Option<ClipTransition>,
 }
 
 /// The longest fade that can be stored. A fade longer than its clip is shortened when it is applied.
@@ -376,9 +379,18 @@ impl TimelineClip {
     /// The fades as they are applied: the fade-in is at most the clip's length, the fade-out takes what
     /// is left. The preview uses the same rule.
     pub fn fades(&self) -> (f64, f64) {
+        self.fades_with(0.0, 0.0)
+    }
+    /// The fades of the clip's SOUND when it comes in or leaves with a transition of these lengths: the
+    /// sound fades for at least as long as the picture takes.
+    pub fn fades_with(&self, coming: f64, leaving: f64) -> (f64, f64) {
         let length = self.timeline_duration();
-        let fade_in = self.fade_in.unwrap_or(0.0).clamp(0.0, length);
-        let fade_out = self.fade_out.unwrap_or(0.0).clamp(0.0, length - fade_in);
+        let fade_in = self.fade_in.unwrap_or(0.0).max(coming).clamp(0.0, length);
+        let fade_out = self
+            .fade_out
+            .unwrap_or(0.0)
+            .max(leaving)
+            .clamp(0.0, length - fade_in);
         (fade_in, fade_out)
     }
     pub fn keep_pitch(&self) -> bool {

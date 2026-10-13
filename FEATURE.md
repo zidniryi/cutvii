@@ -42,9 +42,13 @@ unless a line says otherwise.
 - **Transform:** scale, position, rotation, opacity, flip across and down, reset.
 - **Keyframes:** animate scale, position, rotation and opacity. The diamond next to a value adds a keyframe
   at the playhead; a value with keyframes is edited at the playhead. Straight-line movement between keys.
-- **Transitions:** a clip can come in with one of ten transitions (Dissolve, Slide from left / right / below /
-  above, Zoom in, Zoom out, Spin in, Rise, Tilt), 0.1 to 3 seconds. The clip before it on the same track
-  holds its last frame underneath.
+- **Transitions:** in the Transition tab a clip can come in and leave with one of sixteen transitions
+  (Dissolve / Fade out, Fade from / to black, four slides, two glides, Zoom in, Zoom out, Pop, Spin, Swing,
+  Rise, Drop, Tilt), 0.1 to 3 seconds each. Pick one from a gallery that shows the movement, or drag it onto
+  a clip in the timeline (left half = coming in, right half = leaving); "Play it" shows the result. On the
+  timeline a transition is a darker block at the clip's end whose bar can be pulled to change its length.
+  Coming in, the clip before it on the same track holds its last frame underneath. The clip's sound fades
+  with its picture. "Fade out" on one clip and "Fade from black" on the next gives a fade through black.
 - **Crop:** sliders or the preview box; shapes Free, 16:9, 9:16, 1:1, 4:5, 4:3.
 - **Fit:** fill, fit, or fit over a blurred copy; background black, a colour or a picture; apply to all clips.
 - **Speed:** presets and custom speed (0.1× to 10×), keep pitch, reverse, freeze frame.
@@ -84,7 +88,9 @@ unless a line says otherwise.
   them to the timeline or exports each as its own file.
 - **Karaoke Maker:** lyrics from recognition, pasted text or an `.lrc` / `.srt` file; lines are timed, can be
   nudged and edited, and are added in a karaoke style. Optional "Lower the singer's voice (estimate)".
-- **AI upscale (pictures):** 2× or 4× with Real-ESRGAN models; the clip is pointed at the new picture.
+- **AI upscale (pictures and video):** 2× or 4× with Real-ESRGAN models; the clip is pointed at the new
+  file. For video only the part the clip uses is treated, frame by frame (slow: seconds per frame), up to
+  1280 px on the longer side and 3000 frames at a time.
 
 ## Style packs
 
@@ -120,10 +126,9 @@ unless a line says otherwise.
 ## Not built yet
 
 - Remove background, blur background, text behind the subject.
-- Upscale for video clips.
 - Vocal separation (stems) and word-by-word highlight in Karaoke; tap-to-sync.
 - Keyframes for volume, crop and colour; easing per keyframe; keyframe marks on the timeline.
-- Wipes and other masked transitions; a transition out; sound cross-fades.
+- Wipes and other masked transitions; a true cross-fade of two moving clips (the outgoing one is frozen).
 - Clean-up and ducking heard in the preview.
 - Subtitle export as `.srt`, translation.
 - More settings (the Settings window has one).

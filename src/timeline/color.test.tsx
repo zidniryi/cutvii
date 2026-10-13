@@ -258,6 +258,6 @@ describe("colour in the preview and the inspector", () => {
 
     open(project(), "music", 1);
     render(<Inspector />);
-    expect(screen.queryByRole("tab", { name: "Color" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Preset" })).not.toBeInTheDocument();
   });
 });

@@ -51,7 +51,19 @@ pub struct Kind {
     /// Shown by the app (the preview reads the same file); read here so the whole file is checked.
     #[allow(dead_code)]
     pub name: String,
+    /// The name when the clip leaves this way (it then ends where `from` is).
+    #[allow(dead_code)]
+    #[serde(rename = "outName")]
+    pub out_name: String,
+    /// Coming in: does the clip before it hold its last frame underneath? `false` comes in over nothing
+    /// (black, or the tracks below), as "Fade from black" does.
+    #[serde(default = "yes")]
+    pub hold: bool,
     pub from: From,
+}
+
+fn yes() -> bool {
+    true
 }
 
 pub const MIN_TRANSITION: f64 = 0.1;
@@ -75,8 +87,16 @@ pub fn kinds() -> &'static [Kind] {
     })
 }
 
-pub fn find(id: &str) -> Option<From> {
-    kinds().iter().find(|k| k.id == id).map(|k| k.from)
+pub fn find(id: &str) -> Option<&'static Kind> {
+    kinds().iter().find(|k| k.id == id)
+}
+
+/// Keys `(clip time, share of "from" reached)` for a clip of `length` seconds that leaves over its last
+/// `seconds`: the same ease, run the other way.
+pub fn leaving(length: f64, seconds: f64) -> Vec<(f64, f64)> {
+    EASE.iter()
+        .map(|(u, left)| (length - seconds + u * seconds, 1.0 - left))
+        .collect()
 }
 
 /// Keys `(clip time, share of "from" left)` for a transition of `seconds`.
@@ -89,12 +109,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_ten_kinds_are_readable_and_stay_inside_what_a_clip_may_be() {
-        assert_eq!(kinds().len(), 10);
+    fn the_kinds_are_readable_and_stay_inside_what_a_clip_may_be() {
+        assert_eq!(kinds().len(), 16);
         let mut ids: Vec<&str> = kinds().iter().map(|k| k.id.as_str()).collect();
         ids.sort_unstable();
         ids.dedup();
-        assert_eq!(ids.len(), 10, "ids are unique");
+        assert_eq!(ids.len(), 16, "ids are unique");
+        assert!(kinds().iter().all(|k| !k.out_name.trim().is_empty()));
+        assert!(find("dissolve").unwrap().hold && !find("fade-black").unwrap().hold);
+        assert_eq!(leaving(5.0, 2.0)[0], (3.0, 0.0));
+        assert_eq!(leaving(5.0, 2.0)[4], (5.0, 1.0));
         for k in kinds() {
             assert!(
                 !k.name.trim().is_empty() && k.from != From::default(),
@@ -105,7 +129,7 @@ mod tests {
             assert!((0.05..=2.0).contains(&k.from.scale), "{}", k.id);
             assert!(k.from.rotation.abs() <= 180.0 && (0.0..=1.0).contains(&k.from.opacity));
         }
-        assert_eq!(find("dissolve").unwrap().opacity, 0.0);
+        assert_eq!(find("dissolve").unwrap().from.opacity, 0.0);
         assert!(find("nothing").is_none());
         assert_eq!(remaining(2.0)[2], (1.0, 0.5));
     }

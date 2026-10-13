@@ -350,11 +350,11 @@ function SpeedPanel({
 
 /** Tabs that have working controls for each kind of clip, in display order. The first one is the default. */
 export const TABS_FOR: Record<ClipKind, InspectorTab[]> = {
-  video: ["video", "color", "audio", "ai", "speed", "info"],
+  video: ["video", "transition", "color", "audio", "ai", "speed", "info"],
   audio: ["audio", "ai", "speed", "info"],
-  image: ["video", "color", "info"], // stills have no sound and no speed
+  image: ["video", "transition", "color", "info"], // stills have no sound and no speed
 };
-const TEXT_TABS: InspectorTab[] = ["text", "info"];
+const TEXT_TABS: InspectorTab[] = ["text", "transition", "info"];
 const TAB_LABEL: Record<InspectorTab, string> = {
   video: "Video",
   audio: "Audio",
@@ -362,7 +362,9 @@ const TAB_LABEL: Record<InspectorTab, string> = {
   info: "Info",
   text: "Text",
   ai: "AI",
-  color: "Color",
+  // the user asked for this name; the tab holds the presets, the sliders and the LUT
+  color: "Preset",
+  transition: "Transition",
 };
 
 function FitChips({ clip }: { clip: TimelineClip }) {
@@ -692,7 +694,7 @@ function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset;
         role="tablist"
         aria-label="Clip properties"
         onKeyDown={onKeyDown}
-        className="flex shrink-0 border-b px-1"
+        className="flex shrink-0 overflow-x-auto border-b px-1 [scrollbar-width:none]"
       >
         {tabs.map((t) => (
           <button
@@ -705,7 +707,7 @@ function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset;
             tabIndex={active === t ? 0 : -1}
             onClick={() => setTab(kind, t)}
             className={cn(
-              "flex h-11 flex-1 items-center justify-center gap-1 border-b-2 text-xs [&_svg]:size-3.5",
+              "flex h-11 flex-1 items-center justify-center gap-1 border-b-2 px-1.5 text-xs whitespace-nowrap [&_svg]:size-3.5",
               active === t ? "border-accent text-text" : "border-transparent text-text-muted hover:text-text",
               // the AI tab keeps a touch of the accent so it is easy to find
               t === "ai" && "[&_svg]:text-accent",
@@ -738,8 +740,8 @@ function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset;
         )}
         {active === "video" && <TransformPanel key={`${clip.id}-transform`} clip={clip} />}
         {active === "video" && <CropPanel key={`${clip.id}-crop`} clip={clip} asset={asset} />}
-        {active === "video" && <TransitionPanel key={`${clip.id}-transition`} clip={clip} />}
-        {active === "video" && asset.type === "image" && !asset.text && (
+        {active === "transition" && <TransitionPanel key={`${clip.id}-transition`} clip={clip} />}
+        {active === "video" && ((asset.type === "image" && !asset.text) || asset.type === "video") && (
           <UpscalePanel key={`${clip.id}-upscale`} clip={clip} asset={asset} />
         )}
         {active === "audio" && (

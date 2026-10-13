@@ -44,14 +44,14 @@ beforeEach(() => {
 describe("Inspector tabs", () => {
   it("offers only the tabs that have controls for that kind of clip", () => {
     expect(TABS_FOR).toEqual({
-      video: ["video", "color", "audio", "ai", "speed", "info"],
+      video: ["video", "transition", "color", "audio", "ai", "speed", "info"],
       audio: ["audio", "ai", "speed", "info"],
-      image: ["video", "color", "info"],
+      image: ["video", "transition", "color", "info"],
     });
 
     place(IDS.vid);
     const { unmount } = render(<Inspector />);
-    expect(tabNames()).toEqual(["Video", "Color", "Audio", "AI", "Speed", "Info"]);
+    expect(tabNames()).toEqual(["Video", "Transition", "Preset", "Audio", "AI", "Speed", "Info"]);
     unmount();
 
     act(() => useSelectionStore.getState().clear());
@@ -63,7 +63,7 @@ describe("Inspector tabs", () => {
     act(() => useSelectionStore.getState().clear());
     place(IDS.img, 30);
     render(<Inspector />);
-    expect(tabNames()).toEqual(["Video", "Color", "Info"]); // a still has no sound and no speed
+    expect(tabNames()).toEqual(["Video", "Transition", "Preset", "Info"]); // a still has no sound and no speed
   });
 
   it("keeps the header (name, type and track, Start, Duration) visible on every tab", async () => {
@@ -147,8 +147,8 @@ describe("Inspector tabs", () => {
     tab("Video").focus();
 
     fireEvent.keyDown(list, { key: "ArrowRight" });
-    expect(tab("Color")).toHaveAttribute("aria-selected", "true");
-    expect(tab("Color")).toHaveFocus();
+    expect(tab("Transition")).toHaveAttribute("aria-selected", "true");
+    expect(tab("Transition")).toHaveFocus();
     fireEvent.keyDown(list, { key: "End" });
     expect(tab("Info")).toHaveAttribute("aria-selected", "true");
     fireEvent.keyDown(list, { key: "ArrowRight" }); // wraps

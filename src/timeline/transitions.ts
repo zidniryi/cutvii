@@ -14,6 +14,10 @@ const KindSchema = z
   .object({
     id: z.string().min(1),
     name: z.string().min(1),
+    /** The name when a clip leaves this way (it then ends where `from` is). */
+    outName: z.string().min(1),
+    /** Coming in: does the clip before it hold its last frame underneath? "Fade from black" does not. */
+    hold: z.boolean().default(true),
     /** Where the clip starts: `x` / `y` / `rotation` are added, `scale` and `opacity` multiply. */
     from: z
       .object({
@@ -52,17 +56,33 @@ export function remainingAt(u: number): number {
   return 0;
 }
 
-type Incoming = Pick<TimelineClip, "transitionIn" | "sourceIn" | "sourceOut" | "speed">;
+type Incoming = Pick<TimelineClip, "transitionIn" | "transitionOut" | "sourceIn" | "sourceOut" | "speed">;
+export interface AppliedTransition {
+  from: TransitionKind["from"];
+  seconds: number;
+  hold: boolean;
+}
 
-/** The clip's transition as it is applied: its kind and its length, at most the clip's own length. */
-export function transitionOf(clip: Incoming): { from: TransitionKind["from"]; seconds: number } | null {
+/** The clip's transition in as it is applied: its kind and its length, at most the clip's own length. */
+export function transitionOf(clip: Incoming): AppliedTransition | null {
   if (!clip.transitionIn) return null;
   const kind = TRANSITIONS.find((k) => k.id === clip.transitionIn!.kind);
   if (!kind) return null;
   return {
     from: kind.from,
+    hold: kind.hold,
     seconds: Math.min(clip.transitionIn.duration, clipDuration(clip as TimelineClip)),
   };
+}
+
+/** The clip's transition out as it is applied: it gets what the transition in leaves of the clip's length. */
+export function transitionOutOf(clip: Incoming): AppliedTransition | null {
+  if (!clip.transitionOut) return null;
+  const kind = TRANSITIONS.find((k) => k.id === clip.transitionOut!.kind);
+  if (!kind) return null;
+  const room = clipDuration(clip as TimelineClip) - (transitionOf(clip)?.seconds ?? 0);
+  const seconds = Math.min(clip.transitionOut.duration, room);
+  return seconds > 1e-3 ? { from: kind.from, hold: kind.hold, seconds } : null;
 }
 
 /**
@@ -72,15 +92,18 @@ export function transitionOf(clip: Incoming): { from: TransitionKind["from"]; se
 export function holdAfter(clip: TimelineClip, siblings: readonly TimelineClip[]): number {
   const end = clipEnd(clip);
   const next = siblings.find((c) => c !== clip && c.transitionIn && Math.abs(c.timelineStart - end) < 1e-3);
-  return next ? (transitionOf(next)?.seconds ?? 0) : 0;
+  const coming = next ? transitionOf(next) : null;
+  return coming?.hold ? coming.seconds : 0;
 }
 
-/** Give a clip a transition in, change it, or take it away (`null`). Not for sound. */
+/** Give a clip a transition in (or out), change it, or take it away (`null`). Not for sound. */
 export function setClipTransition(
   project: Project,
   clipId: string,
   transition: ClipTransition | null,
+  which: "in" | "out" = "in",
 ): EditResult {
+  const field = which === "in" ? "transitionIn" : "transitionOut";
   const found = findClip(project, clipId);
   if (!found) return { ok: false, error: { code: "unknown-clip", message: `Unknown clip ${clipId}` } };
   const asset = project.assets.find((a) => a.id === found.clip.assetId);
@@ -97,7 +120,7 @@ export function setClipTransition(
       };
     }
   }
-  const now = found.clip.transitionIn;
+  const now = found.clip[field];
   if ((now?.kind ?? null) === (transition?.kind ?? null) && now?.duration === transition?.duration) {
     return { ok: true, project };
   }
@@ -112,8 +135,8 @@ export function setClipTransition(
               clips: t.clips.map((c) => {
                 if (c.id !== clipId) return c;
                 const out = { ...c };
-                if (transition) out.transitionIn = { kind: transition.kind, duration: transition.duration };
-                else delete out.transitionIn;
+                if (transition) out[field] = { kind: transition.kind, duration: transition.duration };
+                else delete out[field];
                 return out;
               }),
             }

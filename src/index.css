@@ -114,3 +114,48 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* Transition gallery (inspector): the block in a tile shows the movement while the tile is pointed at or
+   focused. `--tx`, `--ty`, `--r`, `--s` and `--o` are where the transition starts. */
+@keyframes cutvii-transition-demo {
+  from {
+    transform: translate(var(--tx), var(--ty)) rotate(var(--r)) scale(var(--s));
+    opacity: var(--o);
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+.group:hover .transition-demo,
+.group:focus-visible .transition-demo {
+  animation: cutvii-transition-demo 0.8s ease-in-out both;
+}
+.group:hover .transition-demo[data-way="out"],
+.group:focus-visible .transition-demo[data-way="out"] {
+  animation-direction: reverse;
+}
+@media (prefers-reduced-motion: reduce) {
+  .group:hover .transition-demo,
+  .group:focus-visible .transition-demo {
+    animation: none;
+  }
+}
+
+/* A transition being dragged over a clip: the half that will take it lights up. */
+[data-drop-way]::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+  background: var(--accent);
+  opacity: 0.45;
+  pointer-events: none;
+}
+[data-drop-way="in"]::after {
+  left: 0;
+}
+[data-drop-way="out"]::after {
+  right: 0;
+}

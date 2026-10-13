@@ -1,10 +1,10 @@
 import { useDragDropStore } from "@/store/dragDrop";
 
-/** Small label that follows the pointer while a media card is dragged. */
+/** Small label that follows the pointer while a media card or a transition is dragged. */
 export function DragChip() {
   const dragging = useDragDropStore((s) => s.dragging);
   const overTimeline = useDragDropStore((s) => s.preview !== null);
-  if (!dragging || dragging.source !== "library") return null;
+  if (!dragging || dragging.source === "os") return null;
   return (
     <div
       aria-hidden

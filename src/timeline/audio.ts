@@ -9,6 +9,7 @@ import {
 } from "@/project/model";
 import { clipDuration, clipEnd, EPS, findClip } from "./clips";
 import { addTrack, type EditResult } from "./edit";
+import { transitionOf, transitionOutOf } from "./transitions";
 
 export { MAX_FADE };
 
@@ -38,6 +39,22 @@ export function fadeGain(clip: Fading, t: number): number {
   if (fadeIn > 0) gain = Math.min(gain, into / fadeIn);
   if (fadeOut > 0) gain = Math.min(gain, left / fadeOut);
   return Math.min(1, Math.max(0, gain));
+}
+
+type Sounding = Fading & Pick<TimelineClip, "transitionIn" | "transitionOut">;
+
+/**
+ * How loud the clip's SOUND is at timeline time `t`: its own fades, and at least as long a fade as its
+ * picture takes to come in or leave with a transition. The export does the same (`fades_with` in Rust).
+ */
+export function soundGain(clip: Sounding, t: number): number {
+  const coming = transitionOf(clip)?.seconds ?? 0;
+  const going = transitionOutOf(clip)?.seconds ?? 0;
+  if (coming === 0 && going === 0) return fadeGain(clip, t);
+  return fadeGain(
+    { ...clip, fadeIn: Math.max(clip.fadeIn ?? 0, coming), fadeOut: Math.max(clip.fadeOut ?? 0, going) },
+    t,
+  );
 }
 
 const fail = (code: "unknown-clip" | "out-of-range" | "incompatible-track", message: string): EditResult => ({

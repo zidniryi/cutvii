@@ -9,7 +9,8 @@ import { useUpscaleStore, type UpscaleModel } from "@/store/upscale";
 import { expectValid, IDS, makeProject } from "@/test/makeProject";
 import { addClip } from "./edit";
 import { undo } from "./editor";
-import { applyUpscaledPicture, upscaleBlocker, upscaledSize } from "./upscale";
+import { setKey } from "./keyframes";
+import { applyUpscaledPicture, applyUpscaledVideo, upscaleBlocker, upscaledSize } from "./upscale";
 
 /** A 640x360 picture ("photo") on v1, a huge one ("huge") and a video ("video"). */
 function project(): Project {
@@ -74,6 +75,8 @@ beforeEach(() => {
       models = models.map((m) => (m.id === args!.id ? { ...m, installed: false } : m));
       return undefined;
     }
+    if (cmd === "upscale_video")
+      return { path: "/data/upscaled/v.mp4", width: 1280, height: 720, duration: 3.97 };
     if (cmd === "upscale_image") {
       if (upscaleAnswer instanceof Error) throw upscaleAnswer.message;
       return upscaleAnswer;
@@ -86,11 +89,11 @@ beforeEach(() => {
 });
 
 describe("what can be upscaled", () => {
-  it("pictures up to the size limit; not video, not text", () => {
+  it("pictures and video up to their limits", () => {
     const p = project();
     expect(upscaleBlocker(p, "photo")).toBeNull();
     expect(upscaleBlocker(p, "huge")).toMatch(/4000×3000.*up to 2048 px/);
-    expect(upscaleBlocker(p, "video")).toMatch(/picture clips for now/);
+    expect(upscaleBlocker(p, "video")).toBeNull(); // 10 s of video: allowed
     expect(upscaleBlocker(p, "nope")).toMatch(/missing/);
     expect(upscaledSize({ width: 640, height: 360 }, 4)).toEqual({ width: 2560, height: 1440 });
     expect(upscaledSize({ width: 640, height: 360 }, 2)).toEqual({ width: 1280, height: 720 });
@@ -198,10 +201,9 @@ describe("the Upscale with AI panel", () => {
     expect(await store.upscaleClip("photo", "general", 2)).toBe("Stopped. Nothing was changed.");
     upscaleAnswer = { path: 5 };
     expect(await store.upscaleClip("photo", "general", 2)).toMatch(/could not be made/);
-    // never sent to Rust at all: too large, or not a picture
+    // never sent to Rust at all: too large, or text
     const sent = calls.filter((c) => c.cmd === "upscale_image").length;
     expect(await store.upscaleClip("huge", "general", 2)).toMatch(/up to 2048 px/);
-    expect(await store.upscaleClip("video", "general", 2)).toMatch(/picture clips/);
     expect(calls.filter((c) => c.cmd === "upscale_image")).toHaveLength(sent);
     expect(now()).toBe(before);
     expect(useUpscaleStore.getState().running).toBeNull();
@@ -211,5 +213,94 @@ describe("the Upscale with AI panel", () => {
     const panel = open("huge");
     expect(panel.getByText(/up to 2048 px/)).toBeInTheDocument();
     expect(panel.queryByRole("button", { name: /Download|Upscale/ })).toBeNull();
+  });
+});
+
+describe("upscaling a video clip", () => {
+  /** "video" trimmed to source 2..6 with a slide keyed at source 1 s and 4 s. */
+  function trimmed(): Project {
+    let p = project();
+    p = {
+      ...p,
+      assets: p.assets.map((a) => (a.id === IDS.vid ? { ...a, width: 640, height: 360 } : a)),
+      tracks: p.tracks.map((t) => ({
+        ...t,
+        clips: t.clips.map((c) => (c.id === "video" ? { ...c, sourceIn: 2, sourceOut: 6, speed: 2 } : c)),
+      })),
+    };
+    for (const [t, v] of [
+      [1, 0],
+      [4, 0.6],
+    ] as const) {
+      const r = setKey(p, "video", "x", t, v);
+      if (!r.ok) throw new Error(r.error.message);
+      p = r.project;
+    }
+    return p;
+  }
+  const video = { path: "/data/upscaled/v.mp4", width: 1280, height: 720, duration: 3.97 };
+
+  it("refuses video that is too large or too long, and sound", () => {
+    const p = trimmed();
+    expect(upscaleBlocker(p, "video")).toBeNull();
+    const large = {
+      ...p,
+      assets: p.assets.map((a) => (a.id === IDS.vid ? { ...a, width: 1920, height: 1080 } : a)),
+    };
+    expect(upscaleBlocker(large, "video")).toMatch(/1920×1080.*up to 1280 px/);
+    const long = {
+      ...p,
+      assets: p.assets.map((a) => (a.id === IDS.vid ? { ...a, duration: 500 } : a)),
+      tracks: p.tracks.map((t) => ({
+        ...t,
+        clips: t.clips.map((c) => (c.id === "video" ? { ...c, sourceIn: 0, sourceOut: 300 } : c)),
+      })),
+    };
+    expect(upscaleBlocker(long, "video")).toMatch(/300 s.*up to 100 s/);
+  });
+
+  it("points the clip at the new file, which starts at 0, and keeps the movement on the same pictures", () => {
+    const r = applyUpscaledVideo(trimmed(), "video", video, "new");
+    if (!r.ok) throw new Error(r.error.message);
+    expectValid(r.project);
+    const clip = r.project.tracks.flatMap((t) => t.clips).find((c) => c.id === "video")!;
+    expect(clip).toMatchObject({ assetId: "new", sourceIn: 0, sourceOut: 3.97, speed: 2 });
+    expect(r.project.assets.find((a) => a.id === "new")).toEqual({
+      id: "new",
+      path: "/data/upscaled/v.mp4",
+      type: "video",
+      duration: 3.97,
+      width: 1280,
+      height: 720,
+    });
+    // the key at source 1 s was before the stretch: the clip starts with the value it had at 2 s (0.2);
+    // the key at source 4 s is now 2 s into the new file
+    expect(clip.keyframes!.x![0].t).toBe(0);
+    expect(clip.keyframes!.x![0].v).toBeCloseTo(0.2);
+    expect(clip.keyframes!.x![1]).toEqual({ t: 2, v: 0.6 });
+    expect(r.project.assets.some((a) => a.id === IDS.vid)).toBe(true); // the original stays in the library
+    // a picture is not a video, and the other way round
+    expect(applyUpscaledVideo(trimmed(), "photo", video, "n").ok).toBe(false);
+  });
+
+  it("runs from the panel on the stretch the clip uses, as one undo step", async () => {
+    models = models.map((m) => ({ ...m, installed: true }));
+    useProjectStore.setState({ project: trimmed(), past: [], future: [] });
+    const clip = clipOf("video");
+    render(<UpscalePanel clip={clip} asset={now().assets.find((a) => a.id === IDS.vid)!} />);
+    const panel = within(screen.getByRole("group", { name: "Upscale with AI" }));
+    expect(panel.getByText(/frame by frame/)).toBeInTheDocument();
+    fireEvent.click(await panel.findByRole("button", { name: /^Upscale/ }));
+    await waitFor(() => expect(panel.getByRole("status")).toHaveTextContent(/now uses the enlarged video/));
+    expect(calls.find((c) => c.cmd === "upscale_video")?.args).toEqual({
+      path: "/m/vid.mp4",
+      modelId: "general",
+      factor: 2,
+      sourceIn: 2,
+      sourceOut: 6,
+    });
+    expect(clipOf("video")).toMatchObject({ sourceIn: 0, sourceOut: 3.97 });
+    undo();
+    expect(clipOf("video")).toMatchObject({ assetId: IDS.vid, sourceIn: 2, sourceOut: 6 });
   });
 });

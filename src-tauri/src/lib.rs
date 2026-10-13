@@ -71,6 +71,7 @@ pub fn run() {
             commands::upscale::download_upscale_model,
             commands::upscale::delete_upscale_model,
             commands::upscale::upscale_image,
+            commands::upscale::upscale_video,
             commands::clip_tools::media_details,
             commands::clip_tools::reveal_media,
             commands::clip_tools::text_fonts,

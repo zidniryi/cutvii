@@ -165,14 +165,18 @@ pub fn validate(project: &Project) -> Result<(), Vec<String>> {
                     err(format!("{at}.lut.name: must be 1 to 40 characters"));
                 }
             }
-            if let Some(tr) = &clip.transition_in {
+            for (name, tr) in [
+                ("transitionIn", &clip.transition_in),
+                ("transitionOut", &clip.transition_out),
+            ] {
                 use crate::export::transitions::{MAX_TRANSITION, MIN_TRANSITION, find};
+                let Some(tr) = tr else { continue };
                 if find(&tr.kind).is_none() {
-                    err(format!("{at}.transitionIn.kind: is not a transition"));
+                    err(format!("{at}.{name}.kind: is not a transition"));
                 }
                 if !(MIN_TRANSITION..=MAX_TRANSITION).contains(&tr.duration) {
                     err(format!(
-                        "{at}.transitionIn.duration: must be between {MIN_TRANSITION} and {MAX_TRANSITION} seconds"
+                        "{at}.{name}.duration: must be between {MIN_TRANSITION} and {MAX_TRANSITION} seconds"
                     ));
                 }
             }

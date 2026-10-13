@@ -6,7 +6,9 @@ import { findClip } from "@/timeline/clips";
 import {
   upscaleBlocker,
   applyUpscaledPicture,
+  applyUpscaledVideo,
   type UpscaledPicture,
+  type UpscaledVideo,
   type UpscaleFactor,
 } from "@/timeline/upscale";
 import { useAiStore } from "./ai";
@@ -115,7 +117,7 @@ export const useUpscaleStore = create<UpscaleState>((set, get) => {
         .catch(() => undefined);
     },
     upscaleClip: async (clipId, modelId, factor) => {
-      if (get().running) return "Another picture is still being upscaled.";
+      if (get().running) return "Another clip is still being upscaled.";
       const project = useProjectStore.getState().project;
       const blocker = upscaleBlocker(project, clipId);
       if (blocker) return blocker;
@@ -123,6 +125,32 @@ export const useUpscaleStore = create<UpscaleState>((set, get) => {
       const asset = project.assets.find((a) => a.id === found.clip.assetId)!;
       attach();
       set({ running: { clipId, fraction: 0, startedAt: Date.now() } });
+      if (asset.type === "video") {
+        // only the stretch the clip uses is treated: every frame costs seconds
+        let video: UpscaledVideo;
+        try {
+          video = await invoke<UpscaledVideo>("upscale_video", {
+            path: asset.path,
+            modelId,
+            factor,
+            sourceIn: found.clip.sourceIn,
+            sourceOut: found.clip.sourceOut,
+          });
+        } catch (e) {
+          const reason = message(e);
+          return /cancel/i.test(reason) ? "Stopped. Nothing was changed." : reason;
+        } finally {
+          set({ running: null });
+        }
+        if (!video || typeof video.path !== "string" || !(video.width > 0) || !(video.duration > 0)) {
+          return "The upscaled video could not be made.";
+        }
+        const done = useProjectStore.getState().execute({
+          label: `Upscale ${factor}× with AI`,
+          apply: (p) => applyUpscaledVideo(p, clipId, video, crypto.randomUUID()),
+        });
+        return done.ok ? null : done.error.message;
+      }
       let picture: UpscaledPicture;
       try {
         picture = await invoke<UpscaledPicture>("upscale_image", { path: asset.path, modelId, factor });

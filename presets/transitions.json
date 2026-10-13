@@ -1,12 +1,49 @@
 [
-  { "id": "dissolve", "name": "Dissolve", "from": { "opacity": 0 } },
-  { "id": "slide-left", "name": "Slide from left", "from": { "x": -1 } },
-  { "id": "slide-right", "name": "Slide from right", "from": { "x": 1 } },
-  { "id": "slide-up", "name": "Slide from below", "from": { "y": 1 } },
-  { "id": "slide-down", "name": "Slide from above", "from": { "y": -1 } },
-  { "id": "zoom-in", "name": "Zoom in", "from": { "scale": 0.3, "opacity": 0 } },
-  { "id": "zoom-out", "name": "Zoom out", "from": { "scale": 1.8, "opacity": 0 } },
-  { "id": "spin", "name": "Spin in", "from": { "scale": 0.3, "rotation": -120, "opacity": 0 } },
-  { "id": "rise", "name": "Rise", "from": { "y": 0.12, "opacity": 0 } },
-  { "id": "tilt", "name": "Tilt", "from": { "scale": 1.15, "rotation": 8, "opacity": 0 } }
+  { "id": "dissolve", "name": "Dissolve", "outName": "Fade out", "from": { "opacity": 0 } },
+  {
+    "id": "fade-black",
+    "name": "Fade from black",
+    "outName": "Fade to black",
+    "hold": false,
+    "from": { "opacity": 0 }
+  },
+  { "id": "slide-left", "name": "Slide from left", "outName": "Slide out to left", "from": { "x": -1 } },
+  { "id": "slide-right", "name": "Slide from right", "outName": "Slide out to right", "from": { "x": 1 } },
+  { "id": "slide-up", "name": "Slide from below", "outName": "Slide out downwards", "from": { "y": 1 } },
+  { "id": "slide-down", "name": "Slide from above", "outName": "Slide out upwards", "from": { "y": -1 } },
+  { "id": "zoom-in", "name": "Zoom in", "outName": "Shrink away", "from": { "scale": 0.3, "opacity": 0 } },
+  { "id": "zoom-out", "name": "Zoom out", "outName": "Grow away", "from": { "scale": 1.8, "opacity": 0 } },
+  { "id": "pop", "name": "Pop", "outName": "Pop out", "from": { "scale": 0.85, "opacity": 0 } },
+  {
+    "id": "spin",
+    "name": "Spin in",
+    "outName": "Spin out",
+    "from": { "scale": 0.3, "rotation": -120, "opacity": 0 }
+  },
+  { "id": "rise", "name": "Rise", "outName": "Sink", "from": { "y": 0.12, "opacity": 0 } },
+  { "id": "drop", "name": "Drop", "outName": "Lift", "from": { "y": -0.12, "opacity": 0 } },
+  {
+    "id": "tilt",
+    "name": "Tilt",
+    "outName": "Tilt away",
+    "from": { "scale": 1.15, "rotation": 8, "opacity": 0 }
+  },
+  {
+    "id": "glide-left",
+    "name": "Glide from left",
+    "outName": "Glide out to left",
+    "from": { "x": -0.25, "opacity": 0 }
+  },
+  {
+    "id": "glide-right",
+    "name": "Glide from right",
+    "outName": "Glide out to right",
+    "from": { "x": 0.25, "opacity": 0 }
+  },
+  {
+    "id": "swing",
+    "name": "Swing in",
+    "outName": "Swing out",
+    "from": { "x": -0.2, "scale": 0.9, "rotation": -18, "opacity": 0 }
+  }
 ]

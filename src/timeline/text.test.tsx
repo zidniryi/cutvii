@@ -193,7 +193,7 @@ describe("Add text", () => {
 
     // the inspector shows what works for text: its editor and facts, no fit, background, sound or speed
     const view = render(<Inspector />);
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Text", "Info"]);
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Text", "Transition", "Info"]);
     expect(screen.getByRole("textbox", { name: "Text" })).toHaveValue("Text");
     view.unmount();
 

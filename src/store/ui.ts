@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { ClipLut, ColorAdjust } from "@/project/model";
 
 export type SidePanel = "library" | "text" | "inspector";
-export type InspectorTab = "video" | "audio" | "speed" | "info" | "text" | "ai" | "color";
+export type InspectorTab = "video" | "audio" | "speed" | "info" | "text" | "ai" | "color" | "transition";
 export type ClipKind = "video" | "audio" | "image";
 
 export interface DialogState {
@@ -36,6 +36,9 @@ interface UiState {
   /** The "Support CutVii" popup. Only a click opens it. */
   settingsOpen: boolean;
   setSettingsOpen: (open: boolean) => void;
+  /** Which end of the clip the Transition tab is showing; a transition block on the timeline sets it. */
+  transitionWay: "in" | "out";
+  setTransitionWay: (way: "in" | "out") => void;
   supportOpen: boolean;
   setSupportOpen: (open: boolean) => void;
   canvasDialogOpen: boolean;
@@ -89,6 +92,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   aboutOpen: false,
   setAboutOpen: (aboutOpen) => set({ aboutOpen }),
   settingsOpen: false,
+  transitionWay: "in",
+  setTransitionWay: (transitionWay) => set({ transitionWay }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   supportOpen: false,
   setSupportOpen: (supportOpen) => set({ supportOpen }),

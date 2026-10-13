@@ -367,6 +367,8 @@ export const TimelineClipSchema = z
     keyframes: KeyframesSchema.optional(),
     /** The transition this clip comes in with; absent means a plain cut. */
     transitionIn: ClipTransitionSchema.optional(),
+    /** The transition this clip leaves with; absent means a plain cut. */
+    transitionOut: ClipTransitionSchema.optional(),
   })
   .strict()
   .refine((c) => c.sourceOut > c.sourceIn, {

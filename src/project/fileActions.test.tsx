@@ -211,7 +211,9 @@ describe("open", () => {
     let dialog = await screen.findByRole("alertdialog");
     expect(dialog).toHaveTextContent("Discard unsaved changes?");
     await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
-    expect(mocked).not.toHaveBeenCalled();
+    // nothing was opened (the inspector of the new clip may ask Rust for its own things)
+    expect(mocked).not.toHaveBeenCalledWith("open_project");
+    expect(mocked).not.toHaveBeenCalledWith("open_project", expect.anything());
     expect(clips()).toHaveLength(1);
 
     fireEvent.keyDown(window, { key: "o", ctrlKey: true });

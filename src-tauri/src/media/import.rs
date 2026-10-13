@@ -84,6 +84,41 @@ mod tests {
     }
 
     /// Runs against a real FFmpeg; skipped (loudly) when none is installed.
+    /// A JPEG still: FFmpeg reads nothing from it when asked to seek first, even to 0 (seen with a user's
+    /// picture: no thumbnail in the library and empty preset pictures in the Color tab).
+    #[test]
+    fn a_jpeg_still_gets_a_thumbnail_and_a_frame_for_the_presets() {
+        let Ok(ffmpeg) = locate_tool("ffmpeg", FFMPEG_ENV) else {
+            eprintln!("skipped: FFmpeg not found");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("cutvii-jpeg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let picture = dir.join("still.jpg");
+        generate(
+            &ffmpeg,
+            &picture,
+            &[
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=s=320x568:d=1",
+                "-frames:v",
+                "1",
+            ],
+        );
+        let backend = FfmpegBackend::locate().unwrap();
+        let imported = import_one(&backend, &picture, &dir.join("thumbs")).unwrap();
+        let thumb = PathBuf::from(imported.thumbnail_path.expect("a thumbnail was made"));
+        assert!(std::fs::metadata(&thumb).unwrap().len() > 0);
+        for at in [0.0, 2.5] {
+            let frame = crate::media::looks::read_frame(&ffmpeg, &picture, at).unwrap();
+            let (w, h) = crate::media::looks::THUMB_SIZE;
+            assert_eq!(frame.len(), (w * h * 3) as usize, "at {at}");
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn imports_video_audio_image_and_reuses_thumbnails() {
         let Ok(backend) = FfmpegBackend::locate() else {

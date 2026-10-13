@@ -199,9 +199,13 @@ export function changeTransform(clipId: string, patch: Partial<Transform> | null
 }
 
 /** Give a clip a transition in, change it, or take it away (`null`). One undo step. */
-export function changeTransition(clipId: string, transition: ClipTransition | null): EditResult {
+export function changeTransition(
+  clipId: string,
+  transition: ClipTransition | null,
+  which: "in" | "out" = "in",
+): EditResult {
   return run(transition ? "Set transition" : "Remove transition", (p) =>
-    setClipTransition(p, clipId, transition),
+    setClipTransition(p, clipId, transition, which),
   );
 }
 

@@ -1403,6 +1403,62 @@ mod tests {
         );
         assert!(is_blue(e.region(&slide, 1.9, right)));
 
+        // fade through black: the first clip fades out, the second fades in from black (no held frame)
+        let through = {
+            let mut p = project(
+                vec![
+                    asset("red", &red, "video", Some(4.0)),
+                    asset("blue", &blue, "video", Some(4.0)),
+                ],
+                vec![track(
+                    "v1",
+                    "video",
+                    0,
+                    false,
+                    false,
+                    vec![
+                        clip("c1", "red", "v1", 0.0, 0.0, 1.0, 1.0),
+                        clip("c2", "blue", "v1", 1.0, 0.0, 1.0, 1.0),
+                    ],
+                )],
+            );
+            p.tracks[0].clips[0].transition_out = Some(ClipTransition {
+                kind: "dissolve".into(),
+                duration: 0.5,
+            });
+            p.tracks[0].clips[1].transition_in = Some(ClipTransition {
+                kind: "fade-black".into(),
+                duration: 0.5,
+            });
+            let out = e.dir.join("through.mp4");
+            e.export(&p, &opts(Quality::Draft), &out)
+                .0
+                .unwrap_or_else(|err| panic!("through: {err}"));
+            out
+        };
+        let dark = |c: (u8, u8, u8)| c.0 < 60 && c.1 < 60 && c.2 < 60;
+        assert!(
+            is_red(e.region(&through, 0.3, left)),
+            "{:?}",
+            e.region(&through, 0.3, left)
+        );
+        let at_cut = e.region(&through, 1.03, left);
+        assert!(dark(at_cut), "black at the cut: {at_cut:?}");
+        let before_cut = e.region(&through, 0.9, left);
+        assert!(
+            before_cut.0 < 140 && before_cut.2 < 60,
+            "red on its way out: {before_cut:?}"
+        );
+        let late = (
+            e.region(&through, 1.3, left),
+            e.region(&through, 1.6, left),
+            e.region(&through, 1.8, left),
+        );
+        assert!(is_blue(late.2), "blue at the end: {late:?}");
+        // the sound follows: silent at the cut, there before and after (both sources have a tone)
+        assert!(e.volume(&through, 0.2, 0.2) > -40.0);
+        assert!(e.volume(&through, 0.97, 0.06) < e.volume(&through, 0.2, 0.2) - 12.0);
+
         // every kind renders
         for kind in crate::export::transitions::kinds() {
             let out = render(&format!("{}.mp4", kind.id), Some(&kind.id));

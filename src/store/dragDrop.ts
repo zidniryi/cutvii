@@ -13,8 +13,8 @@ export interface DropPreview {
 }
 
 interface DragDropState {
-  /** A drag is in progress (from a media card, or files from the OS). */
-  dragging: { source: "library" | "os"; label: string; x: number; y: number } | null;
+  /** A drag is in progress (a media card, files from the OS, or a transition from the gallery). */
+  dragging: { source: "library" | "os" | "transition"; label: string; x: number; y: number } | null;
   preview: DropPreview | null;
   set: (patch: Partial<Pick<DragDropState, "dragging" | "preview">>) => void;
   clear: () => void;

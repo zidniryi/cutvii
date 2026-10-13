@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use super::transitions::{From, find as find_transition, remaining};
+use super::transitions::{From, find as find_transition, leaving, remaining};
 use super::{ExportFormat, ExportOptions, Quality};
 use crate::errors::{AppError, AppResult};
 use crate::media::MediaType;
@@ -65,6 +65,8 @@ pub struct PlannedClip {
     pub motion: Option<Motion>,
     /// The transition the clip comes in with: where it starts from, and for how many seconds.
     pub transition: Option<(From, f64)>,
+    /// The transition the clip leaves with: where it ends up, and over how many of its last seconds.
+    pub transition_out: Option<(From, f64)>,
     /// Seconds the last frame stays on after the clip, under the next clip's transition.
     pub hold: f64,
     /// Colour adjustment of the picture; `None` when nothing is set (and always for text).
@@ -223,17 +225,36 @@ pub fn build_plan(
                 continue;
             }
             // a transition in; the clip that ends right here on this track holds its last frame under it
-            let transition = c
+            let coming = c
                 .transition_in
                 .as_ref()
                 .filter(|_| video)
                 .and_then(|t| Some((find_transition(&t.kind)?, t.duration.min(duration))));
-            if let (Some((_, seconds)), Some(before)) = (transition, clips.last_mut()) {
+            if let (Some((kind, seconds)), Some(before)) = (coming, clips.last_mut()) {
                 let touches = (before.start + before.duration - c.timeline_start).abs() < 1e-3;
-                if before.video && before.track == track.id && touches {
+                if kind.hold && before.video && before.track == track.id && touches {
                     before.hold = seconds;
                 }
             }
+            let transition = coming.map(|(kind, seconds)| (kind.from, seconds));
+            // a transition out takes what the transition in leaves of the clip's length
+            let room = duration - transition.map_or(0.0, |(_, seconds)| seconds);
+            let transition_out = c
+                .transition_out
+                .as_ref()
+                .filter(|_| video)
+                .and_then(|t| Some((find_transition(&t.kind)?.from, t.duration.min(room))))
+                .filter(|(_, seconds)| *seconds > 1e-3);
+            // the sound of a clip fades for as long as its picture comes in or leaves (text has no sound:
+            // its own fade is its transparency)
+            let (fade_in, fade_out) = if asset.text.is_none() {
+                c.fades_with(
+                    transition.map_or(0.0, |(_, seconds)| seconds),
+                    transition_out.map_or(0.0, |(_, seconds)| seconds),
+                )
+            } else {
+                c.fades()
+            };
             // what shows behind a fitted or transparent picture
             let black = || "#000000".to_string();
             let (bg_color, bg_image) = match c.fit_background.as_ref() {
@@ -271,8 +292,8 @@ pub fn build_plan(
                 reversed,
                 start: c.timeline_start,
                 volume: c.volume,
-                fade_in: c.fades().0,
-                fade_out: c.fades().1,
+                fade_in,
+                fade_out,
                 clean: c.clean.filter(|k| audio && !k.is_off()),
                 duck: c.duck.filter(|_| audio).unwrap_or(0.0).clamp(0.0, 1.0),
                 fit: c.fit_mode.unwrap_or_default(),
@@ -285,10 +306,15 @@ pub fn build_plan(
                     .unwrap_or(DEFAULT_BLUR_AMOUNT),
                 crop: c.crop.filter(|k| !k.is_none() && asset.text.is_none()),
                 transform: Some(c.transform()).filter(|t| {
-                    !t.is_identity() || (video && (c.motion().is_some() || transition.is_some()))
+                    !t.is_identity()
+                        || (video
+                            && (c.motion().is_some()
+                                || transition.is_some()
+                                || transition_out.is_some()))
                 }),
                 motion: c.motion().filter(|_| video),
                 transition,
+                transition_out,
                 hold: 0.0,
                 color: c
                     .color
@@ -593,42 +619,60 @@ pub fn build_filter_graph(plan: &ExportPlan) -> FilterGraph {
                             piecewise(keys, &clip_time(var))
                         }
                     };
-                    // the transition: `left` goes from 1 to 0 while the clip comes in
-                    let from = clip.transition.map(|(f, _)| f).unwrap_or_default();
+                    // the transitions: `left` goes from 1 to 0 while the clip comes in, `gone` from 0 to 1
+                    // while it leaves
+                    let coming = clip.transition.map(|(f, _)| f).unwrap_or_default();
+                    let going = clip.transition_out.map(|(f, _)| f).unwrap_or_default();
                     let left = |var: &str| match clip.transition {
                         Some((_, seconds)) => piecewise(&remaining(seconds), &clip_time(var)),
                         None => "0".into(),
                     };
-                    let added = |keys: &[(f64, f64)], fixed: f64, var: &str, offset: f64| match (
-                        keys.is_empty(),
-                        offset != 0.0,
-                    ) {
-                        (true, false) => None,
-                        (false, false) => Some(own(keys, fixed, var)),
-                        (_, true) => Some(format!(
-                            "({})+({offset:.6})*({})",
-                            own(keys, fixed, var),
-                            left(var)
-                        )),
+                    let gone = |var: &str| match clip.transition_out {
+                        Some((_, seconds)) => {
+                            piecewise(&leaving(clip.duration, seconds), &clip_time(var))
+                        }
+                        None => "0".into(),
                     };
-                    let scaled = |keys: &[(f64, f64)], fixed: f64, var: &str, factor: f64| match (
-                        keys.is_empty(),
-                        factor != 1.0,
-                    ) {
-                        (true, false) => None,
-                        (false, false) => Some(own(keys, fixed, var)),
-                        (_, true) => Some(format!(
-                            "({})*(1+({:.6})*({}))",
-                            own(keys, fixed, var),
-                            factor - 1.0,
-                            left(var)
-                        )),
-                    };
-                    let x = added(&m.x, t.x, "t", from.x);
-                    let y = added(&m.y, t.y, "t", from.y);
-                    let rotation = added(&m.rotation, t.rotation, "t", from.rotation);
-                    let scale = scaled(&m.scale, t.scale, "t", from.scale);
-                    let opacity = scaled(&m.opacity, t.opacity, "T", from.opacity);
+                    // `offsets` / `factors`: what the transition in and the transition out add or multiply
+                    let added =
+                        |keys: &[(f64, f64)], fixed: f64, var: &str, offsets: (f64, f64)| {
+                            if keys.is_empty() && offsets == (0.0, 0.0) {
+                                return None;
+                            }
+                            let mut e = own(keys, fixed, var);
+                            if offsets.0 != 0.0 {
+                                e = format!("({e})+({:.6})*({})", offsets.0, left(var));
+                            }
+                            if offsets.1 != 0.0 {
+                                e = format!("({e})+({:.6})*({})", offsets.1, gone(var));
+                            }
+                            Some(e)
+                        };
+                    let scaled =
+                        |keys: &[(f64, f64)], fixed: f64, var: &str, factors: (f64, f64)| {
+                            if keys.is_empty() && factors == (1.0, 1.0) {
+                                return None;
+                            }
+                            let mut e = own(keys, fixed, var);
+                            if factors.0 != 1.0 {
+                                e = format!("({e})*(1+({:.6})*({}))", factors.0 - 1.0, left(var));
+                            }
+                            if factors.1 != 1.0 {
+                                e = format!("({e})*(1+({:.6})*({}))", factors.1 - 1.0, gone(var));
+                            }
+                            Some(e)
+                        };
+                    let x = added(&m.x, t.x, "t", (coming.x, going.x));
+                    let y = added(&m.y, t.y, "t", (coming.y, going.y));
+                    let rotation = added(
+                        &m.rotation,
+                        t.rotation,
+                        "t",
+                        (coming.rotation, going.rotation),
+                    );
+                    let scale = scaled(&m.scale, t.scale, "t", (coming.scale, going.scale));
+                    let opacity =
+                        scaled(&m.opacity, t.opacity, "T", (coming.opacity, going.opacity));
 
                     let mut chain = vec!["format=rgba".to_string()];
                     if t.flip_h {
@@ -641,10 +685,13 @@ pub fn build_filter_graph(plan: &ExportPlan) -> FilterGraph {
                         chain.push(format!("scale=w=iw*{s:.6}:h=ih*{s:.6}", s = t.scale));
                     }
                     let fade = if let Some(e) = &opacity {
-                        // the alpha gain takes no expression, so it is set anew for every frame
-                        let first = m.opacity.first().map_or(t.opacity, |k| k.1) * from.opacity;
+                        // The alpha gain takes no expression, so it is set anew for every frame. The
+                        // command is sent to THIS clip's filter by its own name: sent to the plain filter
+                        // name it only ever reaches the first such filter in the graph (measured: a
+                        // second fading clip stayed invisible).
+                        let first = m.opacity.first().map_or(t.opacity, |k| k.1) * coming.opacity;
                         Some(format!(
-                            "sendcmd=c='0-1000000 [expr] colorchannelmixer aa {}',colorchannelmixer=aa={first:.4}",
+                            "sendcmd=c='0-1000000 [expr] colorchannelmixer@fade{i} aa {}',colorchannelmixer@fade{i}=aa={first:.4}",
                             // its commas would end the command: escaped for the command, inside the quotes
                             e.replace(',', "\\\\,"),
                         ))
@@ -1145,6 +1192,55 @@ mod tests {
                 .join(";");
             assert!(e.contains("crop"), "{bad:?}: {e}");
         }
+    }
+
+    #[test]
+    fn transitions_in_and_out_share_the_clip_and_fade_its_sound() {
+        use crate::project::ClipTransition;
+        let tr = |kind: &str, duration: f64| {
+            Some(ClipTransition {
+                kind: kind.into(),
+                duration,
+            })
+        };
+        // sample: video c1 on t1 at 1..5 (4 s long)
+        let mut p = sample();
+        let c = &mut p.tracks[0].clips[0];
+        (c.transition_in, c.transition_out) = (tr("slide-left", 1.0), tr("dissolve", 0.5));
+        let plan = build_plan(&p, &opts(), &sample_facts()).unwrap();
+        let clip = &plan.clips[0];
+        assert_eq!(clip.transition.unwrap().1, 1.0);
+        assert_eq!(clip.transition_out.unwrap().1, 0.5);
+        assert_eq!(
+            (clip.fade_in, clip.fade_out),
+            (1.0, 0.5),
+            "the sound fades with the picture"
+        );
+        let g = build_filter_graph(&plan).graph;
+        // leaving: opacity goes down over clip time 3.5..4
+        assert!(
+            g.contains("if(lt((T-1.000000)\\\\,3.500000)\\\\,0.000000"),
+            "{g}"
+        );
+        assert!(
+            g.contains("afade=t=in:st=0:d=1.000000,afade=t=out:st=3.500000:d=0.500000"),
+            "{g}"
+        );
+
+        // longer than the clip: the way in keeps its length, the way out gets what is left
+        let c = &mut p.tracks[0].clips[0];
+        (c.transition_in, c.transition_out) = (tr("dissolve", 3.0), tr("dissolve", 3.0));
+        let squeezed = build_plan(&p, &opts(), &sample_facts()).unwrap();
+        assert_eq!(squeezed.clips[0].transition.unwrap().1, 3.0);
+        assert_eq!(squeezed.clips[0].transition_out.unwrap().1, 1.0);
+        // an unknown kind is refused when the project is checked
+        p.tracks[0].clips[0].transition_out = tr("sparkle", 1.0);
+        assert!(
+            validate(&p)
+                .unwrap_err()
+                .join(" ")
+                .contains("transitionOut.kind")
+        );
     }
 
     #[test]

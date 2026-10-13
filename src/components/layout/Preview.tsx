@@ -45,7 +45,7 @@ import {
 import { useImagePreviewStore } from "@/store/imagePreviews";
 import { ColorCanvas } from "@/components/preview/ColorCanvas";
 import { useLutStore } from "@/store/luts";
-import { fadeGain, isSoundOnly } from "@/timeline/audio";
+import { fadeGain, isSoundOnly, soundGain } from "@/timeline/audio";
 import { colorOf, gradeKey, isGraded, lutOf } from "@/timeline/color";
 import { useUserLutStore } from "@/store/userLuts";
 import { transformStyle } from "@/timeline/transform";
@@ -108,7 +108,7 @@ export function Preview() {
         // clip volume (capped at 100% in the preview; export applies gain) times the monitor volume
         // ... and the clip's fades, which follow the playhead
         el.volume =
-          Math.min(1, Math.max(0, layer.clip.volume)) * monitor.volume * fadeGain(layer.clip, playhead);
+          Math.min(1, Math.max(0, layer.clip.volume)) * monitor.volume * soundGain(layer.clip, playhead);
         const speed = clipSpeed(layer.clip);
         // same rule as export: no sound above 4x
         el.muted =
@@ -438,7 +438,10 @@ function LayerView({
   // with keyframes follows the playhead; any other is only drawn again when the clip itself changes.
   const placed = usePlaybackStore(
     useShallow((s) =>
-      transformStyle(layer.clip, layer.clip.keyframes || layer.clip.transitionIn ? s.playhead : undefined),
+      transformStyle(
+        layer.clip,
+        layer.clip.keyframes || layer.clip.transitionIn || layer.clip.transitionOut ? s.playhead : undefined,
+      ),
     ),
   );
   const videoRef = useRef<HTMLVideoElement | null>(null);
