@@ -169,7 +169,7 @@ pub async fn transcribe_media(
         transcribe(
             &model_file,
             &samples,
-            language.as_deref(),
+            spec.language(language.as_deref()),
             Box::new(move |percent| {
                 events
                     .emit(TRANSCRIBE_EVENT, TranscribeProgress { percent })

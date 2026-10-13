@@ -41,7 +41,20 @@ pub struct ModelSpec {
     /// and then writes nonsense, so nothing but the exact file is accepted.
     pub bytes: u64,
     pub sha256: &'static str,
+    /// Who publishes the file, named in the consent dialog.
+    pub publisher: &'static str,
+    /// Set on a model trained for ONE language: it is always run in that language, whatever is asked.
+    pub only_language: Option<&'static str>,
 }
+
+impl ModelSpec {
+    /// The language to recognise in: the model's own when it knows only one, otherwise the one asked for.
+    pub fn language<'a>(&self, asked: Option<&'a str>) -> Option<&'a str> {
+        self.only_language.or(asked)
+    }
+}
+
+const WHISPER_CPP: &str = "the whisper.cpp project";
 
 /// The multilingual models offered, smallest first. They come from the whisper.cpp project's own
 /// repository on Hugging Face.
@@ -54,6 +67,8 @@ pub const MODELS: &[ModelSpec] = &[
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
         bytes: 77_691_713,
         sha256: "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
+        publisher: WHISPER_CPP,
+        only_language: None,
     },
     ModelSpec {
         id: "base",
@@ -63,6 +78,8 @@ pub const MODELS: &[ModelSpec] = &[
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
         bytes: 147_951_465,
         sha256: "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+        publisher: WHISPER_CPP,
+        only_language: None,
     },
     ModelSpec {
         id: "small",
@@ -72,6 +89,8 @@ pub const MODELS: &[ModelSpec] = &[
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
         bytes: 487_601_967,
         sha256: "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+        publisher: WHISPER_CPP,
+        only_language: None,
     },
     ModelSpec {
         id: "medium",
@@ -81,6 +100,8 @@ pub const MODELS: &[ModelSpec] = &[
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin",
         bytes: 1_533_763_059,
         sha256: "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208",
+        publisher: WHISPER_CPP,
+        only_language: None,
     },
     ModelSpec {
         id: "large-turbo",
@@ -90,6 +111,8 @@ pub const MODELS: &[ModelSpec] = &[
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
         bytes: 1_624_555_275,
         sha256: "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69",
+        publisher: WHISPER_CPP,
+        only_language: None,
     },
     ModelSpec {
         id: "large",
@@ -99,6 +122,21 @@ pub const MODELS: &[ModelSpec] = &[
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
         bytes: 3_095_033_483,
         sha256: "64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2",
+        publisher: WHISPER_CPP,
+        only_language: None,
+    },
+    // Last, so it is never the model picked by default: it only knows Indonesian. A community conversion
+    // (5-bit quantised) of cahya/whisper-medium-id, pinned to one commit and to its exact size and hash.
+    ModelSpec {
+        id: "medium-id",
+        label: "Medium Indonesia (Indonesian only; tuned for Indonesian speech)",
+        approx_mb: 514,
+        file: "ggml-model-medium-id-q5_0.bin",
+        url: "https://huggingface.co/rafdiraf/whisper-medium-id-ggml/resolve/674030cf4477a23e279fbc95ffa993b08db02269/ggml-model-medium-id-q5_0.bin",
+        bytes: 539_212_467,
+        sha256: "da09c51f05f78a727d37325e2d1ad7b78c20597593215276e820cd7fa1e92e0f",
+        publisher: "rafdiraf, a community conversion of cahya/whisper-medium-id; not from the whisper.cpp project",
+        only_language: Some("id"),
     },
 ];
 
@@ -133,6 +171,10 @@ pub struct ModelStatus {
     pub approx_mb: u32,
     /// Where it is downloaded from, shown to the user before they agree.
     pub source: String,
+    /// Who publishes the file.
+    pub publisher: String,
+    /// The one language the model knows, when it is not multilingual.
+    pub language: Option<String>,
     pub installed: bool,
 }
 
@@ -144,6 +186,8 @@ pub fn model_statuses(dir: &Path) -> Vec<ModelStatus> {
             label: m.label.into(),
             approx_mb: m.approx_mb,
             source: m.url.into(),
+            publisher: m.publisher.into(),
+            language: m.only_language.map(Into::into),
             installed: is_installed(m, &dir.join(m.file)),
         })
         .collect()
@@ -430,8 +474,25 @@ mod tests {
     fn models_are_known_by_id_and_recognised_by_their_first_bytes() {
         assert_eq!(
             MODELS.iter().map(|m| m.id).collect::<Vec<_>>(),
-            ["tiny", "base", "small", "medium", "large-turbo", "large"]
+            [
+                "tiny",
+                "base",
+                "small",
+                "medium",
+                "large-turbo",
+                "large",
+                "medium-id"
+            ]
         );
+        // a one-language model is run in its language whatever is asked; the others do as asked
+        let indonesian = model_spec("medium-id").unwrap();
+        assert_eq!(indonesian.language(Some("en")), Some("id"));
+        assert_eq!(indonesian.language(None), Some("id"));
+        assert_eq!(
+            model_spec("large").unwrap().language(Some("en")),
+            Some("en")
+        );
+        assert_eq!(model_spec("large").unwrap().language(None), None);
         assert!(
             MODELS
                 .iter()

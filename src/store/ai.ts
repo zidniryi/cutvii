@@ -10,6 +10,10 @@ export interface SpeechModel {
   approxMb: number;
   /** Where it is downloaded from; shown before the user agrees. */
   source: string;
+  /** Who publishes the file; the whisper.cpp project when absent. */
+  publisher?: string;
+  /** The one language the model knows, when it is not multilingual ("id"). It is always run in it. */
+  language?: string | null;
   installed: boolean;
 }
 
@@ -149,7 +153,7 @@ export async function downloadWithConsent(model: SpeechModel): Promise<AiNote | 
   const agreed = await confirmDialog({
     title: "Download the speech model?",
     lines: [
-      `${model.label}: about ${modelSize(model.approxMb)}, downloaded once from ${host} (the whisper.cpp project).`,
+      `${model.label}: about ${modelSize(model.approxMb)}, downloaded once from ${host} (${model.publisher ?? "the whisper.cpp project"}).`,
       "It is kept on this computer. Your media is never uploaded: speech is recognised here.",
     ],
     confirmLabel: "Download",

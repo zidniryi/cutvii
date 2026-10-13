@@ -436,6 +436,12 @@ describe("choosing the speech model", () => {
     expect(karaokeModel()).toBe("tiny");
     useKaraokeStore.getState().setModel("medium"); // chosen but not here: the largest that is
     expect(karaokeModel()).toBe("small");
+    // a one-language model is never picked by itself, only when it was chosen
+    const indonesian = { ...model("medium-id", 514, true), language: "id" };
+    useAiStore.setState({ models: [model("small", 466, true), indonesian] });
+    expect(karaokeModel()).toBe("small");
+    useKaraokeStore.getState().setModel("medium-id");
+    expect(karaokeModel()).toBe("medium-id");
     useAiStore.setState({ models: [model("tiny", 75, false)] });
     expect(karaokeModel()).toBeNull();
     useKaraokeStore.setState({ model: null });

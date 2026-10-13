@@ -117,6 +117,12 @@ No GPL/LGPL/AGPL crates.
   confirms a dialog that states the size and the source (`huggingface.co/ggerganov/whisper.cpp`). The file is
   checked against the published size and SHA-256 before it is used, kept in the app data folder, and can be
   removed from the AI tab.
+- **Medium Indonesia** (about 514 MB) is the one model that does not come from the whisper.cpp project: it is
+  `cahya/whisper-medium-id` (a fine-tune of OpenAI's Whisper Medium on Indonesian speech, declared Apache-2.0
+  on Hugging Face) as converted to ggml and quantised by a third party (`rafdiraf/whisper-medium-id-ggml`,
+  declared Apache-2.0). CutVii pins one commit of that repository and its exact size and SHA-256, and the
+  consent dialog names the publisher. The licences are as declared on those pages; nobody here has checked
+  the training data.
 - This download and the upscale model download (below) are the **only network requests CutVii makes** (`ureq`, MIT OR Apache-2.0; `sha2`, MIT OR
   Apache-2.0). Recognition runs entirely on the user's machine; media and text are never sent anywhere.
 

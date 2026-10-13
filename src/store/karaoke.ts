@@ -78,12 +78,13 @@ export function karaokeStyle(id: string): StylePreset {
 
 /**
  * The speech model to listen with: the one chosen in the dialog if it is on this computer, otherwise the
- * largest one that is (singing is hard to recognise, so bigger is better here).
+ * largest multilingual one that is (singing is hard to recognise, so bigger is better here).
  */
 export function karaokeModel(): string | null {
   const installed = useAiStore.getState().models.filter((m) => m.installed);
   const chosen = useKaraokeStore.getState().model;
-  const largest = [...installed].sort((a, b) => b.approxMb - a.approxMb)[0];
+  // a one-language model is only used when it was chosen
+  const largest = installed.filter((m) => !m.language).sort((a, b) => b.approxMb - a.approxMb)[0];
   return (installed.find((m) => m.id === chosen) ?? largest)?.id ?? null;
 }
 

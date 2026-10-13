@@ -198,7 +198,7 @@ pub async fn find_clips_in_media(
             request.source_in,
             request.source_out,
             request.model,
-            request.language.as_deref().unwrap_or("auto")
+            spec.language(request.language.as_deref()).unwrap_or("auto")
         ),
     )?;
     let cache_file = app
@@ -212,7 +212,7 @@ pub async fn find_clips_in_media(
         model_file,
         start: request.source_in,
         seconds: request.source_out - request.source_in,
-        language: request.language.clone(),
+        language: spec.language(request.language.as_deref()).map(Into::into),
     };
 
     let cancel = job.start()?;
