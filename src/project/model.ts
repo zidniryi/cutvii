@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-/** Bump when the on-disk shape changes, and add a migration in `src-tauri/src/project/migrate.rs`. v2: clip speed. v3: fitMode. v4: fitBackground. v5: text assets. v6: clip crop, text font, rotation and flip, clip mute and fades, clip colour, text styles. */
-export const SCHEMA_VERSION = 6;
+/** Bump when the on-disk shape changes, and add a migration in `src-tauri/src/project/migrate.rs`. v2: clip speed. v3: fitMode. v4: fitBackground. v5: text assets. v6: clip crop, text font, rotation and flip, clip mute and fades, clip colour, text styles. v7: clip LUT. */
+export const SCHEMA_VERSION = 7;
 
 /** Tolerance (seconds) when comparing a clip's sourceOut with the asset duration. */
 const DURATION_EPSILON = 1e-3;
@@ -230,6 +230,30 @@ const colorValue = z.number().min(-1).max(1);
  * Colour adjustment: each value runs from -1 to 1 and 0 changes nothing. Rust bakes them into one lookup
  * table (`src-tauri/src/media/color.rs`) that both the preview and the export apply.
  */
+/**
+ * An imported colour table on a clip. The table is not in the project: CutVii keeps its own checked copy in
+ * the app data folder (`src-tauri/src/media/cube.rs`), found by `id` (a hash of the table).
+ */
+/** Clean-up of a clip's sound. The export applies it; the preview plays the original. */
+export const AudioCleanSchema = z
+  .object({
+    /** How strongly steady background noise is lowered, 0 (off) to 1. */
+    noise: z.number().min(0).max(1),
+    /** Remove low rumble and hum (below 80 Hz). */
+    rumble: z.boolean(),
+  })
+  .strict();
+
+export const ClipLutSchema = z
+  .object({
+    id: z.string().regex(/^[0-9a-f]{24}$/, "is not a LUT id"),
+    /** The table's name when it was chosen, so a project can say which one is missing. */
+    name: z.string().trim().min(1).max(40),
+    /** How much of the table's result is taken, 0 to 1. */
+    intensity: z.number().min(0).max(1),
+  })
+  .strict();
+
 export const ColorAdjustSchema = z
   .object({
     exposure: colorValue,
@@ -292,6 +316,12 @@ export const TimelineClipSchema = z
     crop: CropSchema.optional(),
     /** The Adjust sliders of the Color tab; absent means the picture is left as it is. */
     color: ColorAdjustSchema.optional(),
+    /** An imported LUT (`.cube`), applied after `color`; absent means none. */
+    lut: ClipLutSchema.optional(),
+    /** Noise and rumble clean-up of the clip's sound; absent means none. */
+    clean: AudioCleanSchema.optional(),
+    /** Ducking: how far this clip is turned down while other clips make sound, 0 to 1; absent means off. */
+    duck: z.number().min(0).max(1).optional(),
   })
   .strict()
   .refine((c) => c.sourceOut > c.sourceIn, {
@@ -369,6 +399,8 @@ export const ProjectSchema = z
   });
 
 export type ColorAdjust = z.infer<typeof ColorAdjustSchema>;
+export type ClipLut = z.infer<typeof ClipLutSchema>;
+export type AudioClean = z.infer<typeof AudioCleanSchema>;
 export type Crop = z.infer<typeof CropSchema>;
 export type TextSpec = z.infer<typeof TextSpecSchema>;
 export type TextStyle = z.infer<typeof TextStyleSchema>;

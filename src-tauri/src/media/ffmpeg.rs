@@ -362,6 +362,14 @@ impl MediaBackend for FfmpegBackend {
         let mut graded = request.plan.clone();
         let luts = std::env::temp_dir().join("cutvii-luts");
         for clip in graded.clips.iter_mut().filter(|c| c.video) {
+            if clip.lut.is_some() {
+                continue; // already baked with its imported LUT (`ExportPlan::bake_user_luts`)
+            }
+            if clip.user_lut.is_some() {
+                return Err(AppError::InvalidInput(
+                    "a clip's LUT was not prepared for this export".into(),
+                ));
+            }
             if let Some(adjust) = &clip.color {
                 clip.lut = Some(ensure_lut(&luts, adjust)?.cube);
             }

@@ -173,7 +173,7 @@ mod tests {
             .to_string();
         assert!(e.contains("missing schemaVersion"), "{e}");
 
-        let future = FIXTURE.replace("\"schemaVersion\": 1", "\"schemaVersion\": 7");
+        let future = FIXTURE.replace("\"schemaVersion\": 1", "\"schemaVersion\": 99");
         assert!(
             parse_project_json(&future)
                 .unwrap_err()

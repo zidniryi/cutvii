@@ -1,6 +1,7 @@
 /** Per-clip sound: mute, fades, and detaching a video's sound into its own clip. */
 import {
   MAX_FADE,
+  type AudioClean,
   type MediaAsset,
   type Project,
   type TimelineClip,
@@ -98,6 +99,56 @@ export function setClipSound(project: Project, clipId: string, patch: Partial<Cl
   };
 }
 
+export const NO_CLEAN: AudioClean = { noise: 0, rumble: false };
+export const cleanOf = (clip: Pick<TimelineClip, "clean">): AudioClean => clip.clean ?? NO_CLEAN;
+
+/** Set a clip's noise / rumble clean-up. "Nothing switched on" is not stored. Not for stills or text. */
+export function setClipClean(project: Project, clipId: string, patch: Partial<AudioClean>): EditResult {
+  const found = findClip(project, clipId);
+  if (!found) return fail("unknown-clip", `Unknown clip ${clipId}`);
+  const asset = project.assets.find((a) => a.id === found.clip.assetId);
+  if (!asset || asset.type === "image") return fail("incompatible-track", "This clip has no sound");
+  const current = cleanOf(found.clip);
+  const next = { ...current, ...patch };
+  if (!Number.isFinite(next.noise) || next.noise < 0 || next.noise > 1) {
+    return fail("out-of-range", "Noise reduction can be 0 to 100 %");
+  }
+  if (next.noise === current.noise && next.rumble === current.rumble) return { ok: true, project };
+  return {
+    ok: true,
+    project: replaceClip(project, clipId, (c) => {
+      const out = { ...c };
+      if (next.noise > 0 || next.rumble) out.clean = next;
+      else delete out.clean;
+      return out;
+    }),
+  };
+}
+
+/**
+ * Ducking: turn this clip down while other clips make sound (music under a voice). 0 switches it off and
+ * is not stored. Not for stills or text.
+ */
+export function setClipDuck(project: Project, clipId: string, amount: number): EditResult {
+  const found = findClip(project, clipId);
+  if (!found) return fail("unknown-clip", `Unknown clip ${clipId}`);
+  const asset = project.assets.find((a) => a.id === found.clip.assetId);
+  if (!asset || asset.type === "image") return fail("incompatible-track", "This clip has no sound");
+  if (!Number.isFinite(amount) || amount < 0 || amount > 1) {
+    return fail("out-of-range", "Ducking can be 0 to 100 %");
+  }
+  if ((found.clip.duck ?? 0) === amount) return { ok: true, project };
+  return {
+    ok: true,
+    project: replaceClip(project, clipId, (c) => {
+      const out = { ...c };
+      if (amount > 0) out.duck = amount;
+      else delete out.duck;
+      return out;
+    }),
+  };
+}
+
 /**
  * Split a video clip's sound into its own clip on an audio track, at the same time and with the same
  * trim, speed, volume and fades. The video clip is muted, so the sound is heard once. One undo step.
@@ -149,6 +200,8 @@ export function detachAudio(
     ...(clip.reversed !== undefined ? { reversed: clip.reversed } : {}),
     ...(clip.fadeIn !== undefined ? { fadeIn: clip.fadeIn } : {}),
     ...(clip.fadeOut !== undefined ? { fadeOut: clip.fadeOut } : {}),
+    ...(clip.clean !== undefined ? { clean: clip.clean } : {}),
+    ...(clip.duck !== undefined ? { duck: clip.duck } : {}),
   };
   next = replaceClip(next, clip.id, (c) => ({ ...c, muted: true }));
   return {

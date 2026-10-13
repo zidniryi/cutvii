@@ -154,6 +154,23 @@ pub fn validate(project: &Project) -> Result<(), Vec<String>> {
             if clip.color.is_some_and(|c| !c.is_valid()) {
                 err(format!("{at}.color: every value must be between -1 and 1"));
             }
+            if let Some(lut) = &clip.lut {
+                if !crate::media::cube::is_cube_id(&lut.id) {
+                    err(format!("{at}.lut.id: is not a LUT id"));
+                }
+                if !(0.0..=1.0).contains(&lut.intensity) {
+                    err(format!("{at}.lut.intensity: must be between 0 and 1"));
+                }
+                if lut.name.trim().is_empty() || lut.name.chars().count() > 40 {
+                    err(format!("{at}.lut.name: must be 1 to 40 characters"));
+                }
+            }
+            if clip.duck.is_some_and(|d| !(0.0..=1.0).contains(&d)) {
+                err(format!("{at}.duck: must be between 0 and 1"));
+            }
+            if clip.clean.is_some_and(|c| !c.is_valid()) {
+                err(format!("{at}.clean.noise: must be between 0 and 1"));
+            }
             for (name, fade) in [("fadeIn", clip.fade_in), ("fadeOut", clip.fade_out)] {
                 if fade.is_some_and(|f| !(0.0..=MAX_FADE).contains(&f)) {
                     err(format!(
@@ -247,7 +264,7 @@ mod tests {
     use super::*;
 
     fn fixture() -> Project {
-        serde_json::from_str(include_str!("../../../fixtures/project-v6.json"))
+        serde_json::from_str(include_str!("../../../fixtures/project-v7.json"))
             .expect("fixture parses")
     }
 
@@ -262,7 +279,7 @@ mod tests {
     #[test]
     fn unknown_fields_are_rejected() {
         let mut v: serde_json::Value =
-            serde_json::from_str(include_str!("../../../fixtures/project-v6.json")).unwrap();
+            serde_json::from_str(include_str!("../../../fixtures/project-v7.json")).unwrap();
         v["extra"] = 1.into();
         assert!(serde_json::from_value::<Project>(v).is_err());
     }

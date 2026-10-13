@@ -1,4 +1,4 @@
-# CutVii project file (schemaVersion 6)
+# CutVii project file (schemaVersion 7)
 
 Plain JSON. Source of truth: `src/project/model.ts` (Zod) and `src-tauri/src/project/` (serde + `validate`).
 Both are tested against `fixtures/project-v1.json`; change the fixture and both test suites together.
@@ -36,6 +36,24 @@ A clip may carry `color` with the eight Adjust values, each from -1 to 1 where 0
 (1 is two stops brighter), `contrast`, `saturation`, `vibrance`, `temperature` (negative cooler, positive warmer),
 `tint` (negative greener, positive more magenta), `highlights`, `shadows`. All eight are written; a clip with
 nothing set has no `color` at all. It applies to video and image clips, not to sound or text.
+
+## LUT (schemaVersion 7)
+
+A clip may carry `lut`: `{ "id", "name", "intensity" }`. `id` is 24 hex digits, a hash of an imported `.cube`
+table; `name` (1 to 40 characters) is the table's name when it was chosen; `intensity` runs from 0 to 1. The
+table is **not** in the project: CutVii keeps its own checked copy in the app data folder (`luts/<id>.cube`), so
+a project opened on another computer shows the LUT as missing until the same file is imported there. The LUT
+is applied after `color`, and both are baked into one table that the preview and the export share. A missing
+LUT is left out of the preview and stops an export with a message. v6 projects migrate unchanged.
+
+## Sound clean-up (schemaVersion 7)
+
+A clip with sound may carry `clean`: `{ "noise", "rumble" }`. `noise` (0 to 1) is how strongly steady
+background noise is lowered; `rumble` (true / false) removes sound below 80 Hz. Absent means none. The export
+applies it to the clip's sound before speed, volume and fades; the preview plays the original sound.
+
+A clip with sound may also carry `duck` (0 to 1): how far it is turned down while the clips that do not duck
+make sound. Absent means off. Export only; the preview plays the clip at its full level.
 
 ## Crop (schemaVersion 6)
 

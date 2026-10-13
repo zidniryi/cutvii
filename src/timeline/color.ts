@@ -3,11 +3,11 @@
  * (`src-tauri/src/media/color.rs`); the preview applies that table in a shader and the export with FFmpeg,
  * so both show the same colours.
  */
-import type { ColorAdjust, Project } from "@/project/model";
+import type { ClipLut, ColorAdjust, Project } from "@/project/model";
 import { findClip } from "./clips";
 import type { EditResult } from "./edit";
 
-export type { ColorAdjust };
+export type { ClipLut, ColorAdjust };
 
 export const NO_COLOR: ColorAdjust = {
   exposure: 0,
@@ -39,6 +39,53 @@ export const isGraded = (a: ColorAdjust) => KEYS.some((k) => a[k] !== 0);
 export const sameColor = (a: ColorAdjust, b: ColorAdjust) => KEYS.every((k) => a[k] === b[k]);
 /** Identity of a setting, for caching its table. */
 export const colorKey = (a: ColorAdjust) => KEYS.map((k) => a[k]).join("|");
+
+/** The clip's imported LUT when it does something (an intensity of 0 is the same as none). */
+export const lutOf = (clip: { lut?: ClipLut }): ClipLut | null =>
+  clip.lut && clip.lut.intensity > 0 ? clip.lut : null;
+/** Identity of a whole grade (Adjust plus an imported LUT), for caching its table. */
+export const gradeKey = (a: ColorAdjust, lut: ClipLut | null) =>
+  lut ? `${colorKey(a)}|${lut.id}|${lut.intensity}` : colorKey(a);
+
+/** Put an imported LUT on a clip, change its intensity, or take it off with `null`. Not for sound or text. */
+export function setClipLut(project: Project, clipId: string, lut: ClipLut | null): EditResult {
+  const found = findClip(project, clipId);
+  if (!found) return { ok: false, error: { code: "unknown-clip", message: `Unknown clip ${clipId}` } };
+  const asset = project.assets.find((a) => a.id === found.clip.assetId);
+  if (!asset || asset.type === "audio" || asset.text || found.track.type === "audio") {
+    return {
+      ok: false,
+      error: { code: "incompatible-track", message: "Only video and image clips have colour" },
+    };
+  }
+  if (lut && !(lut.intensity >= 0 && lut.intensity <= 1)) {
+    return { ok: false, error: { code: "out-of-range", message: "LUT intensity runs from 0 to 100" } };
+  }
+  const old = found.clip.lut;
+  if ((!lut && !old) || (lut && old && lut.id === old.id && lut.intensity === old.intensity)) {
+    return { ok: true, project };
+  }
+  return {
+    ok: true,
+    project: {
+      ...project,
+      tracks: project.tracks.map((t) =>
+        t.id === found.track.id
+          ? {
+              ...t,
+              clips: t.clips.map((k) => {
+                if (k.id !== clipId) return k;
+                const out = { ...k };
+                if (lut) out.lut = { id: lut.id, name: lut.name, intensity: lut.intensity };
+                else delete out.lut;
+                return out;
+              }),
+            }
+          : t,
+      ),
+    },
+  };
+}
 
 /** Change some colour values of a clip, or put them all back with `null`. Not for sound or text. */
 export function setClipColor(

@@ -4,7 +4,41 @@ use crate::media::MediaType;
 use crate::media::color::ColorAdjust;
 use crate::media::text::TextSpec;
 
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 7;
+
+/// An imported colour table (`.cube`) on a clip. The table itself is not in the project: CutVii keeps its
+/// own checked copy in the app data folder (`media/cube.rs`), found by `id`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClipLut {
+    /// Hash of the table's contents.
+    pub id: String,
+    /// The table's name when it was chosen, so a project can still say which one is missing.
+    pub name: String,
+    /// How much of the table's result is taken, 0 to 1.
+    pub intensity: f64,
+}
+
+/// Clean-up of a clip's sound (`media/clean.rs`). The export applies it; the preview plays the original.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AudioClean {
+    /// How strongly steady background noise is lowered, 0 (off) to 1.
+    pub noise: f64,
+    /// Remove low rumble and hum (below 80 Hz).
+    pub rumble: bool,
+}
+
+impl AudioClean {
+    pub fn is_valid(&self) -> bool {
+        (0.0..=1.0).contains(&self.noise)
+    }
+
+    /// Nothing is switched on.
+    pub fn is_off(&self) -> bool {
+        self.noise <= 0.0 && !self.rumble
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -121,6 +155,15 @@ pub struct TimelineClip {
     /// The Adjust sliders of the Color tab. Absent means the picture is left as it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<ColorAdjust>,
+    /// An imported LUT, applied after `color`. Absent means none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lut: Option<ClipLut>,
+    /// Noise and rumble clean-up of the clip's sound. Absent means none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clean: Option<AudioClean>,
+    /// Ducking: how far this clip is turned down while other clips make sound, 0 to 1. Absent means off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duck: Option<f64>,
 }
 
 /// The longest fade that can be stored. A fade longer than its clip is shortened when it is applied.

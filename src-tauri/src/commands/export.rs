@@ -83,7 +83,8 @@ async fn run(
         .await
         .map_err(|e| AppError::InvalidInput(format!("export planning failed: {e}")))??
     };
-    let (plan, name, format) = plan;
+    let (mut plan, name, format) = plan;
+    plan.bake_user_luts(&crate::commands::clip_tools::cubes_dir(app)?)?;
 
     let output: Option<PathBuf> = {
         let app = app.clone();
@@ -272,7 +273,7 @@ async fn run_batch(
     let backend = Arc::new(FfmpegBackend::locate()?);
     let scope = app.asset_protocol_scope();
     let format = options.format;
-    let planned = {
+    let mut planned = {
         let backend = Arc::clone(&backend);
         tauri::async_runtime::spawn_blocking(move || {
             items
@@ -288,6 +289,11 @@ async fn run_batch(
         .await
         .map_err(|e| AppError::InvalidInput(format!("export planning failed: {e}")))??
     };
+
+    let cubes = crate::commands::clip_tools::cubes_dir(app)?;
+    for (_, plan) in planned.iter_mut() {
+        plan.bake_user_luts(&cubes)?;
+    }
 
     if !folder.is_dir() {
         return Err(AppError::InvalidInput("that folder does not exist".into()));

@@ -500,10 +500,14 @@ mod tests {
             out: &Path,
         ) -> (AppResult<ExportReport>, Vec<f64>) {
             let facts = gather_facts(project, &self.backend);
-            let plan = match build_plan(project, opts, &facts) {
+            let mut plan = match build_plan(project, opts, &facts) {
                 Ok(p) => p,
                 Err(e) => return (Err(AppError::InvalidInput(e.join("; "))), vec![]),
             };
+            // imported LUTs come from the test's own folder, as the app's come from the app data folder
+            if let Err(e) = plan.bake_user_luts(&self.dir.join("luts")) {
+                return (Err(e), vec![]);
+            }
             let mut seen = Vec::new();
             let r = self.backend.render(
                 &RenderRequest {
@@ -662,7 +666,7 @@ mod tests {
     }
     fn project(assets: Vec<Value>, tracks: Vec<Value>) -> Project {
         serde_json::from_value(json!({
-            "id": "p", "name": "t", "schemaVersion": 6,
+            "id": "p", "name": "t", "schemaVersion": 7,
             "createdAt": "2026-01-01T00:00:00.000Z", "modifiedAt": "2026-01-01T00:00:00.000Z",
             "settings": {"width": 640, "height": 360, "fps": 30, "backgroundColor": "#202020"},
             "assets": assets, "tracks": tracks
@@ -1342,6 +1346,71 @@ mod tests {
     }
 
     #[test]
+    fn a_ducking_clip_is_turned_down_only_while_another_clip_sounds() {
+        let Some(e) = env("duck") else { return };
+        let (red, tone) = (e.red(), e.tone());
+        // music (440 Hz) for 3 s; the video's own sound (1000 Hz) comes in at 1.5 s
+        let render = |name: &str, duck: Option<f64>| {
+            let mut p = project(
+                vec![
+                    asset("red", &red, "video", Some(4.0)),
+                    asset("tone", &tone, "audio", Some(3.0)),
+                ],
+                vec![
+                    track(
+                        "v1",
+                        "video",
+                        0,
+                        false,
+                        false,
+                        vec![clip("c1", "red", "v1", 1.5, 0.0, 1.5, 1.0)],
+                    ),
+                    track(
+                        "a1",
+                        "audio",
+                        1,
+                        false,
+                        false,
+                        vec![clip("c2", "tone", "a1", 0.0, 0.0, 3.0, 1.0)],
+                    ),
+                ],
+            );
+            p.tracks[1].clips[0].duck = duck;
+            let out = e.dir.join(name);
+            e.export(&p, &opts(Quality::Draft), &out)
+                .0
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            out
+        };
+        let plain = render("plain.mp4", None);
+        let (alone, under) = (
+            band_volume(&e, &plain, 0.3, 0.9, 440),
+            band_volume(&e, &plain, 2.0, 0.8, 440),
+        );
+        assert!(
+            (alone - under).abs() < 2.0,
+            "no ducking: {alone} vs {under}"
+        );
+
+        let ducked = render("ducked.mp4", Some(1.0));
+        let (alone, under) = (
+            band_volume(&e, &ducked, 0.3, 0.9, 440),
+            band_volume(&e, &ducked, 2.0, 0.8, 440),
+        );
+        assert!(
+            under < alone - 6.0,
+            "ducked under the voice: {alone} vs {under}"
+        );
+        // the other clip keeps its level, and the music runs to its end
+        let voice = (
+            band_volume(&e, &plain, 2.0, 0.8, 1000),
+            band_volume(&e, &ducked, 2.0, 0.8, 1000),
+        );
+        assert!((voice.0 - voice.1).abs() < 1.5, "{voice:?}");
+        assert!(band_volume(&e, &ducked, 2.6, 0.3, 440) > -70.0);
+    }
+
+    #[test]
     fn fades_ramp_the_sound_and_a_muted_clip_is_silent() {
         let Some(e) = env("fades") else { return };
         let (red, tone) = (e.red(), e.tone());
@@ -1475,6 +1544,70 @@ mod tests {
             dark.0 < plain.0.saturating_sub(60) && dark.0 > dark.1 + 40,
             "{dark:?} vs {plain:?}"
         );
+    }
+
+    #[test]
+    fn an_imported_lut_reaches_the_exported_picture_on_top_of_adjust() {
+        use crate::media::cube::{store_cube, tests::cube_of};
+        use crate::project::ClipLut;
+        let Some(e) = env("user-lut") else { return };
+        let red = e.red();
+        // a table that swaps red and blue: easy to tell apart from anything Adjust can do
+        let swap = store_cube(&e.dir.join("luts"), &cube_of(17, |c| [c[2], c[1], c[0]])).unwrap();
+        let render = |name: &str, intensity: f64, id: &str, saturation: f64| {
+            let mut p = project(
+                vec![asset("red", &red, "video", Some(4.0))],
+                vec![track(
+                    "v1",
+                    "video",
+                    0,
+                    false,
+                    false,
+                    vec![clip("c1", "red", "v1", 0.0, 0.0, 1.0, 1.0)],
+                )],
+            );
+            p.tracks[0].clips[0].lut = Some(ClipLut {
+                id: id.into(),
+                name: "Swap".into(),
+                intensity,
+            });
+            if saturation != 0.0 {
+                p.tracks[0].clips[0].color = Some(crate::media::color::ColorAdjust {
+                    saturation,
+                    ..Default::default()
+                });
+            }
+            let out = e.dir.join(name);
+            e.export(&p, &opts(Quality::Draft), &out)
+                .0
+                .map(|_| e.color_at(&out, 0.5))
+        };
+        let full = render("full.mp4", 1.0, &swap.id, 0.0).unwrap();
+        assert!(near(full, (0, 0, 255), 60), "red became blue: {full:?}");
+        let half = render("half.mp4", 0.5, &swap.id, 0.0).unwrap();
+        assert!(
+            (90..170).contains(&half.0) && (90..170).contains(&half.2) && half.1 < 60,
+            "half way between red and blue: {half:?}"
+        );
+        let none = render("none.mp4", 0.0, &swap.id, 0.0).unwrap();
+        assert!(
+            near(none, (255, 0, 0), 60),
+            "intensity 0 changes nothing: {none:?}"
+        );
+        // Adjust runs first: grey in, and swapping the channels of grey leaves grey
+        let grey = render("grey.mp4", 1.0, &swap.id, -1.0).unwrap();
+        let spread = grey.0.max(grey.1).max(grey.2) - grey.0.min(grey.1).min(grey.2);
+        assert!(spread < 14 && (40..70).contains(&grey.0), "{grey:?}");
+
+        // a LUT that is not on this computer stops the export and is named; nothing is written
+        let missing = render("missing.mp4", 1.0, "0123456789abcdef01234567", 0.0)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            missing.contains("\"Swap\"") && missing.contains("Import it again"),
+            "{missing}"
+        );
+        assert!(!e.dir.join("missing.mp4").exists());
     }
 
     #[test]

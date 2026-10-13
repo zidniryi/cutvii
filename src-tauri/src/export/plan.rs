@@ -1,11 +1,15 @@
 //! Export planning and FFmpeg filter-graph generation. Pure: no processes, no filesystem.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::{ExportFormat, ExportOptions, Quality};
+use crate::errors::{AppError, AppResult};
 use crate::media::MediaType;
-use crate::media::color::{ColorAdjust, filter_path};
+use crate::media::clean::{duck_filter, filters as clean_filters};
+use crate::media::color::{ColorAdjust, Overlay, ensure_graded_lut, filter_path};
+use crate::media::cube::load_cube;
+use crate::project::{AudioClean, ClipLut};
 use crate::project::{
     BackgroundKind, Crop, DEFAULT_BLUR_AMOUNT, FitMode, Project, TrackType, Transform, validate,
 };
@@ -37,6 +41,10 @@ pub struct PlannedClip {
     /// Seconds of fade at the start and at the end of the clip's sound (already fitted to its length).
     pub fade_in: f64,
     pub fade_out: f64,
+    /// Noise and rumble clean-up of the sound, when any is switched on.
+    pub clean: Option<AudioClean>,
+    /// Ducking amount 0..1: the clip is turned down while the clips that do not duck make sound. 0 = off.
+    pub duck: f64,
     /// How the picture is scaled to the canvas (video and stills).
     pub fit: FitMode,
     /// Colour behind the picture where it does not cover the canvas (`#RRGGBB`).
@@ -54,6 +62,9 @@ pub struct PlannedClip {
     /// The baked table for `color` (a `.cube` file). Filled in just before rendering: planning itself
     /// writes no files. Without it the colour step is left out of the graph.
     pub lut: Option<PathBuf>,
+    /// An imported LUT to lay over `color`. Its table is loaded and baked into `lut` by
+    /// [`ExportPlan::bake_user_luts`] before rendering.
+    pub user_lut: Option<ClipLut>,
     /// A text picture: drawn over the tracks below with its transparency kept, never on a background.
     pub transparent: bool,
     /// Contributes picture (on a visible video track, not an audio asset).
@@ -76,6 +87,32 @@ pub struct ExportPlan {
     pub clips: Vec<PlannedClip>,
     /// Things the user should know about this export (for example sound muted at high speed).
     pub warnings: Vec<String>,
+}
+
+impl ExportPlan {
+    /// Bake the table of every clip that uses an imported LUT: Adjust first, then the LUT (see
+    /// `media/color.rs`). `cubes` is the folder of CutVii's own LUT copies. A LUT that is not there stops
+    /// the export with a message that names it: the video is never silently exported without it.
+    pub fn bake_user_luts(&mut self, cubes: &Path) -> AppResult<()> {
+        let out = std::env::temp_dir().join("cutvii-luts");
+        for clip in self.clips.iter_mut() {
+            let Some(lut) = &clip.user_lut else { continue };
+            let cube = load_cube(cubes, &lut.id).map_err(|e| {
+                AppError::InvalidInput(format!(
+                    "a clip uses the LUT \"{}\", which cannot be used: {e}. Import it again, or remove it from the clip in the Color tab.",
+                    lut.name
+                ))
+            })?;
+            let overlay = Overlay {
+                id: &lut.id,
+                cube: &cube,
+                intensity: lut.intensity,
+            };
+            let adjust = clip.color.unwrap_or_default();
+            clip.lut = Some(ensure_graded_lut(&out, &adjust, Some(&overlay))?.cube);
+        }
+        Ok(())
+    }
 }
 
 /// Above this speed a clip's sound is dropped: it is no longer intelligible and the time-stretch artefacts dominate.
@@ -213,6 +250,8 @@ pub fn build_plan(
                 volume: c.volume,
                 fade_in: c.fades().0,
                 fade_out: c.fades().1,
+                clean: c.clean.filter(|k| audio && !k.is_off()),
+                duck: c.duck.filter(|_| audio).unwrap_or(0.0).clamp(0.0, 1.0),
                 fit: c.fit_mode.unwrap_or_default(),
                 bg_color,
                 bg_image,
@@ -227,6 +266,10 @@ pub fn build_plan(
                     .color
                     .filter(|k| video && !k.is_identity() && asset.text.is_none()),
                 lut: None,
+                user_lut: c
+                    .lut
+                    .clone()
+                    .filter(|l| video && l.intensity > 0.0 && asset.text.is_none()),
                 transparent: asset.text.is_some(),
                 video,
                 audio,
@@ -521,8 +564,16 @@ pub fn build_filter_graph(plan: &ExportPlan) -> FilterGraph {
         d = secs(plan.duration)
     ));
     let mut labels = vec!["[a0]".to_string()];
+    // ducking: clips that duck listen to the mix of the clips that do not (the "key"). It only happens
+    // when there is at least one of each.
+    let heard = |c: &&PlannedClip| c.audio;
+    let ducking = plan.clips.iter().filter(heard).any(|c| c.duck > 0.0)
+        && plan.clips.iter().filter(heard).any(|c| c.duck <= 0.0);
+    let mut keys: Vec<String> = Vec::new();
+    let mut ducked: Vec<(usize, f64)> = Vec::new();
     for (i, clip) in plan.clips.iter().enumerate().filter(|(_, c)| c.audio) {
         let ms = (clip.start * 1000.0).round() as u64;
+        let n = labels.len();
         // speed: time-stretch with atempo (pitch kept), or resample so pitch follows the speed
         let tempo = if (clip.speed - 1.0).abs() <= 1e-9 {
             String::new()
@@ -549,13 +600,48 @@ pub fn build_filter_graph(plan: &ExportPlan) -> FilterGraph {
                 clip.fade_out
             ));
         }
+        // clean-up works on the sound as recorded, before speed changes its pitch
+        let clean = clip.clean.as_ref().map(clean_filters).unwrap_or_default();
         parts.push(format!(
-            "[{i}:a]aresample={AUDIO_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,{tempo}\
-             volume={vol:.4},asetpts=PTS-STARTPTS,{fades}adelay={ms}|{ms}[a{n}]",
+            "[{i}:a]aresample={AUDIO_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,{clean}{tempo}\
+             volume={vol:.4},asetpts=PTS-STARTPTS,{fades}adelay={ms}|{ms}{end}",
             vol = clip.volume,
-            n = labels.len()
+            end = match (ducking, clip.duck > 0.0) {
+                (false, _) => format!("[a{n}]"),
+                (true, true) => format!("[d{n}]"),
+                (true, false) => format!(",asplit[a{n}][k{n}]"),
+            }
         ));
-        labels.push(format!("[a{}]", labels.len()));
+        if ducking && clip.duck > 0.0 {
+            ducked.push((n, clip.duck));
+        } else if ducking {
+            keys.push(format!("[k{n}]"));
+        }
+        labels.push(format!("[a{n}]"));
+    }
+    if ducking {
+        // the key is as long as the whole timeline: the ducking filter stops when either input ends
+        parts.push(format!(
+            "anullsrc=r={AUDIO_RATE}:cl=stereo,atrim=duration={d},asetpts=N/SR/TB[kb]",
+            d = secs(plan.duration)
+        ));
+        let split = if ducked.len() > 1 {
+            format!(",asplit={}", ducked.len())
+        } else {
+            String::new()
+        };
+        parts.push(format!(
+            "[kb]{}amix=inputs={}:normalize=0:duration=first:dropout_transition=0{split}{}",
+            keys.concat(),
+            keys.len() + 1,
+            ducked
+                .iter()
+                .map(|(n, _)| format!("[key{n}]"))
+                .collect::<String>()
+        ));
+        for (n, amount) in &ducked {
+            parts.push(format!("[d{n}][key{n}]{}[a{n}]", duck_filter(*amount)));
+        }
     }
     if labels.len() == 1 {
         parts.push("[a0]anull[aout]".into());
@@ -582,7 +668,7 @@ mod tests {
 
     pub fn project(assets: serde_json::Value, tracks: serde_json::Value) -> Project {
         serde_json::from_value(json!({
-            "id": "p", "name": "t", "schemaVersion": 6,
+            "id": "p", "name": "t", "schemaVersion": 7,
             "createdAt": "2026-01-01T00:00:00.000Z", "modifiedAt": "2026-01-01T00:00:00.000Z",
             "settings": {"width": 1280, "height": 720, "fps": 30, "backgroundColor": "#102030"},
             "assets": assets, "tracks": tracks
@@ -985,6 +1071,76 @@ mod tests {
     }
 
     #[test]
+    fn sound_clean_up_is_filtered_before_speed_and_only_where_there_is_sound() {
+        let mut p = sample();
+        let on = AudioClean {
+            noise: 0.5,
+            rumble: true,
+        };
+        p.tracks[0].clips[0].clean = Some(on);
+        p.tracks[0].clips[0].speed = Some(2.0);
+        let plan = build_plan(&p, &opts(), &sample_facts()).unwrap();
+        assert_eq!(plan.clips[0].clean, Some(on));
+        let g = build_filter_graph(&plan).graph;
+        assert!(
+            g.contains("channel_layouts=stereo,highpass=f=80,highpass=f=80,afftdn=nr=15.0:nf=-37.5,atempo=2.000000,volume="),
+            "{g}"
+        );
+        assert_eq!(g.matches("afftdn").count(), 1, "only the clip that asked");
+
+        // switched off, or a clip that makes no sound: nothing is planned
+        p.tracks[0].clips[0].clean = Some(AudioClean {
+            noise: 0.0,
+            rumble: false,
+        });
+        assert!(
+            build_plan(&p, &opts(), &sample_facts()).unwrap().clips[0]
+                .clean
+                .is_none()
+        );
+        p.tracks[0].clips[0].clean = Some(on);
+        p.tracks[0].clips[0].muted = Some(true);
+        assert!(
+            build_plan(&p, &opts(), &sample_facts()).unwrap().clips[0]
+                .clean
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_ducking_clip_listens_to_the_clips_that_do_not_duck() {
+        // sample: video c1 on t1 at 1..5, music on t3 at 0.5..4.5
+        let mut p = sample();
+        let music = p
+            .tracks
+            .iter_mut()
+            .find(|t| t.track_type == TrackType::Audio)
+            .unwrap();
+        music.clips[0].duck = Some(0.5);
+        let plan = build_plan(&p, &opts(), &sample_facts()).unwrap();
+        let g = build_filter_graph(&plan).graph;
+        assert_eq!(g.matches("sidechaincompress").count(), 1, "{g}");
+        assert!(g.contains(",asplit[a1][k1]"), "{g}");
+        assert!(
+            g.contains(
+                "[kb][k1]amix=inputs=2:normalize=0:duration=first:dropout_transition=0[key2]"
+            ),
+            "{g}"
+        );
+        assert!(
+            g.contains("[d2][key2]sidechaincompress=threshold=0.015:ratio=5.75:attack=20:release=500:makeup=1[a2]"),
+            "{g}"
+        );
+
+        // every sounding clip ducks: there is nothing to duck under, so nothing happens
+        for t in p.tracks.iter_mut() {
+            t.clips.iter_mut().for_each(|c| c.duck = Some(0.5));
+        }
+        let all = build_filter_graph(&build_plan(&p, &opts(), &sample_facts()).unwrap()).graph;
+        assert!(!all.contains("sidechaincompress"), "{all}");
+    }
+
+    #[test]
     fn clip_mute_fades_and_detached_sound_shape_the_mix() {
         // sample: video c1 on t1 at 1..5 (source 2..6), still on t2, music on t3 at 0.5..4.5
         let mut p = sample();
@@ -1082,6 +1238,45 @@ mod tests {
             g.contains("ih*0.000000,lut3d=file='/cache/luts/abc.cube',scale="),
             "{g}"
         );
+
+        // an imported LUT is planned for pictures only, and only when it does something
+        let lut = |intensity| {
+            Some(ClipLut {
+                id: "0123456789abcdef01234567".into(),
+                name: "Film".into(),
+                intensity,
+            })
+        };
+        let mut p = sample();
+        p.tracks[0].clips[0].lut = lut(0.8);
+        p.tracks[1].clips[0].lut = lut(0.0);
+        p.tracks[2].clips[0].lut = lut(1.0); // sound has no picture
+        let mut plan = build_plan(&p, &opts(), &sample_facts()).unwrap();
+        assert_eq!(plan.clips[0].user_lut, lut(0.8));
+        assert!(plan.clips[1].user_lut.is_none() && plan.clips[2].user_lut.is_none());
+        assert!(plan.clips.iter().all(|c| c.lut.is_none()));
+        // it is not on this computer: the export stops and names it
+        let nowhere = std::env::temp_dir().join("cutvii-no-such-luts");
+        let message = plan.bake_user_luts(&nowhere).unwrap_err().to_string();
+        assert!(message.contains("\"Film\""), "{message}");
+        for (field, value) in [
+            ("id", json!("../../etc/passwd")),
+            ("intensity", json!(1.5)),
+            ("name", json!("")),
+        ] {
+            let mut bad = serde_json::to_value(sample()).unwrap();
+            bad["tracks"][0]["clips"][0]["lut"] =
+                json!({"id": "0123456789abcdef01234567", "name": "Film", "intensity": 1});
+            bad["tracks"][0]["clips"][0]["lut"][field] = value;
+            let bad: Project = serde_json::from_value(bad).unwrap();
+            assert!(
+                build_plan(&bad, &opts(), &sample_facts())
+                    .unwrap_err()
+                    .join(";")
+                    .contains(&format!("lut.{field}")),
+                "{field}"
+            );
+        }
 
         let mut bad = sample();
         bad.tracks[0].clips[0].color = Some(ColorAdjust {

@@ -13,7 +13,12 @@ use crate::commands::export::reveal_command;
 use crate::commands::export::safe_file_stem;
 use crate::errors::{AppError, AppResult};
 use crate::media::MediaBackend;
-use crate::media::color::{ColorAdjust, ensure_lut};
+use crate::media::clean::write_sample;
+use crate::media::color::{ColorAdjust, Overlay, ensure_graded_lut};
+use crate::media::cube::{
+    CUBE_EXTENSION, CubeInfo, MAX_CUBE_FILES, delete_cube, list_cubes, load_cube, read_cube,
+    store_cube,
+};
 use crate::media::ffmpeg::FfmpegBackend;
 use crate::media::import::{ImportedMedia, cache_key, import_one};
 use crate::media::looks::{
@@ -261,14 +266,26 @@ pub fn reveal_media(app: AppHandle, path: String) -> AppResult<()> {
 /// Bake (or reuse) the colour table for the Adjust values and return the file the preview shader loads.
 /// The export bakes the same table with the same code.
 #[tauri::command]
-pub async fn bake_color_lut(app: AppHandle, adjust: ColorAdjust) -> AppResult<String> {
+pub async fn bake_color_lut(
+    app: AppHandle,
+    adjust: ColorAdjust,
+    lut: Option<crate::project::ClipLut>,
+) -> AppResult<String> {
+    let cubes = cubes_dir(&app)?;
     let dir = app
         .path()
         .app_cache_dir()
         .map_err(|e| AppError::InvalidInput(format!("no cache directory: {e}")))?
         .join("luts");
     tauri::async_runtime::spawn_blocking(move || {
-        Ok(ensure_lut(&dir, &adjust)?
+        // an imported LUT goes on top of Adjust; one that is not on this computer is an error
+        let cube = lut.as_ref().map(|l| load_cube(&cubes, &l.id)).transpose()?;
+        let overlay = lut.as_ref().zip(cube.as_ref()).map(|(l, cube)| Overlay {
+            id: &l.id,
+            cube,
+            intensity: l.intensity,
+        });
+        Ok(ensure_graded_lut(&dir, &adjust, overlay.as_ref())?
             .binary
             .to_string_lossy()
             .into_owned())
@@ -546,6 +563,52 @@ pub async fn make_instrumental(
     .map_err(|e| AppError::InvalidInput(format!("sound task failed: {e}")))?
 }
 
+/// A few seconds of a clip's sound from `start` (source seconds), cleaned the way the export will clean it
+/// (`media/clean.rs`), to listen to. One sample is kept at a time, in the cache folder.
+#[tauri::command]
+pub async fn audio_clean_sample(
+    app: AppHandle,
+    path: String,
+    start: f64,
+    clean: crate::project::AudioClean,
+) -> AppResult<String> {
+    let src = allowed_source(&app, &path)?;
+    if !(start.is_finite() && start >= 0.0 && clean.is_valid()) {
+        return Err(AppError::InvalidInput("invalid sample request".into()));
+    }
+    let dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| AppError::InvalidInput(format!("no cache directory: {e}")))?
+        .join("audio-samples");
+    let scope = app.asset_protocol_scope();
+    tauri::async_runtime::spawn_blocking(move || {
+        let params = format!("clean-v1|{start:.3}|{:.3}|{}", clean.noise, clean.rumble);
+        let out = dir.join(format!("{}.wav", derived_key(&src, &params)?));
+        if !out.is_file() {
+            // older samples are of no use any more
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for old in entries.flatten() {
+                    std::fs::remove_file(old.path()).ok();
+                }
+            }
+            write_sample(
+                &locate_tool("ffmpeg", FFMPEG_ENV)?,
+                &src,
+                start,
+                &clean,
+                &out,
+            )?;
+        }
+        scope.allow_file(&out).map_err(|e| {
+            AppError::InvalidInput(format!("could not enable playback of the sample: {e}"))
+        })?;
+        Ok(out.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| AppError::InvalidInput(format!("sound task failed: {e}")))?
+}
+
 /// A lyrics file larger than this is not read.
 const MAX_LYRICS_BYTES: u64 = 1024 * 1024;
 
@@ -651,6 +714,74 @@ pub async fn import_color_presets(app: AppHandle) -> AppResult<PresetImport> {
     })
     .await
     .map_err(|e| AppError::InvalidInput(format!("preset task failed: {e}")))?
+}
+
+/// Where CutVii keeps its own copies of imported `.cube` tables.
+pub fn cubes_dir(app: &AppHandle) -> AppResult<PathBuf> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::InvalidInput(format!("no data directory: {e}")))?
+        .join("luts"))
+}
+
+/// What a LUT import found: the tables that were taken in, and for each refused file its name and the
+/// reason.
+#[derive(Debug, Serialize)]
+pub struct CubeImport {
+    pub luts: Vec<CubeInfo>,
+    pub problems: Vec<(String, String)>,
+}
+
+/// Native "Import LUT" dialog: read the chosen `.cube` files, check each as untrusted input (see
+/// `media/cube.rs`) and keep CutVii's own copy of the good ones. A bad file is reported and the others
+/// still load. The webview never supplies a path. Empty when the user cancels.
+#[tauri::command]
+pub async fn import_color_luts(app: AppHandle) -> AppResult<CubeImport> {
+    let dir = cubes_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let picked = app
+            .dialog()
+            .file()
+            .add_filter("3D LUT", &[CUBE_EXTENSION])
+            .blocking_pick_files()
+            .unwrap_or_default();
+        let mut found = CubeImport {
+            luts: Vec::new(),
+            problems: Vec::new(),
+        };
+        for file in picked.into_iter().take(MAX_CUBE_FILES) {
+            let Ok(path) = file.into_path() else {
+                continue;
+            };
+            let shown = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            match read_cube(&path).and_then(|cube| store_cube(&dir, &cube)) {
+                Ok(info) => found.luts.push(info),
+                Err(e) => found.problems.push((shown, e.to_string())),
+            }
+        }
+        Ok(found)
+    })
+    .await
+    .map_err(|e| AppError::InvalidInput(format!("LUT task failed: {e}")))?
+}
+
+/// The imported LUTs, by name.
+#[tauri::command]
+pub async fn color_luts(app: AppHandle) -> AppResult<Vec<CubeInfo>> {
+    let dir = cubes_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || list_cubes(&dir))
+        .await
+        .map_err(|e| AppError::InvalidInput(format!("LUT task failed: {e}")))
+}
+
+/// Forget an imported LUT (CutVii's copy; the file it came from is never touched).
+#[tauri::command]
+pub async fn delete_color_lut(app: AppHandle, id: String) -> AppResult<()> {
+    delete_cube(&cubes_dir(&app)?, &id)
 }
 
 /// The sample picture of a text style (a bundled one or the user's own), drawn by the same rasterizer as

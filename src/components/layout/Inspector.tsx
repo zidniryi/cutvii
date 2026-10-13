@@ -4,6 +4,8 @@ import { AiPanel } from "@/components/inspector/AiPanel";
 import { ColorPanel } from "@/components/inspector/ColorPanel";
 import { CropPanel } from "@/components/inspector/CropPanel";
 import { MediaInfo } from "@/components/inspector/MediaInfo";
+import { CleanPanel } from "@/components/inspector/CleanPanel";
+import { DuckPanel } from "@/components/inspector/DuckPanel";
 import { SoundPanel } from "@/components/inspector/SoundPanel";
 import { StyleGallery } from "@/components/inspector/StyleGallery";
 import { TextPanel } from "@/components/inspector/TextPanel";
@@ -753,6 +755,8 @@ function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset;
             detachable={asset.type === "video" && !onAudioTrack}
           />
         )}
+        {active === "audio" && <CleanPanel key={`${clip.id}-clean`} clip={clip} asset={asset} />}
+        {active === "audio" && <DuckPanel key={`${clip.id}-duck`} clip={clip} />}
         {active === "speed" && (
           <SpeedPanel
             key={`${clip.id}-speed`}

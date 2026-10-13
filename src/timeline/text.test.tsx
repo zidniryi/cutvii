@@ -60,8 +60,8 @@ const visible = (p: Project, t: number) =>
     .map((l) => l.clip.id);
 
 describe("text in the project file", () => {
-  it("is schema version 6: an image asset may carry text, nothing else may", () => {
-    expect(SCHEMA_VERSION).toBe(6);
+  it("is schema version 7: an image asset may carry text, nothing else may", () => {
+    expect(SCHEMA_VERSION).toBe(7);
     const p = withText(2);
     expectValid(p);
     expect(p.assets.at(-1)).toMatchObject({

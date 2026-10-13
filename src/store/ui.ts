@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ColorAdjust } from "@/project/model";
+import type { ClipLut, ColorAdjust } from "@/project/model";
 
 export type SidePanel = "library" | "text" | "inspector";
 export type InspectorTab = "video" | "audio" | "speed" | "info" | "text" | "ai" | "color";
@@ -51,8 +51,9 @@ interface UiState {
   cropLock: { clipId: string; ratio: number } | null;
   setCropLock: (cropLock: { clipId: string; ratio: number } | null) => void;
   /** Colour values being tried while a slider is dragged: the preview shows them, nothing is saved yet. */
-  colorDraft: { clipId: string; adjust: ColorAdjust } | null;
-  setColorDraft: (draft: { clipId: string; adjust: ColorAdjust } | null) => void;
+  /** `lut` is set while the LUT intensity is being dragged. */
+  colorDraft: { clipId: string; adjust: ColorAdjust; lut?: ClipLut } | null;
+  setColorDraft: (draft: { clipId: string; adjust: ColorAdjust; lut?: ClipLut } | null) => void;
   /** The clip shown without its colour changes while "Before" is held. */
   colorBefore: string | null;
   /** Colour settings copied from a clip, to paste on another. Kept while the app is open. */

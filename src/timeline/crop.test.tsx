@@ -39,8 +39,8 @@ const cropped = (p: Project, id: string, c: Crop | null) => {
 };
 
 describe("crop in the project", () => {
-  it("is schema version 6: an optional crop per clip, with at least a tenth of the picture left", () => {
-    expect(SCHEMA_VERSION).toBe(6);
+  it("is schema version 7: an optional crop per clip, with at least a tenth of the picture left", () => {
+    expect(SCHEMA_VERSION).toBe(7);
     const p = cropped(project(), "still", crop({ left: 0.25, top: 0.1 }));
     expectValid(p);
     expect(clipOf(p, "still").crop).toEqual({ left: 0.25, top: 0.1, right: 0, bottom: 0 });

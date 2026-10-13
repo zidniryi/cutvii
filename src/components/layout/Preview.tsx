@@ -46,7 +46,8 @@ import { useImagePreviewStore } from "@/store/imagePreviews";
 import { ColorCanvas } from "@/components/preview/ColorCanvas";
 import { useLutStore } from "@/store/luts";
 import { fadeGain, isSoundOnly } from "@/timeline/audio";
-import { colorKey, colorOf, isGraded } from "@/timeline/color";
+import { colorOf, gradeKey, isGraded, lutOf } from "@/timeline/color";
+import { useUserLutStore } from "@/store/userLuts";
 import { transformStyle } from "@/timeline/transform";
 import type { Crop, TimelineClip } from "@/project/model";
 
@@ -428,16 +429,23 @@ function LayerView({
   const colorDraft = useUiStore((s) => (s.colorDraft?.clipId === layer.clip.id ? s.colorDraft.adjust : null));
   const colorBefore = useUiStore((s) => s.colorBefore === layer.clip.id);
   const adjust = colorDraft ?? colorOf(layer.clip);
-  const graded = isGraded(adjust) && !asset.text && asset.type !== "audio" && track.type === "video";
+  const lutDraft = useUiStore((s) => (s.colorDraft?.clipId === layer.clip.id ? s.colorDraft.lut : undefined));
+  // An imported LUT that is not on this computer is left out (the Color tab says so; the export stops).
+  const wantedLut = lutOf(lutDraft ? { lut: lutDraft } : layer.clip);
+  const lutHere = useUserLutStore((s) => !wantedLut || !s.luts || s.luts.some((l) => l.id === wantedLut.id));
+  const clipLut = lutHere ? wantedLut : null;
+  const graded =
+    (isGraded(adjust) || clipLut !== null) && !asset.text && asset.type !== "audio" && track.type === "video";
   // The table for these values; while a newer one is on its way (a slider being dragged) the clip keeps
   // the last one it had, so the picture never flashes back to ungraded.
   const lut = useLutStore((s) => {
     if (!graded || colorBefore) return null;
-    const entry = s.entries[colorKey(adjust)];
+    const entry = s.entries[gradeKey(adjust, clipLut)];
     return entry?.status === "ready" ? entry.lut : (s.held[layer.clip.id] ?? null);
   });
   useEffect(() => {
-    if (graded) useLutStore.getState().ensure(adjust, layer.clip.id);
+    if (wantedLut) useUserLutStore.getState().ensure();
+    if (graded) useLutStore.getState().ensure(adjust, layer.clip.id, clipLut);
   });
   // A shader may only read media that was LOADED with CORS, and the asset protocol allows it. It is set
   // from the start, for every picture: switching it on when a clip first gets colour does not make an

@@ -14,7 +14,18 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use super::cube::Cube;
 use crate::errors::{AppError, AppResult};
+
+/// An imported table (`.cube`, see `cube.rs`) laid over the Adjust values: the colour goes through Adjust
+/// first, then through the table, and `intensity` (0 to 1) says how much of the table's result is taken.
+#[derive(Debug, Clone, Copy)]
+pub struct Overlay<'a> {
+    /// The table's id: part of the cache name.
+    pub id: &'a str,
+    pub cube: &'a Cube,
+    pub intensity: f64,
+}
 
 /// Points per side of the table. 33 is the common size for looks and what the 6p spike measured.
 pub const LUT_SIZE: usize = 33;
@@ -129,13 +140,28 @@ pub fn apply(a: &ColorAdjust, rgb: [f64; 3]) -> [f64; 3] {
 }
 
 /// The whole table for `a`: `size^3` colours, red changing fastest, then green, then blue.
+#[cfg(test)]
 pub fn bake(a: &ColorAdjust, size: usize) -> Vec<[f32; 3]> {
+    bake_with(a, None, size)
+}
+
+/// The whole table for `a` with an imported table on top (see [`Overlay`]). Without one, or at intensity
+/// 0, this is exactly [`bake`].
+pub fn bake_with(a: &ColorAdjust, overlay: Option<&Overlay>, size: usize) -> Vec<[f32; 3]> {
+    let overlay = overlay.filter(|o| o.intensity > 0.0);
     let last = (size - 1) as f64;
     let mut table = Vec::with_capacity(size * size * size);
     for b in 0..size {
         for g in 0..size {
             for r in 0..size {
-                let c = apply(a, [r as f64 / last, g as f64 / last, b as f64 / last]);
+                let mut c = apply(a, [r as f64 / last, g as f64 / last, b as f64 / last]);
+                if let Some(o) = overlay {
+                    let looked = o.cube.sample(c);
+                    let t = o.intensity.min(1.0);
+                    for k in 0..3 {
+                        c[k] = (c[k] + (looked[k] - c[k]) * t).clamp(0.0, 1.0);
+                    }
+                }
                 table.push([c[0] as f32, c[1] as f32, c[2] as f32]);
             }
         }
@@ -191,6 +217,18 @@ pub fn lut_key(a: &ColorAdjust) -> String {
     format!("{:016x}", h.finish())
 }
 
+/// Cache name of the table for `a` with an imported table on top. Without one it is [`lut_key`].
+pub fn graded_key(a: &ColorAdjust, overlay: Option<&Overlay>) -> String {
+    match overlay.filter(|o| o.intensity > 0.0) {
+        None => lut_key(a),
+        Some(o) => {
+            let mut h = DefaultHasher::new();
+            (lut_key(a), o.id, o.intensity.min(1.0).to_bits()).hash(&mut h);
+            format!("{:016x}", h.finish())
+        }
+    }
+}
+
 /// The two files of a baked table.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LutFiles {
@@ -213,12 +251,27 @@ fn write_atomic(out: &Path, bytes: &[u8]) -> AppResult<()> {
 /// The table files for `a` inside `dir`, made now unless they already exist. The names are ours (a hash),
 /// never taken from user input, so they are safe to hand to FFmpeg.
 pub fn ensure_lut(dir: &Path, a: &ColorAdjust) -> AppResult<LutFiles> {
+    ensure_graded_lut(dir, a, None)
+}
+
+/// [`ensure_lut`] with an imported table on top. The imported file itself never reaches FFmpeg: only the
+/// table baked here does, under our own name.
+pub fn ensure_graded_lut(
+    dir: &Path,
+    a: &ColorAdjust,
+    overlay: Option<&Overlay>,
+) -> AppResult<LutFiles> {
+    if overlay.is_some_and(|o| !(0.0..=1.0).contains(&o.intensity)) {
+        return Err(AppError::InvalidInput(
+            "LUT intensity must be between 0 and 1".into(),
+        ));
+    }
     if !a.is_valid() {
         return Err(AppError::InvalidInput(
             "colour values must be between -1 and 1".into(),
         ));
     }
-    let key = lut_key(a);
+    let key = graded_key(a, overlay);
     let files = LutFiles {
         cube: dir.join(format!("{key}.cube")),
         binary: dir.join(format!("{key}.cvlut")),
@@ -227,7 +280,7 @@ pub fn ensure_lut(dir: &Path, a: &ColorAdjust) -> AppResult<LutFiles> {
         return Ok(files);
     }
     fs::create_dir_all(dir)?;
-    let table = bake(a, LUT_SIZE);
+    let table = bake_with(a, overlay, LUT_SIZE);
 
     let mut cube = Vec::with_capacity(table.len() * 28);
     writeln!(cube, "TITLE \"CutVii {key}\"\nLUT_3D_SIZE {LUT_SIZE}")?;
@@ -365,6 +418,79 @@ mod tests {
         assert!(serde_json::from_str::<ColorAdjust>(r#"{"exposure":0,"contrast":0,"saturation":0,"vibrance":0,"temperature":0,"tint":0,"highlights":0,"shadows":0,"gamma":1}"#).is_err());
         let sent = serde_json::to_value(STRONG).unwrap();
         assert_eq!(sent["temperature"], 0.8);
+    }
+
+    #[test]
+    fn an_imported_table_goes_on_top_of_adjust_by_its_intensity() {
+        use crate::media::cube::tests::cube_of;
+        let warm = grade(|a| a.temperature = 0.4);
+        let plain = bake(&warm, LUT_SIZE);
+        let same = cube_of(17, |c| c);
+        let swapped = cube_of(17, |c| [c[2], c[1], c[0]]);
+        let over = |cube, intensity| Overlay {
+            id: "0123456789abcdef01234567",
+            cube,
+            intensity,
+        };
+        let close = |a: &[[f32; 3]], b: &[[f32; 3]]| {
+            a.iter()
+                .zip(b)
+                .all(|(x, y)| (0..3).all(|k| (x[k] - y[k]).abs() < 1e-5))
+        };
+        // a table that changes nothing, and any table at intensity 0, leave Adjust as it was
+        assert!(close(
+            &bake_with(&warm, Some(&over(&same, 1.0)), LUT_SIZE),
+            &plain
+        ));
+        assert_eq!(
+            bake_with(&warm, Some(&over(&swapped, 0.0)), LUT_SIZE),
+            plain
+        );
+        assert_eq!(
+            graded_key(&warm, Some(&over(&swapped, 0.0))),
+            lut_key(&warm)
+        );
+        // Adjust first, then the table: red and blue of the ADJUSTED colour change places
+        let full = bake_with(&warm, Some(&over(&swapped, 1.0)), LUT_SIZE);
+        let turned: Vec<[f32; 3]> = plain.iter().map(|c| [c[2], c[1], c[0]]).collect();
+        assert!(close(&full, &turned));
+        // half way is half way between the two
+        let half = bake_with(&warm, Some(&over(&swapped, 0.5)), LUT_SIZE);
+        let middle: Vec<[f32; 3]> = plain
+            .iter()
+            .zip(&turned)
+            .map(|(a, b)| {
+                [
+                    (a[0] + b[0]) / 2.0,
+                    (a[1] + b[1]) / 2.0,
+                    (a[2] + b[2]) / 2.0,
+                ]
+            })
+            .collect();
+        assert!(close(&half, &middle));
+
+        // every setting has its own cache name, and a table that goes out of range is kept inside 0..1
+        let keys = [
+            lut_key(&warm),
+            graded_key(&warm, Some(&over(&swapped, 1.0))),
+            graded_key(&warm, Some(&over(&swapped, 0.5))),
+            graded_key(&ColorAdjust::default(), Some(&over(&swapped, 1.0))),
+        ];
+        assert!((0..4).all(|i| (0..i).all(|j| keys[i] != keys[j])));
+        let wild = cube_of(5, |c| [c[0] * 4.0 - 1.0, c[1], c[2]]);
+        assert!(
+            bake_with(&warm, Some(&over(&wild, 1.0)), LUT_SIZE)
+                .iter()
+                .flatten()
+                .all(|v| (0.0..=1.0).contains(v))
+        );
+
+        let dir = std::env::temp_dir().join(format!("cutvii-graded-{}", std::process::id()));
+        let files = ensure_graded_lut(&dir, &warm, Some(&over(&swapped, 1.0))).unwrap();
+        assert!(files.cube.is_file() && files.binary.is_file());
+        assert_ne!(files.cube, ensure_lut(&dir, &warm).unwrap().cube);
+        assert!(ensure_graded_lut(&dir, &warm, Some(&over(&swapped, 1.5))).is_err());
+        std::fs::remove_dir_all(dir).ok();
     }
 
     #[test]

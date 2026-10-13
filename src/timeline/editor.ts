@@ -4,7 +4,7 @@ import { useUiStore } from "@/store/ui";
 import { usePlaybackStore } from "@/store/playback";
 import { useProjectStore } from "@/store/project";
 import { clipEnd, EPS, minClipDuration } from "./clips";
-import type { Crop, FitBackground, FitMode } from "@/project/model";
+import type { AudioClean, Crop, FitBackground, FitMode } from "@/project/model";
 import {
   addClip,
   addTrack,
@@ -23,8 +23,8 @@ import {
   trimClip,
   type EditResult,
 } from "./edit";
-import { detachAudio, setClipSound, type ClipSound } from "./audio";
-import { setClipColor, type ColorAdjust } from "./color";
+import { detachAudio, setClipClean, setClipDuck, setClipSound, type ClipSound } from "./audio";
+import { setClipColor, setClipLut, type ClipLut, type ColorAdjust } from "./color";
 import { setColorOnAll } from "./looks";
 import { planPlacement, type DropPlacement } from "./placement";
 import { setTextFade } from "./text";
@@ -145,6 +145,16 @@ export function changeClipSound(clipId: string, patch: Partial<ClipSound>): Edit
   return run(label, (p) => setClipSound(p, clipId, patch));
 }
 
+/** Noise / rumble clean-up of a clip's sound. One undo step. */
+export function changeClean(clipId: string, patch: Partial<AudioClean>): EditResult {
+  return run("Change sound clean-up", (p) => setClipClean(p, clipId, patch));
+}
+
+/** Ducking amount of a clip, 0 (off) to 1. One undo step. */
+export function changeDuck(clipId: string, amount: number): EditResult {
+  return run(amount > 0 ? "Change ducking" : "Switch ducking off", (p) => setClipDuck(p, clipId, amount));
+}
+
 /** Put a video clip's sound on an audio track as its own clip (adding a track if none is free there). */
 export function detachClipAudio(clipId: string): EditResult {
   const ids = { clipId: crypto.randomUUID(), trackId: crypto.randomUUID() };
@@ -167,6 +177,11 @@ export function changeColor(clipId: string, patch: Partial<ColorAdjust> | null, 
     const cleared = setClipColor(p, clipId, null);
     return cleared.ok ? setClipColor(cleared.project, clipId, patch) : cleared;
   });
+}
+
+/** Put an imported LUT on a clip, change its intensity, or take it off (`null`). One undo step. */
+export function changeLut(clipId: string, lut: ClipLut | null): EditResult {
+  return run(lut ? "Set LUT" : "Remove LUT", (p) => setClipLut(p, clipId, lut));
 }
 
 /** Give every clip that has a picture the same colour (`null` removes it everywhere). One undo step. */

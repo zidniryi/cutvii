@@ -5,9 +5,10 @@ import { cn } from "@/lib/utils";
 import { useLutStore } from "@/store/luts";
 import { useMediaDetailsStore } from "@/store/mediaDetails";
 import { useUiStore } from "@/store/ui";
-import { COLOR_FIELDS, colorKey, colorOf, isGraded, type ColorAdjust } from "@/timeline/color";
+import { COLOR_FIELDS, colorOf, gradeKey, isGraded, lutOf, type ColorAdjust } from "@/timeline/color";
 import { changeColor, report } from "@/timeline/editor";
 import { LooksPanel } from "./LooksPanel";
+import { LutPanel } from "./LutPanel";
 
 /**
  * Colour sliders for a video or image clip. While a slider is dragged the preview follows; letting go is one
@@ -19,7 +20,9 @@ export function ColorPanel({ clip, asset }: { clip: TimelineClip; asset: MediaAs
   const shown = draft ?? stored;
   const before = useUiStore((s) => s.colorBefore === clip.id);
   const { setColorDraft, setColorBefore } = useUiStore.getState();
-  const failed = useLutStore((s) => isGraded(shown) && s.entries[colorKey(shown)]?.status === "failed");
+  const lut = lutOf(clip);
+  const changed = isGraded(shown) || lut !== null;
+  const failed = useLutStore((s) => changed && s.entries[gradeKey(shown, lut)]?.status === "failed");
   const hdr = useMediaDetailsStore((s) => {
     const entry = s.entries[asset.path];
     return entry?.status === "ready" && entry.details.hdr === true;
@@ -64,7 +67,7 @@ export function ColorPanel({ clip, asset }: { clip: TimelineClip; asset: MediaAs
           <button
             type="button"
             aria-pressed={before}
-            disabled={!isGraded(shown)}
+            disabled={!changed}
             title="Hold to see the picture without the colour changes"
             {...holdBefore}
             className={cn(
@@ -132,6 +135,8 @@ export function ColorPanel({ clip, asset }: { clip: TimelineClip; asset: MediaAs
           </div>
         );
       })}
+
+      <LutPanel clip={clip} adjust={shown} />
 
       {failed && (
         <p role="alert" className="text-xs text-danger">

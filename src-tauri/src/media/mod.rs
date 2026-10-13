@@ -6,9 +6,11 @@ use std::sync::atomic::AtomicBool;
 
 use serde::{Deserialize, Serialize};
 
+pub mod clean;
 pub mod clipper;
 pub mod clipper_job;
 pub mod color;
+pub mod cube;
 pub mod ffmpeg;
 pub mod import;
 pub mod looks;
