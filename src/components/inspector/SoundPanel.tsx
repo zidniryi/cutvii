@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Unlink, Volume2, VolumeX } from "lucide-react";
 import type { MediaAsset, TimelineClip } from "@/project/model";
 import { cn } from "@/lib/utils";
@@ -6,6 +6,7 @@ import { useWaveformStore } from "@/store/waveforms";
 import { MAX_FADE } from "@/timeline/audio";
 import { clipDuration } from "@/timeline/clips";
 import { changeClipSound, detachClipAudio, report } from "@/timeline/editor";
+import { ResetButton } from "./ResetButton";
 
 const fieldClass =
   "h-9 w-full rounded-md border bg-surface-2 px-2 text-sm tabular-nums pointer-coarse:h-11 focus-visible:outline-accent";
@@ -24,6 +25,7 @@ function FadeField({
   max: number;
   onCommit: (seconds: number) => void;
 }) {
+  const id = useId();
   const [draft, setDraft] = useState<string | null>(null);
   function commit() {
     if (draft === null) return;
@@ -34,9 +36,13 @@ function FadeField({
     if (seconds !== value) onCommit(seconds);
   }
   return (
-    <label className="block">
-      <span className="mb-1 block text-xs text-text-muted">{label}</span>
+    <div>
+      <div className="mb-1 flex items-center justify-between text-xs text-text-muted">
+        <label htmlFor={id}>{label}</label>
+        <ResetButton label={label} disabled={value === 0} onReset={() => onCommit(0)} />
+      </div>
       <input
+        id={id}
         type="number"
         inputMode="decimal"
         min={0}
@@ -51,7 +57,7 @@ function FadeField({
           if (e.key === "Escape") setDraft(null);
         }}
       />
-    </label>
+    </div>
   );
 }
 

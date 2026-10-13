@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { ClipLut, ColorAdjust } from "@/project/model";
+import type { Transform } from "@/timeline/transform";
 
 export type SidePanel = "library" | "text" | "inspector";
 export type InspectorTab = "video" | "audio" | "speed" | "info" | "text" | "ai" | "color" | "transition";
@@ -73,6 +74,9 @@ interface UiState {
   /** Colour settings copied from a clip, to paste on another. Kept while the app is open. */
   colorClipboard: ColorAdjust | null;
   setColorClipboard: (color: ColorAdjust | null) => void;
+  /** A transform copied from a clip, to paste on another. Kept while the app is open. */
+  transformClipboard: Transform | null;
+  setTransformClipboard: (transform: Transform | null) => void;
   setColorBefore: (clipId: string | null) => void;
   /** A save is being written (drives the status text; also stops a second save from starting). */
   saving: boolean;
@@ -122,6 +126,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   colorBefore: null,
   colorClipboard: null,
   setColorClipboard: (colorClipboard) => set({ colorClipboard }),
+  transformClipboard: null,
+  setTransformClipboard: (transformClipboard) => set({ transformClipboard }),
   setColorBefore: (colorBefore) => set({ colorBefore }),
   saving: false,
   setSaving: (saving) => set({ saving }),

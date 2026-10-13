@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { ClipboardCopy, Copy, Film, Scissors, Snowflake, Sparkles, Trash2 } from "lucide-react";
+import { Captions, ClipboardCopy, Copy, Film, Scissors, Snowflake, Sparkles, Trash2 } from "lucide-react";
 
 export interface MenuState {
   x: number;
@@ -18,6 +18,8 @@ interface Props {
   onAi?: () => void;
   /** Present with `onAi`: open Auto clips for this clip (it explains itself when the clip is too short). */
   onClips?: () => void;
+  /** Present for a text clip: save the texts of its track as a `.srt` file. */
+  onSrt?: () => void;
   onClose: () => void;
 }
 
@@ -30,6 +32,7 @@ export function ContextMenu({
   onFreeze,
   onAi,
   onClips,
+  onSrt,
   onClose,
 }: Props) {
   useEffect(() => {
@@ -81,6 +84,11 @@ export function ContextMenu({
       {onClips && (
         <button role="menuitem" className={item} onClick={onClips}>
           <Film className="size-4 text-accent" /> Find short clips…
+        </button>
+      )}
+      {onSrt && (
+        <button role="menuitem" className={item} onClick={onSrt}>
+          <Captions className="size-4" /> Export subtitles (.srt)…
         </button>
       )}
       <button role="menuitem" className={item} onClick={onDelete}>

@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Crop as CropIcon } from "lucide-react";
 import type { Crop, MediaAsset, TimelineClip } from "@/project/model";
+import { scrubProps } from "@/lib/scrub";
 import { cn } from "@/lib/utils";
 import { usePlaybackStore } from "@/store/playback";
 import { useUiStore } from "@/store/ui";
@@ -8,6 +9,7 @@ import { clipEnd, EPS } from "@/timeline/clips";
 import { CROP_PRESETS, cropForAspect } from "@/timeline/crop";
 import { changeCrop, report } from "@/timeline/editor";
 import { cropOf, isCropped, MAX_CROP } from "@/timeline/fit";
+import { ResetButton } from "./ResetButton";
 
 const SIDES: { id: keyof Crop; label: string; opposite: keyof Crop }[] = [
   { id: "left", label: "Left", opposite: "right" },
@@ -36,6 +38,7 @@ function SideField({
   max: number;
   onCommit: (v: number) => void;
 }) {
+  const id = useId();
   const [draft, setDraft] = useState<number | null>(null);
   const pct = Math.round((draft ?? value) * 100);
   function commit() {
@@ -44,12 +47,30 @@ function SideField({
     setDraft(null);
     if (v !== value) onCommit(v);
   }
+  const scrub = scrubProps({
+    value: Math.round(value * 100),
+    step: 1,
+    min: 0,
+    max: Math.round(max * 100),
+    onDraft: (v) => setDraft(v === null ? null : v / 100),
+    onCommit: (v) => {
+      setDraft(null);
+      if (v / 100 !== value) onCommit(v / 100);
+    },
+  });
   return (
-    <label className="block">
-      <span className="mb-1 flex justify-between text-xs text-text-muted">
-        {label} <span className="tabular-nums">{pct}%</span>
-      </span>
+    <div>
+      <div className="mb-1 flex items-center justify-between text-xs text-text-muted">
+        <label htmlFor={id} {...scrub}>
+          {label}
+        </label>
+        <span className="flex items-center gap-1 tabular-nums">
+          {pct}%
+          <ResetButton label={`${label} crop`} disabled={value === 0} onReset={() => onCommit(0)} />
+        </span>
+      </div>
       <input
+        id={id}
         type="range"
         min={0}
         max={Math.round(MAX_CROP * 100)}
@@ -63,7 +84,7 @@ function SideField({
         onKeyUp={commit}
         onBlur={commit}
       />
-    </label>
+    </div>
   );
 }
 
@@ -97,8 +118,7 @@ export function CropPanel({ clip, asset }: { clip: TimelineClip; asset: MediaAss
 
   return (
     <div role="group" aria-label="Crop" className="space-y-2">
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-text-muted">Crop</p>
+      <div className="flex items-center justify-end">
         <button
           type="button"
           disabled={!isCropped(crop)}

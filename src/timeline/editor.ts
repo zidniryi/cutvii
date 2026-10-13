@@ -24,7 +24,7 @@ import {
   trimClip,
   type EditResult,
 } from "./edit";
-import { removeKey, setKey } from "./keyframes";
+import { removeKey, resetProp, setKey } from "./keyframes";
 import { setClipTransition } from "./transitions";
 import type { KeyProp } from "./transform";
 import { detachAudio, setClipClean, setClipDuck, setClipSound, type ClipSound } from "./audio";
@@ -223,6 +223,19 @@ export function changeKey(clipId: string, prop: KeyProp, t: number, v: number): 
 /** Remove the keyframe of `prop` at source time `t`. One undo step. */
 export function deleteKey(clipId: string, prop: KeyProp, t: number): EditResult {
   return run("Remove keyframe", (p) => removeKey(p, clipId, prop, t));
+}
+
+/** Give a clip a transform copied from another clip; its own keyframes go. One undo step. */
+export function pasteTransform(clipId: string, transform: Partial<Transform>): EditResult {
+  return run("Paste transform", (p) => {
+    const cleared = setClipTransform(p, clipId, null);
+    return cleared.ok ? setClipTransform(cleared.project, clipId, transform) : cleared;
+  });
+}
+
+/** Put one transform property back to its plain value, keyframes included. One undo step. */
+export function resetTransformProp(clipId: string, prop: KeyProp): EditResult {
+  return run("Reset transform value", (p) => resetProp(p, clipId, prop));
 }
 
 export function changeCrop(clipId: string, crop: Crop | null): EditResult {

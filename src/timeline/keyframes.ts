@@ -5,7 +5,7 @@
 import { MAX_KEYS, TRANSFORM_LIMITS, type Project, type TimelineClip } from "@/project/model";
 import { findClip } from "./clips";
 import type { EditResult } from "./edit";
-import type { Key, KeyProp } from "./transform";
+import { KEY_PROPS, NO_TRANSFORM, setClipTransform, type Key, type KeyProp } from "./transform";
 
 /** Two times closer than this are the same keyframe (a little under one frame at 30 fps). */
 export const KEY_SNAP = 0.03;
@@ -97,4 +97,51 @@ export function removeKey(project: Project, clipId: string, prop: KeyProp, t: nu
       })),
     },
   };
+}
+
+/**
+ * Put one property back to where it starts: its keyframes go, and the clip gets the plain value (full size,
+ * centred, not turned, opaque).
+ */
+export function resetProp(project: Project, clipId: string, prop: KeyProp): EditResult {
+  const found = findClip(project, clipId);
+  if (!found) return fail("unknown-clip", `Unknown clip ${clipId}`);
+  const cleared = keysOf(found.clip, prop).length > 0 ? withKeys(project, clipId, prop, []) : project;
+  return setClipTransform(cleared, clipId, { [prop]: NO_TRANSFORM[prop] });
+}
+
+export interface KeyMark {
+  /** Seconds from the clip's start on the timeline. */
+  at: number;
+  /** The properties that have a keyframe there. */
+  props: KeyProp[];
+}
+
+/**
+ * Where a clip's keyframes sit along it on the timeline. Keys are source times, so a mark follows trim,
+ * speed and reverse (the inverse of `keyTime`); keys in the part that was trimmed away have no mark.
+ * Properties with a key at the same moment share one mark.
+ */
+export function keyMarks(
+  clip: Pick<TimelineClip, "keyframes" | "sourceIn" | "sourceOut" | "speed" | "reversed">,
+): KeyMark[] {
+  if (!clip.keyframes) return [];
+  const speed = clip.speed ?? 1;
+  const marks: (KeyMark & { t: number })[] = [];
+  for (const prop of KEY_PROPS) {
+    for (const key of keysOf(clip, prop)) {
+      if (key.t < clip.sourceIn - KEY_SNAP || key.t > clip.sourceOut + KEY_SNAP) continue;
+      const there = marks.find((m) => Math.abs(m.t - key.t) < KEY_SNAP);
+      if (there) there.props.push(prop);
+      else {
+        const t = Math.min(clip.sourceOut, Math.max(clip.sourceIn, key.t));
+        marks.push({
+          t: key.t,
+          at: (clip.reversed ? clip.sourceOut - t : t - clip.sourceIn) / speed,
+          props: [prop],
+        });
+      }
+    }
+  }
+  return marks.sort((a, b) => a.at - b.at).map(({ at, props }) => ({ at, props }));
 }

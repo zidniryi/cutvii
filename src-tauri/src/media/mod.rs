@@ -20,6 +20,7 @@ pub mod reverse;
 pub mod text;
 pub mod text_fx;
 pub mod tools;
+pub mod tts;
 pub mod upscale;
 pub mod upscale_video;
 pub mod vocals;

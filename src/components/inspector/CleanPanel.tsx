@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { AudioLines, Loader2, Play, Square } from "lucide-react";
+import { Loader2, Play, Square } from "lucide-react";
 import { mediaUrl } from "@/lib/media";
 import { cn } from "@/lib/utils";
 import type { MediaAsset, TimelineClip } from "@/project/model";
@@ -83,10 +83,7 @@ export function CleanPanel({ clip, asset }: { clip: TimelineClip; asset: MediaAs
   }
 
   return (
-    <div role="group" aria-label="Clean up sound" className="space-y-3 border-t pt-3">
-      <p className="flex items-center gap-1.5 text-xs text-text-muted [&_svg]:size-3.5">
-        <AudioLines /> Clean up sound
-      </p>
+    <div role="group" aria-label="Clean up sound" className="space-y-3">
       <div>
         <div className="mb-1 flex items-center justify-between text-xs text-text-muted">
           <label htmlFor="clip-clean-noise">Reduce noise</label>

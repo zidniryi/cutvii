@@ -30,6 +30,8 @@ ureq = "3"
 sha2 = "0.11.0"
 # ONNX Runtime (MIT), for AI upscale. The runtime library is fetched at build time; models never are.
 ort = "=2.0.0-rc.13"
+# Text to speech tidies its text the way the voice model was trained (NFKD). MIT / Apache-2.0.
+unicode-normalization = "0.1"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

@@ -1,9 +1,11 @@
-import { useEffect, useId, useRef, useState } from "react";
-import { AlertTriangle, Sparkles } from "lucide-react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { AlertTriangle, ArrowDownToLine, Sparkles } from "lucide-react";
 import { AiPanel } from "@/components/inspector/AiPanel";
 import { ColorPanel } from "@/components/inspector/ColorPanel";
 import { CropPanel } from "@/components/inspector/CropPanel";
 import { MediaInfo } from "@/components/inspector/MediaInfo";
+import { ResetButton } from "@/components/inspector/ResetButton";
+import { Section } from "@/components/inspector/Section";
 import { CleanPanel } from "@/components/inspector/CleanPanel";
 import { DuckPanel } from "@/components/inspector/DuckPanel";
 import { SoundPanel } from "@/components/inspector/SoundPanel";
@@ -15,8 +17,10 @@ import { UpscalePanel } from "@/components/inspector/UpscalePanel";
 import { Panel } from "@/components/Panel";
 import { assetName, fileName } from "@/lib/media";
 import { formatTimecode } from "@/lib/timecode";
+import { scrubProps } from "@/lib/scrub";
 import { cn } from "@/lib/utils";
 import { useProjectStore } from "@/store/project";
+import { usePlaybackStore } from "@/store/playback";
 import { useSelectionStore } from "@/store/selection";
 import { useUiStore, type ClipKind, type InspectorTab } from "@/store/ui";
 import { selectClipsReady, useAutoClipsStore } from "@/store/autoClips";
@@ -25,7 +29,7 @@ import type { FitBackground, MediaAsset, Project, TimelineClip, TimelineTrack } 
 import { projectDuration } from "@/timeline/clips";
 import { formatDuration } from "@/lib/timecode";
 import { Button } from "@/components/ui/button";
-import { clipDuration, clipSpeed, findClip, sourceDuration } from "@/timeline/clips";
+import { clipDuration, clipSpeed, EPS, findClip, sourceDuration } from "@/timeline/clips";
 import { MAX_SPEED, MAX_VOLUME, MIN_SPEED } from "@/timeline/edit";
 import { backgroundOf, DEFAULT_FIT_MODE, showsBackground } from "@/timeline/fit";
 import { chooseBackgroundImage, relinkFlow } from "@/project/fileActions";
@@ -56,12 +60,21 @@ const fieldClass =
 function SecondsField({
   label,
   value,
+  action,
+  step = 0.01,
+  min = 0,
   onCommit,
 }: {
   label: string;
   value: number;
+  /** What dragging the label adds per step (one frame, for times on the timeline). */
+  step?: number;
+  min?: number;
+  /** A small button shown next to the label. */
+  action?: ReactNode;
   onCommit: (v: number) => void;
 }) {
+  const id = useId();
   const [draft, setDraft] = useState<string | null>(null);
   const shown = draft ?? value.toFixed(3);
 
@@ -71,11 +84,28 @@ function SecondsField({
     setDraft(null);
     if (Number.isFinite(parsed) && Math.abs(parsed - value) > 1e-6) onCommit(parsed);
   }
+  const scrub = scrubProps({
+    value,
+    step,
+    min,
+    max: Number.MAX_SAFE_INTEGER,
+    onDraft: (v) => setDraft(v === null ? null : v.toFixed(3)),
+    onCommit: (v) => {
+      setDraft(null);
+      if (Math.abs(v - value) > 1e-6) onCommit(v);
+    },
+  });
 
   return (
-    <label className="block">
-      <span className="mb-1 block text-xs text-text-muted">{label}</span>
+    <div>
+      <div className="mb-1 flex h-5 items-center justify-between text-xs text-text-muted">
+        <label htmlFor={id} {...scrub}>
+          {label}
+        </label>
+        {action}
+      </div>
       <input
+        id={id}
         type="number"
         inputMode="decimal"
         step="0.01"
@@ -89,7 +119,26 @@ function SecondsField({
           if (e.key === "Escape") setDraft(null);
         }}
       />
-    </label>
+    </div>
+  );
+}
+
+/** Moves the clip so that it starts at the playhead, on a whole frame. One undo step. */
+function StartAtPlayhead({ clip, fps }: { clip: TimelineClip; fps: number }) {
+  const frame = (seconds: number) => Math.round(seconds * fps) / fps;
+  // yes or no only, so a moving playhead does not redraw the inspector
+  const there = usePlaybackStore((s) => Math.abs(frame(s.playhead) - clip.timelineStart) < EPS);
+  return (
+    <button
+      type="button"
+      aria-label="Set start to playhead"
+      title="Move the clip so it starts at the playhead"
+      disabled={there}
+      onClick={() => report(moveClipTo(clip.id, frame(usePlaybackStore.getState().playhead)))}
+      className="flex size-5 shrink-0 items-center justify-center rounded-sm hover:text-text disabled:opacity-40 pointer-coarse:size-11 [&_svg]:size-3.5"
+    >
+      <ArrowDownToLine />
+    </button>
   );
 }
 
@@ -108,9 +157,10 @@ function VolumeField({ volume, onCommit }: { volume: number; onCommit: (v: numbe
 
   return (
     <div>
-      <label htmlFor="inspector-volume" className="mb-1 block text-xs text-text-muted">
-        Volume
-      </label>
+      <div className="mb-1 flex items-center justify-between text-xs text-text-muted">
+        <label htmlFor="inspector-volume">Volume</label>
+        <ResetButton label="Volume" disabled={volume === 1} onReset={() => onCommit(1)} />
+      </div>
       <div className="flex items-center gap-2">
         <input
           id="inspector-volume"
@@ -370,7 +420,6 @@ const TAB_LABEL: Record<InspectorTab, string> = {
 function FitChips({ clip }: { clip: TimelineClip }) {
   return (
     <div role="radiogroup" aria-label="Fit to canvas">
-      <p className="mb-1 text-xs text-text-muted">Fit to canvas</p>
       <div className="grid grid-cols-3 gap-1">
         {FIT_CHIPS.map((chip) => {
           const selected = (clip.fitMode ?? DEFAULT_FIT_MODE) === chip.id;
@@ -729,38 +778,60 @@ function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset;
         tabIndex={0}
         className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3"
       >
-        {active === "video" && <FitChips clip={clip} />}
-        {active === "video" && showsBackground(clip.fitMode ?? DEFAULT_FIT_MODE) && (
-          <BackgroundRow
-            key={`${clip.id}-bg`}
-            clip={clip}
-            blurMode={clip.fitMode === "blur-bg"}
-            opaque={asset.type === "video"}
-          />
+        {active === "video" && (
+          <Section id="fit" title="Fit to canvas">
+            <FitChips clip={clip} />
+            {showsBackground(clip.fitMode ?? DEFAULT_FIT_MODE) && (
+              <BackgroundRow
+                key={`${clip.id}-bg`}
+                clip={clip}
+                blurMode={clip.fitMode === "blur-bg"}
+                opaque={asset.type === "video"}
+              />
+            )}
+          </Section>
         )}
-        {active === "video" && <TransformPanel key={`${clip.id}-transform`} clip={clip} />}
-        {active === "video" && <CropPanel key={`${clip.id}-crop`} clip={clip} asset={asset} />}
+        {active === "video" && (
+          <Section id="transform" title="Transform">
+            <TransformPanel key={`${clip.id}-transform`} clip={clip} />
+          </Section>
+        )}
+        {active === "video" && (
+          <Section id="crop" title="Crop">
+            <CropPanel key={`${clip.id}-crop`} clip={clip} asset={asset} />
+          </Section>
+        )}
         {active === "transition" && <TransitionPanel key={`${clip.id}-transition`} clip={clip} />}
         {active === "video" && ((asset.type === "image" && !asset.text) || asset.type === "video") && (
-          <UpscalePanel key={`${clip.id}-upscale`} clip={clip} asset={asset} />
+          <Section id="upscale" title="Upscale with AI">
+            <UpscalePanel key={`${clip.id}-upscale`} clip={clip} asset={asset} />
+          </Section>
         )}
         {active === "audio" && (
-          <VolumeField
-            key={`${clip.id}-vol`}
-            volume={clip.volume}
-            onCommit={(v) => report(changeVolume(clip.id, v))}
-          />
+          <Section id="volume" title="Volume and fades">
+            <VolumeField
+              key={`${clip.id}-vol`}
+              volume={clip.volume}
+              onCommit={(v) => report(changeVolume(clip.id, v))}
+            />
+            <SoundPanel
+              key={`${clip.id}-sound`}
+              clip={clip}
+              asset={asset}
+              detachable={asset.type === "video" && !onAudioTrack}
+            />
+          </Section>
         )}
         {active === "audio" && (
-          <SoundPanel
-            key={`${clip.id}-sound`}
-            clip={clip}
-            asset={asset}
-            detachable={asset.type === "video" && !onAudioTrack}
-          />
+          <Section id="clean" title="Clean up sound">
+            <CleanPanel key={`${clip.id}-clean`} clip={clip} asset={asset} />
+          </Section>
         )}
-        {active === "audio" && <CleanPanel key={`${clip.id}-clean`} clip={clip} asset={asset} />}
-        {active === "audio" && <DuckPanel key={`${clip.id}-duck`} clip={clip} />}
+        {active === "audio" && (
+          <Section id="duck" title="Ducking">
+            <DuckPanel key={`${clip.id}-duck`} clip={clip} />
+          </Section>
+        )}
         {active === "speed" && (
           <SpeedPanel
             key={`${clip.id}-speed`}
@@ -789,7 +860,9 @@ function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset;
           />
         )}
         {active === "text" && asset.text && (
-          <TransformPanel key={`${clip.id}-transform`} clip={clip} position={false} />
+          <Section id="transform" title="Transform">
+            <TransformPanel key={`${clip.id}-transform`} clip={clip} position={false} />
+          </Section>
         )}
         {active === "color" && <ColorPanel key={`${clip.id}-color`} clip={clip} asset={asset} />}
         {active === "ai" && <AiPanel key={`${clip.id}-ai`} clip={clip} />}
@@ -959,11 +1032,15 @@ export function Inspector() {
           <SecondsField
             label="Start (s)"
             value={clip.timelineStart}
+            step={1 / fps}
+            action={<StartAtPlayhead clip={clip} fps={fps} />}
             onCommit={(v) => report(moveClipTo(clip.id, v))}
           />
           <SecondsField
             label="Duration (s)"
             value={clipDuration(clip)}
+            step={1 / fps}
+            min={1 / fps}
             onCommit={(v) => report(trimClipEdge(clip.id, "end", clip.timelineStart + v))}
           />
         </div>

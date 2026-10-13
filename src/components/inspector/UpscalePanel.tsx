@@ -67,11 +67,7 @@ export function UpscalePanel({ clip, asset }: { clip: TimelineClip; asset: Media
   }
 
   return (
-    <div role="group" aria-label="Upscale with AI" className="space-y-2 border-t pt-3 text-xs">
-      <p className="flex items-center gap-2 text-sm font-medium text-text [&_svg]:size-4 [&_svg]:text-accent">
-        <Sparkles />
-        Upscale with AI
-      </p>
+    <div role="group" aria-label="Upscale with AI" className="space-y-2 text-xs">
       <p className="text-text-muted">
         Makes the picture larger and sharper with a small model that runs on this computer. Your original file
         is not changed.

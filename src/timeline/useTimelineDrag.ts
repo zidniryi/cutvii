@@ -23,6 +23,10 @@ export type DragState =
       /** The project as it would look if dropped now (only when valid). */
       preview: Project | null;
       guide: number | null;
+      /** How far the clip has gone from where it was (seconds; where it lands, not where the pointer is). */
+      delta: number;
+      /** Where the pointer is, for the little time label that follows it. */
+      pointer: { x: number; y: number };
     }
   | {
       kind: "trim";
@@ -84,6 +88,10 @@ export function useTimelineDrag(lanesRef: RefObject<HTMLElement | null>) {
             error: r.ok ? undefined : r.error.message,
             preview: r.ok ? r.project : null,
             guide: snap.snappedTo ? snap.time : null,
+            delta:
+              (r.ok ? (findClip(r.project, clipId)?.clip.timelineStart ?? snap.time) : snap.time) -
+              originStart,
+            pointer: { x: ev.clientX, y: ev.clientY },
           };
         }
 

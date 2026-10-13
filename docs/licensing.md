@@ -123,7 +123,8 @@ No GPL/LGPL/AGPL crates.
   declared Apache-2.0). CutVii pins one commit of that repository and its exact size and SHA-256, and the
   consent dialog names the publisher. The licences are as declared on those pages; nobody here has checked
   the training data.
-- This download and the upscale model download (below) are the **only network requests CutVii makes** (`ureq`, MIT OR Apache-2.0; `sha2`, MIT OR
+- This download, the upscale model download and the voice model download (both below), and the optional
+  update check, are the **only network requests CutVii makes** (`ureq`, MIT OR Apache-2.0; `sha2`, MIT OR
   Apache-2.0). Recognition runs entirely on the user's machine; media and text are never sent anywhere.
 
 ## AI upscale (Real-ESRGAN models, ONNX Runtime)
@@ -144,3 +145,24 @@ No GPL/LGPL/AGPL crates.
   ("SRVGGNetCompact") is described in the BSD-3-Clause Real-ESRGAN repository.
 - Pictures are enlarged on this computer and never uploaded. The result is a new file in the app data folder;
   the original is not changed.
+
+## Voice-over from text (Supertonic 3, ONNX Runtime)
+
+- The engine is **ONNX Runtime** again (see above); the text is tidied with `unicode-normalization`
+  (MIT / Apache-2.0). No phonemizer is used, so there is no espeak-ng (GPL) anywhere in CutVii.
+- The model is **Supertonic 3** by Supertone (`huggingface.co/Supertone/supertonic-3`), **never bundled**:
+  sixteen files (four ONNX networks, two JSON tables, ten voices; 401,276,744 bytes together), each pinned
+  to one published revision by exact size and SHA-256. It is downloaded only after the user confirms a
+  dialog that states the size, the source and the licence.
+- **Licence of the model: BigScience OpenRAIL-M** (checked 2026-10-14). Use is allowed, commercial use
+  included, under use restrictions that travel with the model: among others, not to impersonate a person
+  without consent, not to deceive, nothing unlawful. CutVii states this in the download dialog. The
+  model's sample code is MIT; CutVii's own engine (`src-tauri/src/media/tts.rs`) follows the steps of that
+  sample.
+- A second size, **Compact** (147,709,674 bytes), uses the same files except the two big networks, which
+  are 8-bit copies made by the sherpa-onnx project (`huggingface.co/csukuangfj2/sherpa-onnx-supertonic-3-tts-int8-2026-05-11`,
+  a third party, pinned by revision, size and SHA-256). They are a derivative of the model, so the same
+  OpenRAIL-M terms apply; the download dialog names who made them.
+- **Training data: not stated upstream.** The model card names no recordings. CutVii says so in the dialog.
+- The words typed are spoken on this computer and never uploaded. The result is a WAV file in the app
+  data folder. There is no voice cloning: only the model's ten fixed voices are offered.

@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { ChevronsDown } from "lucide-react";
 import type { TimelineClip } from "@/project/model";
 import { changeDuck, report } from "@/timeline/editor";
 
@@ -21,10 +20,7 @@ export function DuckPanel({ clip }: { clip: TimelineClip }) {
   }
 
   return (
-    <div role="group" aria-label="Ducking" className="space-y-2 border-t pt-3">
-      <p className="flex items-center gap-1.5 text-xs text-text-muted [&_svg]:size-3.5">
-        <ChevronsDown /> Ducking
-      </p>
+    <div role="group" aria-label="Ducking" className="space-y-2">
       <div>
         <div className="mb-1 flex items-center justify-between text-xs text-text-muted">
           <label htmlFor="clip-duck">Lower under other sound</label>

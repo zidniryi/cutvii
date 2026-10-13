@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  Captions,
   FilePlus2,
   FlaskConical,
   FolderOpen,
@@ -16,12 +17,22 @@ import { useStylePackStore } from "@/store/stylePacks";
 import { IconButton } from "@/components/IconButton";
 import { cn } from "@/lib/utils";
 import { newProjectFlow, openProjectFlow, saveFlow } from "@/project/fileActions";
+import { useSelectionStore } from "@/store/selection";
+import { exportSrt } from "@/timeline/srt";
 
 const ITEMS = [
   { id: "new", label: "New project", Icon: FilePlus2, keys: "", run: () => newProjectFlow() },
   { id: "open", label: "Open…", Icon: FolderOpen, keys: "Ctrl/⌘ O", run: () => openProjectFlow() },
   { id: "save", label: "Save", Icon: Save, keys: "Ctrl/⌘ S", run: () => saveFlow(false) },
   { id: "saveAs", label: "Save as…", Icon: SaveAll, keys: "Ctrl/⌘ Shift S", run: () => saveFlow(true) },
+  {
+    id: "srt",
+    label: "Export subtitles (.srt)…",
+    Icon: Captions,
+    keys: "",
+    // the track of a selected text clip, otherwise every text on the timeline
+    run: () => exportSrt(useSelectionStore.getState().selectedClipIds[0]),
+  },
   {
     id: "packs",
     label: "Style packs…",

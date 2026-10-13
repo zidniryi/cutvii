@@ -1,7 +1,10 @@
+import { formatTimecode } from "@/lib/timecode";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Eye,
   EyeOff,
+  AudioLines,
+  Captions,
   Magnet,
   Maximize2,
   MicVocal,
@@ -30,7 +33,9 @@ import { useSelectionStore } from "@/store/selection";
 import { useTimelineViewStore } from "@/store/timelineView";
 import { clipDuration, projectDuration } from "@/timeline/clips";
 import { selectClipsReady, useAutoClipsStore } from "@/store/autoClips";
+import { useVoiceoverStore } from "@/store/voiceover";
 import { aiKindOf, openAiTools, openAutoClips, openKaraoke } from "@/timeline/ai";
+import { exportSrt, textTrackOf } from "@/timeline/srt";
 import { copySelected, cutSelected } from "@/timeline/clipboard";
 import { freezeFrameAtPlayhead } from "@/timeline/freeze";
 import { deleteSelected, report, splitAtPlayhead, toggleTrackFlag } from "@/timeline/editor";
@@ -178,6 +183,16 @@ export function Timeline() {
           </button>
           <button
             type="button"
+            aria-label="Auto subtitles"
+            title="Auto subtitles: turn the speech of a clip into subtitles"
+            onClick={() => openAiTools()}
+            className="mr-1 flex h-8 items-center gap-1.5 rounded-md border border-accent/60 bg-accent-soft px-2.5 text-xs font-medium text-text hover:border-accent focus-visible:outline-accent pointer-coarse:h-11 [&_svg]:size-3.5 [&_svg]:text-accent"
+          >
+            <Captions />
+            Subtitles
+          </button>
+          <button
+            type="button"
             aria-label="Auto clips"
             title="Auto clips: find short clips in a long video"
             onClick={() => openAutoClips()}
@@ -201,6 +216,16 @@ export function Timeline() {
           >
             <MicVocal />
             Karaoke
+          </button>
+          <button
+            type="button"
+            aria-label="Voice-over"
+            title="Voice-over: turn typed words into speech at the playhead"
+            onClick={() => useVoiceoverStore.getState().show()}
+            className="mr-1 flex h-8 items-center gap-1.5 rounded-md border border-accent/60 bg-accent-soft px-2.5 text-xs font-medium text-text hover:border-accent focus-visible:outline-accent pointer-coarse:h-11 [&_svg]:size-3.5 [&_svg]:text-accent"
+          >
+            <AudioLines />
+            Voice-over
           </button>
           <IconButton label="Add text at playhead" icon={<Type />} onClick={() => void addTextAtPlayhead()} />
           <IconButton
@@ -388,6 +413,18 @@ export function Timeline() {
                 Drag media from the library onto a track, or use the “Add to timeline” button on a file.
               </p>
             )}
+            {/* while a clip is moved: how far it has gone, next to the pointer */}
+            {drag?.kind === "move" && (
+              <div
+                aria-hidden
+                data-testid="move-delta"
+                className="pointer-events-none fixed z-[70] rounded-md border bg-popover px-2 py-1 text-xs tabular-nums shadow-lg"
+                style={{ left: drag.pointer.x + 14, top: drag.pointer.y + 18 }}
+              >
+                {drag.delta < 0 ? "-" : "+"}
+                {formatTimecode(Math.abs(drag.delta), project.settings.fps)}
+              </div>
+            )}
             {drag?.guide != null && (
               <div
                 aria-hidden
@@ -438,6 +475,14 @@ export function Timeline() {
               ? () => {
                   closeMenu();
                   openAutoClips(menu.clipId);
+                }
+              : undefined
+          }
+          onSrt={
+            textTrackOf(project, menu.clipId)
+              ? () => {
+                  closeMenu();
+                  void exportSrt(menu.clipId);
                 }
               : undefined
           }

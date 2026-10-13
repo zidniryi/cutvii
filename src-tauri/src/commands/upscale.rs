@@ -20,7 +20,7 @@ use crate::media::upscale::{
     MAX_INPUT_SIDE, MODELS, SCALE, UpscaleModel, Upscaler, halve_rgb, model, onnx_from_pth,
 };
 use crate::media::upscale_video::{VideoJob, refusal, upscale_video as run_video};
-use crate::media::whisper::download_model;
+use crate::media::whisper::download_file;
 
 pub const UPSCALE_EVENT: &str = "upscale-progress";
 
@@ -90,10 +90,12 @@ pub async fn download_upscale_model(
     let cancel = job.start()?;
     let events = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        download_model(
+        // not a speech model: the pinned size and SHA-256 are the check
+        download_file(
             spec.url,
             &out,
             Some((spec.bytes, spec.sha256)),
+            false,
             &mut |received, total| {
                 events
                     .emit(

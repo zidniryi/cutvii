@@ -95,7 +95,10 @@ describe("Timeline", () => {
       clientY: y,
     });
     fireEvent.pointerMove(window, { clientX: 100, clientY: y }); // -10s -> would start at 2, on the first half
+    // the label by the pointer says how far the clip has gone: from 12 s to 0
+    expect(screen.getByTestId("move-delta")).toHaveTextContent("-00:00:12:00");
     fireEvent.pointerUp(window);
+    expect(screen.queryByTestId("move-delta")).not.toBeInTheDocument();
 
     expect(findClip(state().project, id)!.clip.timelineStart).toBe(0); // it is the first clip now
     expect(findClip(state().project, first)!.clip.timelineStart).toBe(4); // and the other follows it

@@ -1,18 +1,29 @@
 import { useId, useState } from "react";
-import { Diamond, FlipHorizontal, FlipVertical } from "lucide-react";
+import { ClipboardCopy, ClipboardPaste, Diamond, FlipHorizontal, FlipVertical } from "lucide-react";
 import type { TimelineClip } from "@/project/model";
+import { scrubProps } from "@/lib/scrub";
 import { cn } from "@/lib/utils";
 import { usePlaybackStore } from "@/store/playback";
-import { changeKey, changeTransform, deleteKey, report } from "@/timeline/editor";
+import { useUiStore } from "@/store/ui";
+import {
+  changeKey,
+  changeTransform,
+  deleteKey,
+  pasteTransform,
+  report,
+  resetTransformProp,
+} from "@/timeline/editor";
 import { keyAt, keysOf } from "@/timeline/keyframes";
 import {
   isTransformed,
   keyTime,
+  NO_TRANSFORM,
   transformAt,
   transformOf,
   type KeyProp,
   type Transform,
 } from "@/timeline/transform";
+import { ResetButton } from "./ResetButton";
 
 /** The keyframe button of one property. */
 interface Keyed {
@@ -31,6 +42,7 @@ function Slider({
   max,
   unit,
   keyed,
+  onReset,
   onCommit,
 }: {
   label: string;
@@ -40,6 +52,8 @@ function Slider({
   max: number;
   unit: string;
   keyed?: Keyed;
+  /** Given when the value is not where it starts: puts it back (and drops its keyframes). */
+  onReset?: () => void;
   onCommit: (v: number) => void;
 }) {
   const id = useId();
@@ -51,13 +65,28 @@ function Slider({
     setDraft(null);
     if (v !== value) onCommit(v);
   }
+  // the label is a finer handle than the slider: one unit for every two pixels
+  const scrub = scrubProps({
+    value,
+    step: 1,
+    min,
+    max,
+    onDraft: setDraft,
+    onCommit: (v) => {
+      setDraft(null);
+      if (v !== value) onCommit(v);
+    },
+  });
   return (
     <div>
       <div className="mb-1 flex items-center justify-between text-xs text-text-muted">
-        <label htmlFor={id}>{label}</label>
+        <label htmlFor={id} {...scrub}>
+          {label}
+        </label>
         <span className="flex items-center gap-1 tabular-nums">
           {shown}
           {unit}
+          <ResetButton label={label} disabled={!onReset} onReset={() => onReset?.()} />
           {keyed && (
             <button
               type="button"
@@ -99,6 +128,9 @@ function Slider({
   );
 }
 
+const quiet =
+  "flex h-8 items-center gap-1 rounded-md border px-2 text-xs text-text-muted hover:text-text disabled:opacity-40 pointer-coarse:h-11 [&_svg]:size-3.5";
+
 const toggleClass = (on: boolean) =>
   cn(
     "flex h-9 items-center justify-center gap-2 rounded-md border text-xs pointer-coarse:h-11 [&_svg]:size-4",
@@ -131,6 +163,18 @@ export function TransformPanel({
   /** Change a value: at the playhead's keyframe when the property is animated, otherwise for the whole clip. */
   const change = (prop: KeyProp, v: number) =>
     keysOf(clip, prop).length > 0 ? report(changeKey(clip.id, prop, now(), v)) : set({ [prop]: v });
+  /** Only for a value that is not plain: moved, scaled, turned, faded or animated. */
+  const reset = (prop: KeyProp) =>
+    keysOf(clip, prop).length > 0 || transformOf(clip)[prop] !== NO_TRANSFORM[prop]
+      ? () => report(resetTransformProp(clip.id, prop))
+      : undefined;
+  const copied = useUiStore((s) => s.transformClipboard);
+  /** Pasting would change nothing. */
+  const sameAs = (other: Transform) => {
+    const mine = transformOf(clip);
+    const theirs = position ? other : { ...other, x: clip.x, y: clip.y };
+    return (Object.keys(mine) as (keyof Transform)[]).every((k) => mine[k] === theirs[k]);
+  };
   const keyed = (prop: KeyProp): Keyed => ({
     any: keysOf(clip, prop).length > 0,
     here: keyAt(clip, prop, keyTime(clip, playhead)) !== undefined,
@@ -144,8 +188,7 @@ export function TransformPanel({
 
   return (
     <div role="group" aria-label="Transform" className="space-y-2">
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-text-muted">Transform</p>
+      <div className="flex items-center justify-end">
         <button
           type="button"
           disabled={!isTransformed(clip)}
@@ -163,6 +206,7 @@ export function TransformPanel({
         max={400}
         unit="%"
         keyed={keyed("scale")}
+        onReset={reset("scale")}
         onCommit={(v) => change("scale", v / 100)}
       />
       {position && (
@@ -174,6 +218,7 @@ export function TransformPanel({
             max={100}
             unit="%"
             keyed={keyed("x")}
+            onReset={reset("x")}
             onCommit={(v) => change("x", v / 100)}
           />
           <Slider
@@ -183,6 +228,7 @@ export function TransformPanel({
             max={100}
             unit="%"
             keyed={keyed("y")}
+            onReset={reset("y")}
             onCommit={(v) => change("y", v / 100)}
           />
         </div>
@@ -194,6 +240,7 @@ export function TransformPanel({
         max={180}
         unit="°"
         keyed={keyed("rotation")}
+        onReset={reset("rotation")}
         onCommit={(v) => change("rotation", v)}
       />
       <Slider
@@ -203,6 +250,7 @@ export function TransformPanel({
         max={100}
         unit="%"
         keyed={keyed("opacity")}
+        onReset={reset("opacity")}
         onCommit={(v) => change("opacity", v / 100)}
       />
 
@@ -230,6 +278,32 @@ export function TransformPanel({
         >
           <FlipVertical />
           Flip down
+        </button>
+      </div>
+      <div className="flex flex-wrap gap-1">
+        <button
+          type="button"
+          className={quiet}
+          onClick={() => {
+            useUiStore.getState().setTransformClipboard(transformOf(clip));
+            useUiStore
+              .getState()
+              .setNotice("Transform copied. Select another clip and choose Paste transform.");
+          }}
+        >
+          <ClipboardCopy /> Copy transform
+        </button>
+        <button
+          type="button"
+          className={quiet}
+          disabled={!copied || (!clip.keyframes && sameAs(copied))}
+          title={copied ? undefined : "Copy a clip's transform first"}
+          onClick={() =>
+            // a text keeps its own place: only size, turn, mirror and opacity are taken over
+            copied && report(pasteTransform(clip.id, position ? copied : { ...copied, x: clip.x, y: clip.y }))
+          }
+        >
+          <ClipboardPaste /> Paste transform
         </button>
       </div>
     </div>

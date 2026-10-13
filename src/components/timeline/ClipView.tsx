@@ -7,6 +7,9 @@ import { MAX_FADE, smoothStep, soundFadesOf } from "@/timeline/audio";
 import { clipDuration } from "@/timeline/clips";
 import { changeClipSound, report } from "@/timeline/editor";
 import { timeToX } from "@/timeline/geometry";
+import { keyMarks } from "@/timeline/keyframes";
+import type { KeyProp } from "@/timeline/transform";
+import { usePlaybackStore } from "@/store/playback";
 import { useSelectionStore } from "@/store/selection";
 import { useUiStore } from "@/store/ui";
 import { useWaveformStore } from "@/store/waveforms";
@@ -20,6 +23,14 @@ const COLOR: Record<MediaType, string> = {
   image: "bg-clip-image",
 };
 const ICON = { video: Film, audio: Music, image: ImageIcon } as const;
+/** The names the Transform section uses. */
+const KEY_NAME: Record<KeyProp, string> = {
+  x: "Move across",
+  y: "Move down",
+  scale: "Scale",
+  rotation: "Rotation",
+  opacity: "Opacity",
+};
 
 interface Props {
   clip: TimelineClip;
@@ -368,6 +379,37 @@ export const ClipView = memo(function ClipView({
           onDraft={(v) => setFadeDraft((d) => ({ ...d, out: v }))}
         />
       )}
+      {/* keyframes: a diamond where each one is; a click moves the playhead there, where it can be changed */}
+      {keyMarks(clip).map((mark) => {
+        const what = `Keyframe at ${mark.at.toFixed(2)} s: ${mark.props.map((p) => KEY_NAME[p]).join(", ")}`;
+        return (
+          <button
+            key={mark.at}
+            type="button"
+            data-testid="key-mark"
+            aria-label={what}
+            title={what}
+            onPointerDown={(e) => e.stopPropagation()} // not a move of the clip
+            onDoubleClick={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              useSelectionStore.getState().select(clip.id);
+              // a key on the clip's very end: the last moment that is still this clip
+              usePlaybackStore
+                .getState()
+                .setPlayhead(clip.timelineStart + Math.max(0, Math.min(mark.at, length - 0.001)));
+            }}
+            // above the trim handles (z-10), so a key on the clip's first or last frame can still be pressed
+            className="group/key absolute bottom-0 z-[11] flex size-4 -translate-x-1/2 cursor-pointer items-end justify-center pb-0.5 pointer-coarse:size-9"
+            style={{ left: timeToX(mark.at, pps) }}
+          >
+            <span
+              aria-hidden
+              className="size-2 rotate-45 border border-black/60 bg-white group-hover/key:bg-accent group-focus-visible/key:bg-accent"
+            />
+          </button>
+        );
+      })}
       {/* the name sits on its own dark pill, so it stays readable over the bars of the waveform */}
       <div className="relative z-[3] flex min-w-0 items-center gap-1 rounded bg-black/55 px-1.5 py-0.5 backdrop-blur-[2px]">
         <Icon className="size-3.5 shrink-0 opacity-90" />

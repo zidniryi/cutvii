@@ -27,7 +27,8 @@ unless a line says otherwise.
 - Move, trim, split at the playhead, delete, cut / copy / paste, select all, snapping, a context menu.
 - Waveforms on clips with sound.
 - Track mute and hide.
-- Toolbar buttons: Add text, AI subtitles, Auto clips, Karaoke.
+- Toolbar buttons: Add text, AI, Subtitles (auto subtitles), Auto clips, Karaoke, Voice-over. The AI menu
+  in the top bar has the same four tools.
 
 ## Preview
 
@@ -38,10 +39,17 @@ unless a line says otherwise.
 
 ## Clip tools (inspector)
 
-- **Clip:** name, start, duration, source in and out.
+- **Clip:** name, start, duration, source in and out. A button next to Start moves the clip to the playhead.
 - **Transform:** scale, position, rotation, opacity, flip across and down, reset.
+- **Sections:** Fit to canvas, Transform, Crop, Upscale, Volume and fades, Clean up sound and Ducking fold
+  away under their title and stay as they were left.
+- **Scrub a number:** drag the label of a Transform value, a crop side, Start or Duration left or right.
+- **Copy / paste transform** between clips (keyframes are not copied; a text keeps its own position).
+- **Reset per field:** a small arrow puts one value back: each Transform value (its keyframes go too),
+  Volume, Fade in / out and each side of the crop.
 - **Keyframes:** animate scale, position, rotation and opacity. The diamond next to a value adds a keyframe
   at the playhead; a value with keyframes is edited at the playhead. Straight-line movement between keys.
+  Every keyframe shows as a diamond on the clip in the timeline; a click on it moves the playhead there.
 - **Transitions:** in the Transition tab a clip can come in and leave with one of sixteen transitions
   (Dissolve / Fade out, Fade from / to black, four slides, two glides, Zoom in, Zoom out, Pop, Spin, Swing,
   Rise, Drop, Tilt), 0.1 to 3 seconds each. Pick one from a gallery that shows the movement, or drag it onto
@@ -84,8 +92,14 @@ unless a line says otherwise.
 
 - **Auto subtitles:** speech to text with Whisper (Tiny, Base, Small, Medium, Large Turbo, Large, and Medium
   Indonesia), language choice, one text clip per line in a chosen subtitle style.
+- **Subtitles as a file:** "Export subtitles (.srt)…" in a text clip's menu (the texts of its track) and in
+  the File menu (the selected text's track, otherwise every text on the timeline).
 - **Auto clips:** finds short clips in a long video, a review step with a player and cut handles, then adds
   them to the timeline or exports each as its own file.
+- **Voice-over from text:** the "Voice-over" button in the timeline toolbar turns typed words into speech
+  (Supertonic 3: Indonesian, English and 29 more languages, ten voices, speed) and puts it on a
+  "Voice-over" audio track at the playhead. Two sizes of the voice model can be chosen and downloaded
+  (Standard about 401 MB, Compact about 148 MB), each once and after asking; the words never leave the computer.
 - **Karaoke Maker:** lyrics from recognition, pasted text or an `.lrc` / `.srt` file; lines are timed, can be
   nudged and edited, and are added in a karaoke style. Optional "Lower the singer's voice (estimate)".
 - **AI upscale (pictures and video):** 2× or 4× with Real-ESRGAN models; the clip is pointed at the new
@@ -127,9 +141,9 @@ unless a line says otherwise.
 
 - Remove background, blur background, text behind the subject.
 - Vocal separation (stems) and word-by-word highlight in Karaoke; tap-to-sync.
-- Keyframes for volume, crop and colour; easing per keyframe; keyframe marks on the timeline.
+- Keyframes for volume, crop and colour; easing per keyframe; dragging a keyframe mark.
 - Wipes and other masked transitions; a true cross-fade of two moving clips (the outgoing one is frozen).
 - Clean-up and ducking heard in the preview.
-- Subtitle export as `.srt`, translation.
+- Subtitle translation; `.vtt` export.
 - More settings (the Settings window has one).
 - Windows and Linux builds, Android, an installer (`.dmg`), bundled FFmpeg.

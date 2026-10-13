@@ -782,7 +782,10 @@ pub fn build_filter_graph(plan: &ExportPlan) -> FilterGraph {
         // fades: half-sine ramps in clip time (after the speed change), like the preview's `soundRamp`
         let mut fades = String::new();
         if clip.fade_in > 1e-6 {
-            fades.push_str(&format!("afade=t=in:st=0:d={:.6}:curve=hsin,", clip.fade_in));
+            fades.push_str(&format!(
+                "afade=t=in:st=0:d={:.6}:curve=hsin,",
+                clip.fade_in
+            ));
         }
         if clip.fade_out > 1e-6 {
             fades.push_str(&format!(

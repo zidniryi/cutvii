@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Captions, MicVocal, Scissors, Sparkles } from "lucide-react";
+import { AudioLines, Captions, MicVocal, Scissors, Sparkles } from "lucide-react";
 import { selectClipsReady, useAutoClipsStore } from "@/store/autoClips";
 import { useClipOutputStore } from "@/store/clipOutput";
+import { useVoiceoverStore } from "@/store/voiceover";
 import { openAiTools, openAutoClips, openKaraoke } from "@/timeline/ai";
 
 /** Top bar "AI" menu: the same tools as the inspector's AI tab, reachable from anywhere. */
@@ -71,6 +72,9 @@ export function AiMenu() {
           </button>
           <button role="menuitem" className={item} onClick={run(() => openKaraoke())}>
             <MicVocal className="size-4" /> Karaoke Maker…
+          </button>
+          <button role="menuitem" className={item} onClick={run(() => useVoiceoverStore.getState().show())}>
+            <AudioLines className="size-4" /> Voice-over from text…
           </button>
         </div>
       )}

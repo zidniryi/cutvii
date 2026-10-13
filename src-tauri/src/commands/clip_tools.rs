@@ -661,6 +661,51 @@ pub async fn open_lyrics_file(app: AppHandle) -> AppResult<Option<LyricsFile>> {
     .map_err(|e| AppError::InvalidInput(format!("lyrics task failed: {e}")))?
 }
 
+/// Subtitles longer than this are not written.
+const MAX_SRT_BYTES: usize = 2 * 1024 * 1024;
+
+/// Subtitle text from the webview, checked before it is written: not empty, at most 2 MB, no NUL bytes.
+pub fn checked_srt(text: &str) -> AppResult<&str> {
+    let bad = |m: &str| AppError::InvalidInput(m.to_string());
+    if text.trim().is_empty() {
+        return Err(bad("there are no subtitles to save"));
+    }
+    if text.len() > MAX_SRT_BYTES {
+        return Err(bad("the subtitles are too long to save (2 MB at most)"));
+    }
+    if text.contains('\0') {
+        return Err(bad("the subtitles are not plain text"));
+    }
+    Ok(text)
+}
+
+/// Save subtitles as a `.srt` file. The native dialog picks the place; the name only suggests the file
+/// name. An existing file is replaced only once the new one is complete. Returns the path written, or
+/// `None` when dismissed.
+#[tauri::command]
+pub async fn export_srt(app: AppHandle, name: String, text: String) -> AppResult<Option<String>> {
+    checked_srt(&text)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(mut out) = app
+            .dialog()
+            .file()
+            .add_filter("Subtitles", &["srt"])
+            .set_file_name(format!("{}.srt", safe_file_stem(&name)))
+            .blocking_save_file()
+            .and_then(|p| p.into_path().ok())
+        else {
+            return Ok(None);
+        };
+        if out.extension().is_none() {
+            out.set_extension("srt");
+        }
+        write_preset(&out, &text)?;
+        Ok(Some(out.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(|e| AppError::InvalidInput(format!("subtitle task failed: {e}")))?
+}
+
 /// A colour preset read from a file the user picked.
 #[derive(Debug, Serialize)]
 pub struct ImportedPreset {
@@ -890,6 +935,14 @@ pub async fn import_text_font(app: AppHandle) -> AppResult<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn subtitles_are_checked_before_they_are_written() {
+        assert!(checked_srt("1\n00:00:01,000 --> 00:00:02,000\nHalo\n").is_ok());
+        assert!(checked_srt(" \n").is_err());
+        assert!(checked_srt("1\n\0").is_err());
+        assert!(checked_srt(&"a".repeat(MAX_SRT_BYTES + 1)).is_err());
+    }
 
     #[test]
     fn lyrics_files_are_read_as_text_only_and_within_a_size_limit() {

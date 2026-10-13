@@ -7,6 +7,7 @@ import { startUpdateWatcher } from "@/updates/updates";
 import { AppDialog } from "@/components/AppDialog";
 import { AutoClipsWizard } from "@/components/autoclips/AutoClipsWizard";
 import { KaraokeDialog } from "@/components/karaoke/KaraokeDialog";
+import { VoiceoverDialog } from "@/components/voiceover/VoiceoverDialog";
 import { StylePacksDialog } from "@/components/packs/StylePacksDialog";
 import { CanvasDialog } from "@/components/canvas/CanvasDialog";
 import { CanvasNotice } from "@/components/canvas/CanvasNotice";
@@ -96,6 +97,7 @@ export default function App() {
       <ExportDialog />
       <AutoClipsWizard />
       <KaraokeDialog />
+      <VoiceoverDialog />
       <StylePacksDialog />
       <NewProjectDialog />
       <CanvasDialog />

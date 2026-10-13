@@ -8,5 +8,6 @@ pub mod menu;
 pub mod project;
 pub mod recent;
 pub mod support;
+pub mod tts;
 pub mod update;
 pub mod upscale;

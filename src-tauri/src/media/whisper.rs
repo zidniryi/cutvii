@@ -193,13 +193,25 @@ pub fn model_statuses(dir: &Path) -> Vec<ModelStatus> {
         .collect()
 }
 
-/// Download `url` to `out` through a temp file. `progress` gets (bytes so far, total if known). A cancelled
-/// or failed download, a file that is not a model, or one whose size or SHA-256 differs from `expected`,
-/// leaves nothing behind and never replaces `out`.
+/// Download a speech model: `download_file`, and what arrives must also look like a speech model.
 pub fn download_model(
     url: &str,
     out: &Path,
     expected: Option<(u64, &str)>,
+    progress: &mut dyn FnMut(u64, Option<u64>),
+    cancel: &AtomicBool,
+) -> AppResult<()> {
+    download_file(url, out, expected, true, progress, cancel)
+}
+
+/// Download `url` to `out` through a temp file. `progress` gets (bytes so far, total if known). A cancelled
+/// or failed download, a file that is not a speech model when `speech_model` is set, or one whose size or
+/// SHA-256 differs from `expected`, leaves nothing behind and never replaces `out`.
+pub fn download_file(
+    url: &str,
+    out: &Path,
+    expected: Option<(u64, &str)>,
+    speech_model: bool,
     progress: &mut dyn FnMut(u64, Option<u64>),
     cancel: &AtomicBool,
 ) -> AppResult<()> {
@@ -236,7 +248,7 @@ pub fn download_model(
                 "the connection ended before the file was complete".into(),
             ));
         }
-        if !is_model_file(&tmp) {
+        if speech_model && !is_model_file(&tmp) {
             return Err(failed("what arrived is not a speech model".into()));
         }
         if let Some((bytes, sha256)) = expected {
