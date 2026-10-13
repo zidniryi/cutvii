@@ -44,14 +44,14 @@ beforeEach(() => {
 describe("Inspector tabs", () => {
   it("offers only the tabs that have controls for that kind of clip", () => {
     expect(TABS_FOR).toEqual({
-      video: ["video", "transition", "color", "audio", "ai", "speed", "info"],
+      video: ["video", "transition", "color", "ai", "audio", "speed", "info"],
       audio: ["audio", "ai", "speed", "info"],
       image: ["video", "transition", "color", "info"],
     });
 
     place(IDS.vid);
     const { unmount } = render(<Inspector />);
-    expect(tabNames()).toEqual(["Video", "Transition", "Preset", "Audio", "AI", "Speed", "Info"]);
+    expect(tabNames()).toEqual(["Video", "Transition", "Preset", "AI", "Audio", "Speed", "Info"]);
     unmount();
 
     act(() => useSelectionStore.getState().clear());

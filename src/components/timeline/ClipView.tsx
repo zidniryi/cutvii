@@ -1,13 +1,17 @@
 import { memo, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Blend, Film, Image as ImageIcon, Music } from "lucide-react";
+import { Film, Image as ImageIcon, Music } from "lucide-react";
 import { ClipWaveform } from "@/components/timeline/ClipWaveform";
 import type { MediaType, TimelineClip } from "@/project/model";
+import { formatDuration } from "@/lib/timecode";
+import { MAX_FADE, smoothStep, soundFadesOf } from "@/timeline/audio";
 import { clipDuration } from "@/timeline/clips";
-import { changeTransition, report } from "@/timeline/editor";
+import { changeClipSound, report } from "@/timeline/editor";
 import { timeToX } from "@/timeline/geometry";
 import { useSelectionStore } from "@/store/selection";
 import { useUiStore } from "@/store/ui";
-import { TRANSITION_LIMITS, TRANSITIONS, transitionOf, transitionOutOf } from "@/timeline/transitions";
+import { useWaveformStore } from "@/store/waveforms";
+import { transitionOf, transitionOutOf } from "@/timeline/transitions";
+import { transitionWidth } from "@/components/timeline/TransitionBlock";
 import { cn } from "@/lib/utils";
 
 const COLOR: Record<MediaType, string> = {
@@ -37,59 +41,95 @@ interface Props {
   onActivate: (clip: TimelineClip, additive: boolean) => void;
 }
 
-/** Width in px of a transition's block on a clip that is `room` px wide. */
-const markWidth = (seconds: number, pps: number, room: number) =>
-  Math.min(room, Math.max(10, timeToX(seconds, pps)));
+/** A fade set by dragging or with the arrow keys is kept to 0.01 s, like in the Sound tab. */
+const snapFade = (seconds: number) => Math.round(seconds * 100) / 100;
+const FADE_KEY_STEP = 0.1;
+/**
+ * The knob is a 14 px dot inside a 28 px grab area (bigger on touch screens), so a slightly missed press still
+ * grabs the fade and does not pick up the clip. The area sits on the end of the ramp, never outside the clip.
+ */
+const GRAB_PX = 28;
+/** The knob of a fade shows while the pointer is this close to that end of the clip (or nearer than its ramp). */
+const EDGE_ZONE_PX = 64;
+
+/** The ramp drawn in a 1 x 1 box (y down): the same half-sine curve the sound follows, as short lines. */
+const RAMP_SAMPLES = 20;
+const curve = (way: "in" | "out") =>
+  Array.from({ length: RAMP_SAMPLES + 1 }, (_, i) => {
+    const u = i / RAMP_SAMPLES;
+    return `${u.toFixed(3)},${(1 - smoothStep(way === "in" ? u : 1 - u)).toFixed(3)}`;
+  });
+const RAMP = {
+  in: { line: curve("in").join(" "), area: ["0,0", ...curve("in")].join(" ") },
+  out: { line: curve("out").join(" "), area: [...curve("out"), "1,0"].join(" ") },
+} as const;
 
 /**
- * A transition shown on its clip as a block of its own: darker, at the end it belongs to, as wide as it
- * lasts. Click it to edit it in the Transition tab; Delete removes it (the clip stays). The bar on its
- * inner edge is pulled to make it longer or shorter (stored on release, one undo step).
+ * The sound's fade at one end of a clip: a darker ramp shows the volume going up (in) or down (out), and a
+ * knob on the ramp's end is dragged along the clip to make it longer or shorter. The change is stored on
+ * release (one undo step); the bars of the waveform follow it while dragging. Double-click, or Delete, removes
+ * the fade; the arrow keys change it by 0.1 s.
  */
-function TransitionMark({
+function FadeHandle({
   clip,
   way,
   seconds,
+  longest,
   pps,
   room,
-  clipSelected,
+  revealed,
+  touchShown,
+  onDraft,
 }: {
   clip: TimelineClip;
-  /** The clip is the selected one. */
-  clipSelected: boolean;
   way: "in" | "out";
-  /** Its length as applied. */
+  /** The fade as shown now (applied, or the value being dragged). */
   seconds: number;
+  /** The most it can be made without squeezing the fade at the other end. */
+  longest: number;
   pps: number;
   /** Width of the clip in px. */
   room: number;
+  /** The pointer is near this end of the clip: the knob fades in. It is also there while dragging. */
+  revealed: boolean;
+  /** The clip is selected: on a touch screen, where there is no hover, the knob stays in view. */
+  touchShown: boolean;
+  /** The length being dragged, or null when the drag is over. */
+  onDraft: (seconds: number | null) => void;
 }) {
-  const [draft, setDraft] = useState<number | null>(null);
-  const shown = draft ?? seconds;
-  const stored = way === "in" ? clip.transitionIn : clip.transitionOut;
+  const [dragging, setDragging] = useState(false);
+  const side = way === "in" ? "left" : "right";
+  const wide = Math.min(room, Math.max(0, timeToX(seconds, pps)));
+  const label = way === "in" ? "Sound fade in" : "Sound fade out";
+  const commit = (value: number) => {
+    const next = snapFade(Math.min(longest, Math.max(0, value)));
+    report(changeClipSound(clip.id, way === "in" ? { fadeIn: next } : { fadeOut: next }));
+  };
 
   function onPointerDown(e: ReactPointerEvent<HTMLSpanElement>) {
-    if (e.button !== 0 || !stored) return;
+    if (e.button !== 0) return;
     e.stopPropagation(); // not a move of the clip
     e.preventDefault();
+    // editing a clip's fade makes it the selected one, so the Sound tab shows the same value
+    useSelectionStore.getState().select(clip.id);
     const startX = e.clientX;
     const from = seconds;
     let latest = from;
-    const longest = Math.min(TRANSITION_LIMITS.max, clipDuration(clip));
+    let moved = false;
+    setDragging(true);
     const onMove = (ev: PointerEvent) => {
       const dx = (ev.clientX - startX) * (way === "in" ? 1 : -1);
-      const next = Math.min(longest, Math.max(TRANSITION_LIMITS.min, from + dx / pps));
-      latest = Math.round(next * 10) / 10;
-      setDraft(latest);
+      latest = Math.min(longest, Math.max(0, from + dx / pps));
+      moved = moved || Math.abs(ev.clientX - startX) > 1;
+      onDraft(snapFade(latest));
     };
-    const done = (commit: boolean) => {
+    const done = (apply: boolean) => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onCancel);
-      setDraft(null);
-      if (commit && latest !== stored.duration) {
-        report(changeTransition(clip.id, { kind: stored.kind, duration: latest }, way));
-      }
+      setDragging(false);
+      onDraft(null);
+      if (apply && moved) commit(latest);
     };
     const onUp = () => done(true);
     const onCancel = () => done(false);
@@ -98,69 +138,96 @@ function TransitionMark({
     window.addEventListener("pointercancel", onCancel);
   }
 
-  const wide = markWidth(shown, pps, room);
-  const active = useUiStore((s) => clipSelected && s.transitionWay === way);
-  const kindName = TRANSITIONS.find((k) => k.id === stored?.kind);
-  const label = `${way === "in" ? "Transition in" : "Transition out"}: ${
-    (way === "in" ? kindName?.name : kindName?.outName) ?? "transition"
-  }, ${shown.toFixed(1)} s`;
-  /** Select the clip and show this end of it in the Transition tab. */
-  function open() {
-    useSelectionStore.getState().select(clip.id);
-    const ui = useUiStore.getState();
-    ui.setTransitionWay(way);
-    for (const kind of ["video", "image"] as const) ui.setInspectorTab(kind, "transition");
-  }
+  const grow = way === "in" ? "ArrowRight" : "ArrowLeft";
+  const shrink = way === "in" ? "ArrowLeft" : "ArrowRight";
+
   return (
-    <span
-      role="button"
-      tabIndex={0}
-      aria-label={label}
-      title={`${label}. Click to edit, Delete to remove.`}
-      data-testid={`transition-${way}-mark`}
-      // a block of its own: a press here is not a press on the clip under it
-      onPointerDown={(e) => e.stopPropagation()}
-      onClick={(e) => {
-        e.stopPropagation();
-        open();
-      }}
-      onContextMenu={(e) => e.stopPropagation()}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          e.stopPropagation();
-          open();
-        } else if (e.key === "Delete" || e.key === "Backspace") {
-          // the transition goes, the clip stays
-          e.preventDefault();
-          e.stopPropagation();
-          report(changeTransition(clip.id, null, way));
-        }
-      }}
-      className={cn(
-        "absolute inset-y-0 z-[5] flex cursor-pointer items-center justify-center bg-[#1a1408] text-accent outline-none [&_svg]:size-3",
-        way === "in" ? "left-0 rounded-l-md" : "right-0 rounded-r-md",
-        active ? "ring-2 ring-accent ring-inset" : "ring-1 ring-accent/50 ring-inset focus-visible:ring-2",
+    <>
+      {wide > 0 && (
+        <svg
+          aria-hidden
+          data-testid={`fade-${way}-ramp`}
+          viewBox="0 0 1 1"
+          preserveAspectRatio="none"
+          className="pointer-events-none absolute inset-y-0 z-[2]"
+          style={{ [side]: 0, width: wide, height: "100%" }}
+        >
+          <polygon points={RAMP[way].area} fill="rgba(0, 0, 0, 0.38)" />
+          <polyline
+            points={RAMP[way].line}
+            fill="none"
+            stroke="rgba(255, 255, 255, 0.75)"
+            strokeWidth={1.5}
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        </svg>
       )}
-      style={{ width: wide }}
-    >
-      {wide > 22 && <Blend aria-hidden />}
       <span
         role="slider"
-        tabIndex={-1}
-        aria-label={way === "in" ? "Length of the transition in" : "Length of the transition out"}
-        aria-valuemin={TRANSITION_LIMITS.min}
-        aria-valuemax={TRANSITION_LIMITS.max}
-        aria-valuenow={shown}
-        aria-valuetext={`${shown.toFixed(1)} seconds`}
-        title="Drag to change how long the transition lasts"
+        tabIndex={0}
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={longest}
+        aria-valuenow={seconds}
+        aria-valuetext={`${seconds.toFixed(1)} seconds`}
+        data-testid={`fade-${way}-handle`}
         onPointerDown={onPointerDown}
+        onClick={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          commit(0);
+        }}
+        onContextMenu={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          if (e.key === grow || e.key === shrink) {
+            e.preventDefault();
+            e.stopPropagation();
+            commit(seconds + (e.key === grow ? FADE_KEY_STEP : -FADE_KEY_STEP));
+          } else if (e.key === "Delete" || e.key === "Backspace") {
+            e.preventDefault();
+            e.stopPropagation();
+            commit(0);
+          }
+        }}
+        // above the trim handles (z-10): a press at the corner is the fade's, not a trim of the clip
         className={cn(
-          "pointer-events-auto absolute inset-y-0 w-2 cursor-ew-resize touch-none bg-accent/80 hover:bg-accent pointer-coarse:w-4",
-          way === "in" ? "right-0" : "left-0",
+          "group/fade absolute top-0 z-[11] flex cursor-ew-resize touch-none items-start justify-center outline-none",
+          "pointer-coarse:h-9 pointer-coarse:w-9",
+          dragging && "cursor-grabbing",
         )}
-      />
-    </span>
+        style={{
+          [side]: Math.min(Math.max(0, wide - GRAB_PX / 2), Math.max(0, room - GRAB_PX)),
+          width: GRAB_PX,
+          height: GRAB_PX,
+        }}
+      >
+        <span
+          aria-hidden
+          className={cn(
+            "mt-[7px] size-3.5 rounded-full border-2 border-white bg-accent shadow-[0_1px_4px_rgb(0_0_0/0.5)]",
+            "transition-[opacity,transform] duration-150 ease-out",
+            "group-hover/fade:scale-125 group-focus-visible/fade:scale-125 group-focus-visible/fade:opacity-100 group-focus-visible/fade:ring-2 group-focus-visible/fade:ring-white",
+            dragging && "scale-125",
+            revealed || dragging ? "scale-100 opacity-100" : "scale-75 opacity-0",
+            touchShown && "pointer-coarse:scale-100 pointer-coarse:opacity-100",
+          )}
+        />
+        {/* the length as a small readout instead of a browser tooltip, which would cover the clip's name */}
+        <span
+          aria-hidden
+          className={cn(
+            "pointer-events-none absolute top-7 z-[12] rounded bg-black/80 px-1.5 py-0.5 text-[10px] whitespace-nowrap text-white tabular-nums",
+            way === "in" ? "left-0" : "right-0",
+            dragging
+              ? "opacity-100"
+              : "opacity-0 group-hover/fade:opacity-100 group-focus-visible/fade:opacity-100",
+          )}
+        >
+          {way === "in" ? "Fade in" : "Fade out"} {seconds.toFixed(2)} s
+        </span>
+      </span>
+    </>
   );
 }
 
@@ -182,9 +249,27 @@ export const ClipView = memo(function ClipView({
   onActivate,
 }: Props) {
   const Icon = ICON[type];
-  const width = Math.max(2, timeToX(clipDuration(clip), pps));
+  const length = clipDuration(clip);
+  const width = Math.max(2, timeToX(length, pps));
   const coming = transitionOf(clip);
   const going = transitionOutOf(clip);
+  // a fade being dragged is shown at once; it is stored when the knob is let go
+  const [fadeDraft, setFadeDraft] = useState<{ in: number | null; out: number | null }>({
+    in: null,
+    out: null,
+  });
+  const dragged = fadeDraft.in !== null || fadeDraft.out !== null;
+  // which end of the clip the pointer is near: only that fade's knob shows
+  const [nearEnd, setNearEnd] = useState<"in" | "out" | null>(null);
+  const fades = soundFadesOf(
+    dragged ? { ...clip, fadeIn: fadeDraft.in ?? clip.fadeIn, fadeOut: fadeDraft.out ?? clip.fadeOut } : clip,
+  );
+  // a clip with sound that is on: not a still, and not one whose file has no audio at all
+  const silent = useWaveformStore((s) => (wavePath ? s.entries[wavePath]?.status === "none" : true));
+  const fadable = type !== "image" && !muted && !missing && !silent;
+  // at an end that has a transition the sound already fades with it (set in the Sound tab)
+  const fadeInHandle = fadable && !(coming && clip.transitionIn);
+  const fadeOutHandle = fadable && !(going && clip.transitionOut);
   const handle =
     "absolute top-0 bottom-0 z-10 w-2 cursor-ew-resize touch-none pointer-coarse:w-4 hover:bg-white/25";
   return (
@@ -195,13 +280,30 @@ export const ClipView = memo(function ClipView({
       title={missing ? `${name} — file not found` : name}
       aria-pressed={selected}
       data-clip-id={clip.id}
-      onPointerDown={(e) => onBodyPointerDown(e, clip)}
+      onPointerDown={(e) => {
+        useUiStore.getState().setSelectedTransition(null); // pressing the clip itself: Delete is for the clip
+        onBodyPointerDown(e, clip);
+      }}
+      onPointerMove={(e) => {
+        if (!fadeInHandle && !fadeOutHandle) return;
+        const x = e.clientX - e.currentTarget.getBoundingClientRect().left;
+        const inZone = fadeInHandle && x <= Math.max(EDGE_ZONE_PX, timeToX(fades.fadeIn, pps) + GRAB_PX);
+        const outZone =
+          fadeOutHandle && x >= width - Math.max(EDGE_ZONE_PX, timeToX(fades.fadeOut, pps) + GRAB_PX);
+        const next =
+          inZone && outZone ? (x < width / 2 ? "in" : "out") : inZone ? "in" : outZone ? "out" : null;
+        setNearEnd((current) => (current === next ? current : next));
+      }}
+      onPointerLeave={() => setNearEnd(null)}
       onContextMenu={(e) => onContextMenu(e, clip)}
       onKeyDown={(e) => {
-        if (e.key === "Enter") onActivate(clip, e.shiftKey);
+        if (e.key === "Enter") {
+          useUiStore.getState().setSelectedTransition(null);
+          onActivate(clip, e.shiftKey);
+        }
       }}
       className={cn(
-        "absolute top-1 bottom-1 flex cursor-grab touch-none items-center gap-1 overflow-hidden rounded-md px-2 text-xs text-text select-none",
+        "group absolute top-1 bottom-1 flex cursor-grab touch-none items-center gap-1 overflow-hidden rounded-md px-2 text-xs text-text shadow-[inset_0_1px_0_rgb(255_255_255/0.14)] select-none",
         COLOR[type],
         selected
           ? "ring-2 ring-accent"
@@ -214,8 +316,10 @@ export const ClipView = memo(function ClipView({
         left: timeToX(clip.timelineStart, pps),
         width,
         // the name starts after the block of the transition in, and stops before the one of the way out
-        paddingLeft: coming && clip.transitionIn ? markWidth(coming.seconds, pps, width) + 6 : undefined,
-        paddingRight: going && clip.transitionOut ? markWidth(going.seconds, pps, width) + 6 : undefined,
+        paddingLeft:
+          coming && clip.transitionIn ? transitionWidth(coming.seconds, pps, width) + 6 : undefined,
+        paddingRight:
+          going && clip.transitionOut ? transitionWidth(going.seconds, pps, width) + 6 : undefined,
       }}
     >
       <div
@@ -226,32 +330,54 @@ export const ClipView = memo(function ClipView({
           onTrimPointerDown(e, clip, "start");
         }}
       />
-      {/* its transitions: a darker block of its own at each end, as wide as the transition lasts */}
-      {coming && clip.transitionIn && (
-        <TransitionMark
+      {wavePath && waveTo > waveFrom && (
+        <ClipWaveform
+          path={wavePath}
+          clip={clip}
+          pps={pps}
+          from={waveFrom}
+          to={waveTo}
+          muted={muted}
+          fadeIn={fades.fadeIn}
+          fadeOut={fades.fadeOut}
+        />
+      )}
+      {fadeInHandle && (
+        <FadeHandle
           clip={clip}
           way="in"
-          seconds={coming.seconds}
+          seconds={fades.fadeIn}
+          longest={Math.min(MAX_FADE, Math.max(0, length - fades.fadeOut))}
           pps={pps}
           room={width}
-          clipSelected={selected}
+          revealed={nearEnd === "in"}
+          touchShown={selected}
+          onDraft={(v) => setFadeDraft((d) => ({ ...d, in: v }))}
         />
       )}
-      {going && clip.transitionOut && (
-        <TransitionMark
+      {fadeOutHandle && (
+        <FadeHandle
           clip={clip}
           way="out"
-          seconds={going.seconds}
+          seconds={fades.fadeOut}
+          longest={Math.min(MAX_FADE, Math.max(0, length - fades.fadeIn))}
           pps={pps}
           room={width}
-          clipSelected={selected}
+          revealed={nearEnd === "out"}
+          touchShown={selected}
+          onDraft={(v) => setFadeDraft((d) => ({ ...d, out: v }))}
         />
       )}
-      {wavePath && waveTo > waveFrom && (
-        <ClipWaveform path={wavePath} clip={clip} pps={pps} from={waveFrom} to={waveTo} muted={muted} />
-      )}
-      <Icon className="relative size-3.5 shrink-0 opacity-80" />
-      <span className="relative truncate">{name}</span>
+      {/* the name sits on its own dark pill, so it stays readable over the bars of the waveform */}
+      <div className="relative z-[3] flex min-w-0 items-center gap-1 rounded bg-black/55 px-1.5 py-0.5 backdrop-blur-[2px]">
+        <Icon className="size-3.5 shrink-0 opacity-90" />
+        <span className="truncate">{name}</span>
+        {width > 160 && (
+          <span className="shrink-0 pl-1 text-[10px] tabular-nums text-white/60">
+            {formatDuration(length)}
+          </span>
+        )}
+      </div>
       <div
         data-testid="trim-end"
         className={cn(handle, "right-0")}

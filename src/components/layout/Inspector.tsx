@@ -350,7 +350,7 @@ function SpeedPanel({
 
 /** Tabs that have working controls for each kind of clip, in display order. The first one is the default. */
 export const TABS_FOR: Record<ClipKind, InspectorTab[]> = {
-  video: ["video", "transition", "color", "audio", "ai", "speed", "info"],
+  video: ["video", "transition", "color", "ai", "audio", "speed", "info"],
   audio: ["audio", "ai", "speed", "info"],
   image: ["video", "transition", "color", "info"], // stills have no sound and no speed
 };

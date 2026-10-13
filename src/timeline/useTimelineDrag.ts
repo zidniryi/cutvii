@@ -4,7 +4,7 @@ import { usePlaybackStore } from "@/store/playback";
 import { useProjectStore } from "@/store/project";
 import { useTimelineViewStore } from "@/store/timelineView";
 import { findClip, clipDuration } from "./clips";
-import { moveClip, trimClip } from "./edit";
+import { moveClip, nearestFreeStart, trimClip } from "./edit";
 import { moveClipTo, report, trimClipEdge } from "./editor";
 import { SNAP_PX, trackIndexAt } from "./geometry";
 import { quantizeToFrame, snapClipMove, snapTime } from "./snap";
@@ -72,11 +72,20 @@ export function useTimelineDrag(lanesRef: RefObject<HTMLElement | null>) {
           const sorted = project.tracks;
           const idx = trackIndexAt(ev.clientY, top, sorted.length);
           const trackId = sorted[idx]?.id ?? clip.trackId;
-          const r = moveClip(project, clipId, { start: snap.time, trackId });
+          // dropped onto another clip: it goes next to it, in the nearest place that is free
+          let start = snap.time;
+          let r = moveClip(project, clipId, { start, trackId });
+          if (!r.ok && r.error.code === "overlap") {
+            const free = nearestFreeStart(project, clipId, start, trackId);
+            if (free !== null) {
+              start = free;
+              r = moveClip(project, clipId, { start, trackId });
+            }
+          }
           return {
             kind: "move",
             clipId,
-            start: snap.time,
+            start,
             trackId,
             duration,
             valid: r.ok,

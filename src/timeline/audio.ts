@@ -30,31 +30,53 @@ export function fadesOf(clip: Fading): { fadeIn: number; fadeOut: number } {
   return { fadeIn, fadeOut };
 }
 
+/** The fade envelope, 0 (silent) to 1, `into` seconds into a clip that is `length` seconds long. Straight ramps. */
+export function fadeRamp(into: number, length: number, fadeIn: number, fadeOut: number): number {
+  let gain = 1;
+  if (fadeIn > 0) gain = Math.min(gain, into / fadeIn);
+  if (fadeOut > 0) gain = Math.min(gain, (length - into) / fadeOut);
+  return Math.min(1, Math.max(0, gain));
+}
+
+/** A half sine wave from 0 to 1: leaves silence and arrives at full level gently, with no corner at either end. */
+export const smoothStep = (u: number) => (1 - Math.cos(Math.PI * Math.min(1, Math.max(0, u)))) / 2;
+
+/**
+ * The fade of a clip's SOUND, 0..1, `into` seconds into a clip `length` seconds long: the straight ramps of
+ * `fadeRamp` shaped with a half sine, so music does not start or end with an audible corner. The export
+ * does the same (`afade ... curve=hsin`).
+ */
+export function soundRamp(into: number, length: number, fadeIn: number, fadeOut: number): number {
+  return smoothStep(fadeRamp(into, length, fadeIn, fadeOut));
+}
+
 /** How loud the clip is at timeline time `t` because of its fades: 0 (silent) to 1. Straight-line ramps. */
 export function fadeGain(clip: Fading, t: number): number {
   const { fadeIn, fadeOut } = fadesOf(clip);
-  const into = t - clip.timelineStart;
-  const left = clipDuration(clip as TimelineClip) - into;
-  let gain = 1;
-  if (fadeIn > 0) gain = Math.min(gain, into / fadeIn);
-  if (fadeOut > 0) gain = Math.min(gain, left / fadeOut);
-  return Math.min(1, Math.max(0, gain));
+  return fadeRamp(t - clip.timelineStart, clipDuration(clip as TimelineClip), fadeIn, fadeOut);
 }
 
 type Sounding = Fading & Pick<TimelineClip, "transitionIn" | "transitionOut">;
 
 /**
- * How loud the clip's SOUND is at timeline time `t`: its own fades, and at least as long a fade as its
- * picture takes to come in or leave with a transition. The export does the same (`fades_with` in Rust).
+ * The fades of the clip's SOUND as they are applied (seconds): its own fades, and at least as long a fade
+ * as its picture takes to come in or leave with a transition.
  */
-export function soundGain(clip: Sounding, t: number): number {
+export function soundFadesOf(clip: Sounding): { fadeIn: number; fadeOut: number } {
   const coming = transitionOf(clip)?.seconds ?? 0;
   const going = transitionOutOf(clip)?.seconds ?? 0;
-  if (coming === 0 && going === 0) return fadeGain(clip, t);
-  return fadeGain(
-    { ...clip, fadeIn: Math.max(clip.fadeIn ?? 0, coming), fadeOut: Math.max(clip.fadeOut ?? 0, going) },
-    t,
-  );
+  if (coming === 0 && going === 0) return fadesOf(clip);
+  return fadesOf({ ...clip, fadeIn: Math.max(clip.fadeIn ?? 0, coming), fadeOut: Math.max(clip.fadeOut ?? 0, going) });
+}
+
+/**
+ * How loud the clip's SOUND is at timeline time `t`: its own fades (smooth, see `soundRamp`), and at least as
+ * long a fade as its picture takes to come in or leave with a transition. The export does the same
+ * (`fades_with` in Rust).
+ */
+export function soundGain(clip: Sounding, t: number): number {
+  const { fadeIn, fadeOut } = soundFadesOf(clip);
+  return soundRamp(t - clip.timelineStart, clipDuration(clip as TimelineClip), fadeIn, fadeOut);
 }
 
 const fail = (code: "unknown-clip" | "out-of-range" | "incompatible-track", message: string): EditResult => ({

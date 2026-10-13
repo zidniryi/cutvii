@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Eye,
   EyeOff,
@@ -16,6 +16,7 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { ClipView } from "@/components/timeline/ClipView";
+import { TransitionBlock } from "@/components/timeline/TransitionBlock";
 import { ContextMenu, type MenuState } from "@/components/timeline/ContextMenu";
 import { Ruler } from "@/components/timeline/Ruler";
 import { IconButton } from "@/components/IconButton";
@@ -33,6 +34,7 @@ import { aiKindOf, openAiTools, openAutoClips, openKaraoke } from "@/timeline/ai
 import { copySelected, cutSelected } from "@/timeline/clipboard";
 import { freezeFrameAtPlayhead } from "@/timeline/freeze";
 import { deleteSelected, report, splitAtPlayhead, toggleTrackFlag } from "@/timeline/editor";
+import { transitionOf, transitionOutOf } from "@/timeline/transitions";
 import {
   contentWidth,
   HEADER_WIDTH,
@@ -322,25 +324,35 @@ export function Timeline() {
                           viewport.left + vw + BUFFER_PX,
                         )
                       : null;
+                    const coming = transitionOf(clip);
+                    const going = transitionOutOf(clip);
                     return (
-                      <ClipView
-                        key={clip.id}
-                        clip={clip}
-                        name={asset ? assetName(asset) : "Missing media"}
-                        // a video's detached sound looks like the audio it is
-                        type={track.type === "audio" ? "audio" : (asset?.type ?? "video")}
-                        pps={pps}
-                        selected={selected.has(clip.id)}
-                        missing={asset ? missing.has(asset.path) : true}
-                        wavePath={wave ? asset?.path : undefined}
-                        waveFrom={wave?.from}
-                        waveTo={wave?.to}
-                        muted={track.muted || (clip.muted ?? false)}
-                        onBodyPointerDown={onBodyPointerDown}
-                        onTrimPointerDown={onTrimPointerDown}
-                        onContextMenu={onContextMenu}
-                        onActivate={onActivate}
-                      />
+                      <Fragment key={clip.id}>
+                        <ClipView
+                          clip={clip}
+                          name={asset ? assetName(asset) : "Missing media"}
+                          // a video's detached sound looks like the audio it is
+                          type={track.type === "audio" ? "audio" : (asset?.type ?? "video")}
+                          pps={pps}
+                          selected={selected.has(clip.id)}
+                          missing={asset ? missing.has(asset.path) : true}
+                          wavePath={wave ? asset?.path : undefined}
+                          waveFrom={wave?.from}
+                          waveTo={wave?.to}
+                          muted={track.muted || (clip.muted ?? false)}
+                          onBodyPointerDown={onBodyPointerDown}
+                          onTrimPointerDown={onTrimPointerDown}
+                          onContextMenu={onContextMenu}
+                          onActivate={onActivate}
+                        />
+                        {/* a transition is a block of its own over its end of the clip, not part of the clip */}
+                        {coming && clip.transitionIn && (
+                          <TransitionBlock clip={clip} way="in" seconds={coming.seconds} pps={pps} />
+                        )}
+                        {going && clip.transitionOut && (
+                          <TransitionBlock clip={clip} way="out" seconds={going.seconds} pps={pps} />
+                        )}
+                      </Fragment>
                     );
                   })}
                   {dropPreview?.trackId === track.id && ghost}

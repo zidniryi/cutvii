@@ -39,6 +39,12 @@ interface UiState {
   /** Which end of the clip the Transition tab is showing; a transition block on the timeline sets it. */
   transitionWay: "in" | "out";
   setTransitionWay: (way: "in" | "out") => void;
+  /**
+   * The transition block picked on the timeline (a block of its own, not the clip): Delete removes just it.
+   * It only counts while its clip is the one selected clip.
+   */
+  selectedTransition: { clipId: string; way: "in" | "out" } | null;
+  setSelectedTransition: (selected: { clipId: string; way: "in" | "out" } | null) => void;
   supportOpen: boolean;
   setSupportOpen: (open: boolean) => void;
   canvasDialogOpen: boolean;
@@ -94,6 +100,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   settingsOpen: false,
   transitionWay: "in",
   setTransitionWay: (transitionWay) => set({ transitionWay }),
+  selectedTransition: null,
+  setSelectedTransition: (selectedTransition) => set({ selectedTransition }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   supportOpen: false,
   setSupportOpen: (supportOpen) => set({ supportOpen }),

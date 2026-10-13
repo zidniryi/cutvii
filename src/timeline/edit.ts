@@ -153,6 +153,37 @@ export function moveClip(
   );
 }
 
+/**
+ * Where a clip can go on `trackId` (its own track when absent) as near as possible to `desired` without
+ * overlapping anything: `desired` itself when that is free, otherwise flush against a neighbour in the
+ * nearest gap that is long enough (there is always room after the last clip). Null for an unknown clip or
+ * track. Used when a clip is dropped onto another one: it lands next to it instead of being refused.
+ */
+export function nearestFreeStart(
+  project: Project,
+  clipId: string,
+  desired: number,
+  trackId?: string,
+): number | null {
+  const found = findClip(project, clipId);
+  const target = project.tracks.find((t) => t.id === (trackId ?? found?.clip.trackId));
+  if (!found || !target) return null;
+  const length = clipDuration(found.clip);
+  const others = target.clips.filter((c) => c.id !== clipId).sort(byStart);
+  const want = Math.max(0, desired);
+  let best: number | null = null;
+  let gapStart = 0;
+  for (let i = 0; i <= others.length; i += 1) {
+    const gapEnd = i < others.length ? others[i].timelineStart : Infinity;
+    if (gapEnd - gapStart >= length - EPS) {
+      const here = Math.min(Math.max(want, gapStart), gapEnd === Infinity ? Infinity : gapEnd - length);
+      if (best === null || Math.abs(here - want) < Math.abs(best - want)) best = here;
+    }
+    if (i < others.length) gapStart = Math.max(gapStart, others[i].timelineStart + clipDuration(others[i]));
+  }
+  return best;
+}
+
 /** Trim one edge to `time` (timeline seconds). Clamps to neighbours, source media limits and one frame. */
 export function trimClip(project: Project, clipId: string, edge: "start" | "end", time: number): EditResult {
   const found = findClip(project, clipId);

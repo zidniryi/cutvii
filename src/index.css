@@ -21,6 +21,8 @@
   --clip-video: #8a4524;
   --clip-audio: #3f5a5c;
   --clip-image: #7d6428;
+  /* a transition is a block of its own on the timeline: a colour none of the clips has */
+  --clip-transition: #5b49a8;
 
   --radius: 0.5rem;
   --touch-target: 44px;
@@ -60,6 +62,7 @@
   --color-clip-video: var(--clip-video);
   --color-clip-audio: var(--clip-audio);
   --color-clip-image: var(--clip-image);
+  --color-clip-transition: var(--clip-transition);
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);

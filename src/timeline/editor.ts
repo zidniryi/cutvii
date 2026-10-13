@@ -294,7 +294,24 @@ export function splitAtPlayhead(): EditResult {
   });
 }
 
+/** The transition block picked on the timeline, when it is still there and its clip is the one selected. */
+function pickedTransition(): { clipId: string; way: "in" | "out" } | null {
+  const picked = useUiStore.getState().selectedTransition;
+  const ids = useSelectionStore.getState().selectedClipIds;
+  if (!picked || ids.length !== 1 || ids[0] !== picked.clipId) return null;
+  const clip = project()
+    .tracks.flatMap((t) => t.clips)
+    .find((c) => c.id === picked.clipId);
+  return (picked.way === "in" ? clip?.transitionIn : clip?.transitionOut) ? picked : null;
+}
+
+/** Delete the picked transition block, or else the selected clips. */
 export function deleteSelected(): EditResult {
+  const picked = pickedTransition();
+  if (picked) {
+    useUiStore.getState().setSelectedTransition(null);
+    return changeTransition(picked.clipId, null, picked.way); // the clip stays
+  }
   const ids = useSelectionStore.getState().selectedClipIds;
   if (ids.length === 0) {
     return { ok: false, error: { code: "unknown-clip", message: "Nothing selected" } };

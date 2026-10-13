@@ -779,14 +779,14 @@ pub fn build_filter_graph(plan: &ExportPlan) -> FilterGraph {
                 AUDIO_RATE as f64 * clip.speed
             )
         };
-        // fades: straight-line ramps in clip time (after the speed change), like the preview's
+        // fades: half-sine ramps in clip time (after the speed change), like the preview's `soundRamp`
         let mut fades = String::new();
         if clip.fade_in > 1e-6 {
-            fades.push_str(&format!("afade=t=in:st=0:d={:.6},", clip.fade_in));
+            fades.push_str(&format!("afade=t=in:st=0:d={:.6}:curve=hsin,", clip.fade_in));
         }
         if clip.fade_out > 1e-6 {
             fades.push_str(&format!(
-                "afade=t=out:st={:.6}:d={:.6},",
+                "afade=t=out:st={:.6}:d={:.6}:curve=hsin,",
                 clip.duration - clip.fade_out,
                 clip.fade_out
             ));
@@ -1223,7 +1223,7 @@ mod tests {
             "{g}"
         );
         assert!(
-            g.contains("afade=t=in:st=0:d=1.000000,afade=t=out:st=3.500000:d=0.500000"),
+            g.contains("afade=t=in:st=0:d=1.000000:curve=hsin,afade=t=out:st=3.500000:d=0.500000:curve=hsin"),
             "{g}"
         );
 
@@ -1460,7 +1460,7 @@ mod tests {
         assert_eq!((detached.fade_in, detached.fade_out), (1.0, 0.5));
         let g = build_filter_graph(&plan).graph;
         assert!(
-            g.contains("asetpts=PTS-STARTPTS,afade=t=in:st=0:d=1.000000,afade=t=out:st=3.500000:d=0.500000,adelay=6000|6000"),
+            g.contains("asetpts=PTS-STARTPTS,afade=t=in:st=0:d=1.000000:curve=hsin,afade=t=out:st=3.500000:d=0.500000:curve=hsin,adelay=6000|6000"),
             "{g}"
         );
         assert_eq!(

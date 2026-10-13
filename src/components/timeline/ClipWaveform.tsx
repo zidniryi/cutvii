@@ -1,6 +1,8 @@
 import { memo, useEffect, useRef } from "react";
 import type { TimelineClip } from "@/project/model";
 import { useWaveformStore } from "@/store/waveforms";
+import { soundRamp } from "@/timeline/audio";
+import { clipDuration } from "@/timeline/clips";
 import { ROW_HEIGHT } from "@/timeline/geometry";
 import { waveColumns } from "@/timeline/waveform";
 
@@ -22,14 +24,27 @@ interface Props {
   to: number;
   /** The track is muted: drawn faint. */
   muted: boolean;
+  /** The fades of the clip's sound as applied, in seconds: the bars shrink along them. */
+  fadeIn?: number;
+  fadeOut?: number;
 }
 
 /** The clip's audio drawn as bars behind its label; a flat line until the peaks are ready. */
-export const ClipWaveform = memo(function ClipWaveform({ path, clip, pps, from, to, muted }: Props) {
+export const ClipWaveform = memo(function ClipWaveform({
+  path,
+  clip,
+  pps,
+  from,
+  to,
+  muted,
+  fadeIn = 0,
+  fadeOut = 0,
+}: Props) {
   const entry = useWaveformStore((s) => s.entries[path]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const data = entry?.status === "ready" ? entry.data : null;
   const { sourceIn, sourceOut, speed, reversed, volume } = clip;
+  const length = clipDuration(clip);
 
   useEffect(() => useWaveformStore.getState().ensure(path), [path]);
 
@@ -54,10 +69,20 @@ export const ClipWaveform = memo(function ClipWaveform({ path, clip, pps, from, 
       Math.ceil(to / BAR_STEP),
     );
     for (let i = 0; i < bars.length; i++) {
-      const h = Math.max(MIN_BAR, bars[i] * (HEIGHT - PADDING * 2));
-      ctx.fillRect((first + i) * BAR_STEP - from, (HEIGHT - h) / 2, BAR_WIDTH, h);
+      // the bar's loudness follows the fades, so dragging a fade is seen in the "equalizer" as it happens
+      const x = (first + i) * BAR_STEP;
+      const level = bars[i] * soundRamp((x + BAR_WIDTH / 2) / pps, length, fadeIn, fadeOut);
+      const h = Math.max(MIN_BAR, level * (HEIGHT - PADDING * 2));
+      const y = (HEIGHT - h) / 2;
+      if (typeof ctx.roundRect === "function") {
+        ctx.beginPath();
+        ctx.roundRect(x - from, y, BAR_WIDTH, h, BAR_WIDTH / 2);
+        ctx.fill();
+      } else {
+        ctx.fillRect(x - from, y, BAR_WIDTH, h);
+      }
     }
-  }, [data, sourceIn, sourceOut, speed, reversed, volume, pps, from, to, muted]);
+  }, [data, sourceIn, sourceOut, speed, reversed, volume, pps, from, to, muted, fadeIn, fadeOut, length]);
 
   if (!entry || entry.status === "loading") {
     return (
