@@ -9,6 +9,7 @@
 pub mod encoder;
 pub mod plan;
 pub mod render;
+pub mod transitions;
 
 use serde::{Deserialize, Serialize};
 

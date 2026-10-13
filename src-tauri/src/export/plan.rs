@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use super::transitions::{From, find as find_transition, remaining};
 use super::{ExportFormat, ExportOptions, Quality};
 use crate::errors::{AppError, AppResult};
 use crate::media::MediaType;
@@ -11,7 +12,8 @@ use crate::media::color::{ColorAdjust, Overlay, ensure_graded_lut, filter_path};
 use crate::media::cube::load_cube;
 use crate::project::{AudioClean, ClipLut};
 use crate::project::{
-    BackgroundKind, Crop, DEFAULT_BLUR_AMOUNT, FitMode, Project, TrackType, Transform, validate,
+    BackgroundKind, Crop, DEFAULT_BLUR_AMOUNT, FitMode, Motion, Project, TrackType, Transform,
+    validate,
 };
 
 /// What we need to know about a source file that the project itself does not record.
@@ -24,6 +26,8 @@ pub struct AssetFacts {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlannedClip {
     pub path: PathBuf,
+    /// Id of the track the clip is on.
+    pub track: String,
     pub media_type: MediaType,
     pub source_in: f64,
     /// Seconds of source media used (sourceOut - sourceIn).
@@ -57,6 +61,12 @@ pub struct PlannedClip {
     pub crop: Option<Crop>,
     /// Position, scale, rotation, flip and opacity of the clip's layer; `None` when it is left as it is.
     pub transform: Option<Transform>,
+    /// Keyframes of the transform in clip time; a property with keys ignores its value in `transform`.
+    pub motion: Option<Motion>,
+    /// The transition the clip comes in with: where it starts from, and for how many seconds.
+    pub transition: Option<(From, f64)>,
+    /// Seconds the last frame stays on after the clip, under the next clip's transition.
+    pub hold: f64,
     /// Colour adjustment of the picture; `None` when nothing is set (and always for text).
     pub color: Option<ColorAdjust>,
     /// The baked table for `color` (a `.cube` file). Filled in just before rendering: planning itself
@@ -158,7 +168,7 @@ pub fn build_plan(
     let mut tracks: Vec<_> = project.tracks.iter().collect();
     tracks.sort_by_key(|t| t.order);
 
-    let mut clips = Vec::new();
+    let mut clips: Vec<PlannedClip> = Vec::new();
     let mut warnings = Vec::new();
     let mut end = 0.0_f64;
     for track in tracks {
@@ -212,6 +222,18 @@ pub fn build_plan(
                 errors.push(format!("media file is missing: {}", asset.path));
                 continue;
             }
+            // a transition in; the clip that ends right here on this track holds its last frame under it
+            let transition = c
+                .transition_in
+                .as_ref()
+                .filter(|_| video)
+                .and_then(|t| Some((find_transition(&t.kind)?, t.duration.min(duration))));
+            if let (Some((_, seconds)), Some(before)) = (transition, clips.last_mut()) {
+                let touches = (before.start + before.duration - c.timeline_start).abs() < 1e-3;
+                if before.video && before.track == track.id && touches {
+                    before.hold = seconds;
+                }
+            }
             // what shows behind a fitted or transparent picture
             let black = || "#000000".to_string();
             let (bg_color, bg_image) = match c.fit_background.as_ref() {
@@ -239,6 +261,7 @@ pub fn build_plan(
             };
             clips.push(PlannedClip {
                 path: PathBuf::from(&asset.path),
+                track: track.id.clone(),
                 media_type: asset.media_type,
                 source_in: c.source_in,
                 source_duration,
@@ -261,7 +284,12 @@ pub fn build_plan(
                     .and_then(|b| b.blur)
                     .unwrap_or(DEFAULT_BLUR_AMOUNT),
                 crop: c.crop.filter(|k| !k.is_none() && asset.text.is_none()),
-                transform: Some(c.transform()).filter(|t| !t.is_identity()),
+                transform: Some(c.transform()).filter(|t| {
+                    !t.is_identity() || (video && (c.motion().is_some() || transition.is_some()))
+                }),
+                motion: c.motion().filter(|_| video),
+                transition,
+                hold: 0.0,
                 color: c
                     .color
                     .filter(|k| video && !k.is_identity() && asset.text.is_none()),
@@ -339,6 +367,27 @@ pub fn rate_expr(fps: f64) -> String {
         }
     }
     format!("{fps}")
+}
+
+/// Keyframes as an FFmpeg expression of `t` (clip time): straight lines between the keys, the first value
+/// before the first key and the last value after the last. The preview does the same (`valueAt`).
+pub fn piecewise(keys: &[(f64, f64)], t: &str) -> String {
+    let (Some(first), Some(last)) = (keys.first(), keys.last()) else {
+        return "0".into();
+    };
+    let mut e = format!("{:.6}", last.1);
+    for pair in keys.windows(2).rev() {
+        let ((t0, v0), (t1, v1)) = (pair[0], pair[1]);
+        e = format!(
+            "if(lt({t},{t1:.6}),({v0:.6})+({dv:.6})*({t}-({t0:.6}))/{dt:.6},{e})",
+            dv = v1 - v0,
+            dt = (t1 - t0).max(1e-6)
+        );
+    }
+    if keys.len() > 1 {
+        e = format!("if(lt({t},{:.6}),{:.6},{e})", first.0, first.1);
+    }
+    e
 }
 
 fn secs(v: f64) -> String {
@@ -519,8 +568,68 @@ pub fn build_filter_graph(plan: &ExportPlan) -> FilterGraph {
             }
             // Transform: the finished canvas-sized layer is mirrored, scaled, rotated and faded, then laid
             // over the tracks below at its offset. Whatever it leaves uncovered keeps showing them.
+            // held under the next clip's transition: the last frame stays on for that long
+            let layer = if clip.hold > 0.0 {
+                parts.push(format!(
+                    "[c{i}]tpad=stop_mode=clone:stop_duration={}[h{i}]",
+                    secs(clip.hold)
+                ));
+                format!("h{i}")
+            } else {
+                format!("c{i}")
+            };
             match clip.transform {
                 Some(t) => {
+                    // Keyframes and the transition in: each animated property is an expression of clip
+                    // time. Layers carry timeline timestamps, so clip time is the filter's time minus the
+                    // clip's start. `None` below means the property is fixed.
+                    let m = clip.motion.clone().unwrap_or_default();
+                    let clip_time = |var: &str| format!("({var}-{})", secs(clip.start));
+                    // what the user set: a fixed value, or the keyframes
+                    let own = |keys: &[(f64, f64)], fixed: f64, var: &str| {
+                        if keys.is_empty() {
+                            format!("{fixed:.6}")
+                        } else {
+                            piecewise(keys, &clip_time(var))
+                        }
+                    };
+                    // the transition: `left` goes from 1 to 0 while the clip comes in
+                    let from = clip.transition.map(|(f, _)| f).unwrap_or_default();
+                    let left = |var: &str| match clip.transition {
+                        Some((_, seconds)) => piecewise(&remaining(seconds), &clip_time(var)),
+                        None => "0".into(),
+                    };
+                    let added = |keys: &[(f64, f64)], fixed: f64, var: &str, offset: f64| match (
+                        keys.is_empty(),
+                        offset != 0.0,
+                    ) {
+                        (true, false) => None,
+                        (false, false) => Some(own(keys, fixed, var)),
+                        (_, true) => Some(format!(
+                            "({})+({offset:.6})*({})",
+                            own(keys, fixed, var),
+                            left(var)
+                        )),
+                    };
+                    let scaled = |keys: &[(f64, f64)], fixed: f64, var: &str, factor: f64| match (
+                        keys.is_empty(),
+                        factor != 1.0,
+                    ) {
+                        (true, false) => None,
+                        (false, false) => Some(own(keys, fixed, var)),
+                        (_, true) => Some(format!(
+                            "({})*(1+({:.6})*({}))",
+                            own(keys, fixed, var),
+                            factor - 1.0,
+                            left(var)
+                        )),
+                    };
+                    let x = added(&m.x, t.x, "t", from.x);
+                    let y = added(&m.y, t.y, "t", from.y);
+                    let rotation = added(&m.rotation, t.rotation, "t", from.rotation);
+                    let scale = scaled(&m.scale, t.scale, "t", from.scale);
+                    let opacity = scaled(&m.opacity, t.opacity, "T", from.opacity);
+
                     let mut chain = vec!["format=rgba".to_string()];
                     if t.flip_h {
                         chain.push("hflip".into());
@@ -528,28 +637,63 @@ pub fn build_filter_graph(plan: &ExportPlan) -> FilterGraph {
                     if t.flip_v {
                         chain.push("vflip".into());
                     }
-                    if t.scale != 1.0 {
+                    if scale.is_none() && t.scale != 1.0 {
                         chain.push(format!("scale=w=iw*{s:.6}:h=ih*{s:.6}", s = t.scale));
                     }
-                    if t.rotation != 0.0 {
+                    let fade = if let Some(e) = &opacity {
+                        // the alpha gain takes no expression, so it is set anew for every frame
+                        let first = m.opacity.first().map_or(t.opacity, |k| k.1) * from.opacity;
+                        Some(format!(
+                            "sendcmd=c='0-1000000 [expr] colorchannelmixer aa {}',colorchannelmixer=aa={first:.4}",
+                            // its commas would end the command: escaped for the command, inside the quotes
+                            e.replace(',', "\\\\,"),
+                        ))
+                    } else if t.opacity != 1.0 {
+                        Some(format!("colorchannelmixer=aa={:.4}", t.opacity))
+                    } else {
+                        None
+                    };
+                    // The alpha gain draws wrongly on frames whose size changes (measured: it keeps to
+                    // the first frame's area), so with an animated scale it comes before the scaling.
+                    let fade_first = scale.is_some();
+                    if fade_first {
+                        chain.extend(fade.clone());
+                    }
+                    if let Some(e) = &rotation {
+                        // a square that holds the picture at any angle: the size cannot change per frame
+                        chain.push(format!(
+                            "rotate=a='({e})*PI/180':ow='hypot(iw,ih)':oh=ow:c=black@0"
+                        ));
+                    } else if t.rotation != 0.0 {
                         let a = t.rotation.to_radians();
                         chain.push(format!(
                             "rotate={a:.6}:ow=rotw({a:.6}):oh=roth({a:.6}):c=black@0"
                         ));
                     }
-                    if t.opacity != 1.0 {
-                        chain.push(format!("colorchannelmixer=aa={:.4}", t.opacity));
+                    if let Some(e) = &scale {
+                        // after the turn: scaling evenly and turning give the same picture in either order
+                        chain.push(format!(
+                            "scale=eval=frame:w='max(2,iw*({e}))':h='max(2,ih*({e}))'"
+                        ));
                     }
-                    parts.push(format!("[c{i}]{}[t{i}]", chain.join(",")));
+                    if !fade_first {
+                        chain.extend(fade);
+                    }
+                    parts.push(format!("[{layer}]{}[t{i}]", chain.join(",")));
+                    let offset = |e: &Option<String>, fixed: f64, size: &str| match e {
+                        Some(e) => format!("({e})*{size}"),
+                        None => format!("{fixed:.3}"),
+                    };
+                    let q = if x.is_none() && y.is_none() { "" } else { "'" };
                     parts.push(format!(
-                        "[v{current}][t{i}]overlay=x=(W-w)/2+({dx:.3}):y=(H-h)/2+({dy:.3}):eof_action=pass:repeatlast=0[v{n}]",
-                        dx = t.x * w as f64,
-                        dy = t.y * h as f64,
+                        "[v{current}][t{i}]overlay=x={q}(W-w)/2+({dx}){q}:y={q}(H-h)/2+({dy}){q}:eof_action=pass:repeatlast=0[v{n}]",
+                        dx = offset(&x, t.x * w as f64, "W"),
+                        dy = offset(&y, t.y * h as f64, "H"),
                         n = current + 1
                     ));
                 }
                 None => parts.push(format!(
-                    "[v{current}][c{i}]overlay=eof_action=pass:repeatlast=0[v{n}]",
+                    "[v{current}][{layer}]overlay=eof_action=pass:repeatlast=0[v{n}]",
                     n = current + 1
                 )),
             }
@@ -1000,6 +1144,63 @@ mod tests {
                 .unwrap_err()
                 .join(";");
             assert!(e.contains("crop"), "{bad:?}: {e}");
+        }
+    }
+
+    #[test]
+    fn keyframes_become_expressions_of_clip_time() {
+        use crate::project::{Key, Keyframes};
+        assert_eq!(piecewise(&[], "T"), "0");
+        assert_eq!(piecewise(&[(1.0, 0.5)], "T"), "0.500000");
+        assert_eq!(
+            piecewise(&[(0.5, -1.0), (2.5, 1.0)], "T"),
+            "if(lt(T,0.500000),-1.000000,if(lt(T,2.500000),(-1.000000)+(2.000000)*(T-(0.500000))/2.000000,1.000000))"
+        );
+
+        // sample: video c1 on t1 at 1..5, source 2..6. A key at source 3 s is 1 s into the clip.
+        let mut p = sample();
+        let c = &mut p.tracks[0].clips[0];
+        c.keyframes = Some(Keyframes {
+            x: Some(vec![Key { t: 3.0, v: 0.0 }, Key { t: 5.0, v: 0.5 }]),
+            ..Default::default()
+        });
+        let plan = build_plan(&p, &opts(), &sample_facts()).unwrap();
+        assert_eq!(
+            plan.clips[0].motion.as_ref().unwrap().x,
+            vec![(1.0, 0.0), (3.0, 0.5)]
+        );
+        let g = build_filter_graph(&plan).graph;
+        assert!(
+            g.contains("overlay=x='(W-w)/2+((if(lt((t-1.000000),1.000000),0.000000,"),
+            "{g}"
+        );
+        assert!(
+            g.contains(")*W)':y='(H-h)/2+(0.000)':eof_action=pass"),
+            "{g}"
+        );
+
+        // twice as fast: half as far into the clip; backwards: counted from the other end
+        let c = &mut p.tracks[0].clips[0];
+        c.speed = Some(2.0);
+        assert_eq!(c.motion().unwrap().x, vec![(0.5, 0.0), (1.5, 0.5)]);
+        c.reversed = Some(true);
+        assert_eq!(c.motion().unwrap().x, vec![(0.5, 0.5), (1.5, 0.0)]);
+
+        // bad keyframes are refused when the project is checked
+        let c = &mut p.tracks[0].clips[0];
+        c.keyframes = Some(Keyframes {
+            scale: Some(vec![Key { t: 3.0, v: 1.0 }, Key { t: 3.0, v: 2.0 }]),
+            opacity: Some(vec![Key { t: 0.0, v: 1.5 }]),
+            rotation: Some(vec![]),
+            ..Default::default()
+        });
+        let errors = validate(&p).unwrap_err().join("\n");
+        for part in [
+            "keyframes.scale: keyframes must be in time order",
+            "keyframes.opacity: every value",
+            "keyframes.rotation: must have 1 to 64",
+        ] {
+            assert!(errors.contains(part), "{errors}");
         }
     }
 

@@ -10,6 +10,7 @@ import { SoundPanel } from "@/components/inspector/SoundPanel";
 import { StyleGallery } from "@/components/inspector/StyleGallery";
 import { TextPanel } from "@/components/inspector/TextPanel";
 import { TransformPanel } from "@/components/inspector/TransformPanel";
+import { TransitionPanel } from "@/components/inspector/TransitionPanel";
 import { UpscalePanel } from "@/components/inspector/UpscalePanel";
 import { Panel } from "@/components/Panel";
 import { assetName, fileName } from "@/lib/media";
@@ -737,6 +738,7 @@ function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset;
         )}
         {active === "video" && <TransformPanel key={`${clip.id}-transform`} clip={clip} />}
         {active === "video" && <CropPanel key={`${clip.id}-crop`} clip={clip} asset={asset} />}
+        {active === "video" && <TransitionPanel key={`${clip.id}-transition`} clip={clip} />}
         {active === "video" && asset.type === "image" && !asset.text && (
           <UpscalePanel key={`${clip.id}-upscale`} clip={clip} asset={asset} />
         )}

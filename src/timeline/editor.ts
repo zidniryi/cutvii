@@ -4,7 +4,7 @@ import { useUiStore } from "@/store/ui";
 import { usePlaybackStore } from "@/store/playback";
 import { useProjectStore } from "@/store/project";
 import { clipEnd, EPS, minClipDuration } from "./clips";
-import type { AudioClean, Crop, FitBackground, FitMode } from "@/project/model";
+import type { AudioClean, ClipTransition, Crop, FitBackground, FitMode } from "@/project/model";
 import {
   addClip,
   addTrack,
@@ -23,6 +23,9 @@ import {
   trimClip,
   type EditResult,
 } from "./edit";
+import { removeKey, setKey } from "./keyframes";
+import { setClipTransition } from "./transitions";
+import type { KeyProp } from "./transform";
 import { detachAudio, setClipClean, setClipDuck, setClipSound, type ClipSound } from "./audio";
 import { setClipColor, setClipLut, type ClipLut, type ColorAdjust } from "./color";
 import { setColorOnAll } from "./looks";
@@ -193,6 +196,23 @@ export function applyColorToAll(color: ColorAdjust | null): EditResult {
 
 export function changeTransform(clipId: string, patch: Partial<Transform> | null): EditResult {
   return run(patch ? "Transform" : "Reset transform", (p) => setClipTransform(p, clipId, patch));
+}
+
+/** Give a clip a transition in, change it, or take it away (`null`). One undo step. */
+export function changeTransition(clipId: string, transition: ClipTransition | null): EditResult {
+  return run(transition ? "Set transition" : "Remove transition", (p) =>
+    setClipTransition(p, clipId, transition),
+  );
+}
+
+/** Set (add or change) the keyframe of `prop` at source time `t`. One undo step. */
+export function changeKey(clipId: string, prop: KeyProp, t: number, v: number): EditResult {
+  return run("Set keyframe", (p) => setKey(p, clipId, prop, t, v));
+}
+
+/** Remove the keyframe of `prop` at source time `t`. One undo step. */
+export function deleteKey(clipId: string, prop: KeyProp, t: number): EditResult {
+  return run("Remove keyframe", (p) => removeKey(p, clipId, prop, t));
 }
 
 export function changeCrop(clipId: string, crop: Crop | null): EditResult {

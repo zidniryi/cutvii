@@ -19,6 +19,15 @@ pub struct ClipLut {
     pub intensity: f64,
 }
 
+/// How a clip comes in (`export/transitions.rs`): one of the kinds in `presets/transitions.json`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClipTransition {
+    pub kind: String,
+    /// Seconds on the timeline; shortened to the clip's length when it is applied.
+    pub duration: f64,
+}
+
 /// Clean-up of a clip's sound (`media/clean.rs`). The export applies it; the preview plays the original.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -164,6 +173,12 @@ pub struct TimelineClip {
     /// Ducking: how far this clip is turned down while other clips make sound, 0 to 1. Absent means off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duck: Option<f64>,
+    /// Keyframes of position, scale, rotation and opacity. Absent means nothing is animated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keyframes: Option<Keyframes>,
+    /// The transition this clip comes in with. Absent means a plain cut.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transition_in: Option<ClipTransition>,
 }
 
 /// The longest fade that can be stored. A fade longer than its clip is shortened when it is applied.
@@ -188,6 +203,61 @@ pub struct Transform {
     pub flip_h: bool,
     pub flip_v: bool,
     pub opacity: f64,
+}
+
+/// Most keyframes one property of a clip may have.
+pub const MAX_KEYS: usize = 64;
+
+/// One keyframe: at source time `t` (seconds in the media, like `sourceIn`) the property is `v`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Key {
+    pub t: f64,
+    pub v: f64,
+}
+
+/// Keyframes of a clip's transform. A property that has keys follows them instead of its fixed value:
+/// straight lines between keys, the first value before the first key, the last value after the last.
+/// Times are source times, so trimming, splitting and speed keep every key on the same picture.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Keyframes {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x: Option<Vec<Key>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y: Option<Vec<Key>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale: Option<Vec<Key>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<Vec<Key>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<Vec<Key>>,
+}
+
+/// A property's name, its keys, and the range its values must stay in.
+pub type KeyTrack<'a> = (&'static str, &'a Option<Vec<Key>>, f64, f64);
+
+impl Keyframes {
+    pub fn tracks(&self) -> [KeyTrack<'_>; 5] {
+        [
+            ("x", &self.x, -MAX_OFFSET, MAX_OFFSET),
+            ("y", &self.y, -MAX_OFFSET, MAX_OFFSET),
+            ("scale", &self.scale, MIN_SCALE, MAX_SCALE),
+            ("rotation", &self.rotation, -MAX_ROTATION, MAX_ROTATION),
+            ("opacity", &self.opacity, 0.0, 1.0),
+        ]
+    }
+}
+
+/// A clip's keyframes ready for the export: `(seconds from the clip's start on the timeline, value)` in
+/// time order. An empty list means the property is not animated.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Motion {
+    pub x: Vec<(f64, f64)>,
+    pub y: Vec<(f64, f64)>,
+    pub scale: Vec<(f64, f64)>,
+    pub rotation: Vec<(f64, f64)>,
+    pub opacity: Vec<(f64, f64)>,
 }
 
 impl Transform {
@@ -273,6 +343,35 @@ impl TimelineClip {
     }
     pub fn speed(&self) -> f64 {
         self.speed.unwrap_or(1.0)
+    }
+    /// The keyframes in clip time (source time through trim, speed and reverse). `None` when there are none.
+    pub fn motion(&self) -> Option<Motion> {
+        let keys = self.keyframes.as_ref()?;
+        let (speed, reversed) = (self.speed(), self.reversed.unwrap_or(false));
+        let local = |list: &Option<Vec<Key>>| -> Vec<(f64, f64)> {
+            let mut out: Vec<(f64, f64)> = list
+                .iter()
+                .flatten()
+                .map(|k| {
+                    let used = if reversed {
+                        self.source_out - k.t
+                    } else {
+                        k.t - self.source_in
+                    };
+                    (used / speed, k.v)
+                })
+                .collect();
+            out.sort_by(|a, b| a.0.total_cmp(&b.0));
+            out
+        };
+        let motion = Motion {
+            x: local(&keys.x),
+            y: local(&keys.y),
+            scale: local(&keys.scale),
+            rotation: local(&keys.rotation),
+            opacity: local(&keys.opacity),
+        };
+        (motion != Motion::default()).then_some(motion)
     }
     /// The fades as they are applied: the fade-in is at most the clip's length, the fade-out takes what
     /// is left. The preview uses the same rule.

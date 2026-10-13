@@ -1,0 +1,12 @@
+[
+  { "id": "dissolve", "name": "Dissolve", "from": { "opacity": 0 } },
+  { "id": "slide-left", "name": "Slide from left", "from": { "x": -1 } },
+  { "id": "slide-right", "name": "Slide from right", "from": { "x": 1 } },
+  { "id": "slide-up", "name": "Slide from below", "from": { "y": 1 } },
+  { "id": "slide-down", "name": "Slide from above", "from": { "y": -1 } },
+  { "id": "zoom-in", "name": "Zoom in", "from": { "scale": 0.3, "opacity": 0 } },
+  { "id": "zoom-out", "name": "Zoom out", "from": { "scale": 1.8, "opacity": 0 } },
+  { "id": "spin", "name": "Spin in", "from": { "scale": 0.3, "rotation": -120, "opacity": 0 } },
+  { "id": "rise", "name": "Rise", "from": { "y": 0.12, "opacity": 0 } },
+  { "id": "tilt", "name": "Tilt", "from": { "scale": 1.15, "rotation": 8, "opacity": 0 } }
+]

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import transitionKinds from "../../presets/transitions.json";
 
 /** Bump when the on-disk shape changes, and add a migration in `src-tauri/src/project/migrate.rs`. v2: clip speed. v3: fitMode. v4: fitBackground. v5: text assets. v6: clip crop, text font, rotation and flip, clip mute and fades, clip colour, text styles. v7: clip LUT. */
 export const SCHEMA_VERSION = 7;
@@ -273,6 +274,46 @@ export const MAX_FADE = 60;
 /** Limits of the clip transform. The same numbers are enforced in Rust (`project/model.rs`). */
 export const TRANSFORM_LIMITS = { offset: 2, minScale: 0.05, maxScale: 4, rotation: 180 } as const;
 
+/** Seconds a transition may last. */
+export const TRANSITION_LIMITS = { min: 0.1, max: 3 } as const;
+
+/** How a clip comes in: one of the kinds in `presets/transitions.json`, and for how long. */
+export const ClipTransitionSchema = z
+  .object({
+    kind: z.string().refine((id) => transitionKinds.some((k) => k.id === id), "is not a transition"),
+    /** Seconds on the timeline; shortened to the clip's length when it is applied. */
+    duration: z.number().min(TRANSITION_LIMITS.min).max(TRANSITION_LIMITS.max),
+  })
+  .strict();
+
+/** Most keyframes one property of a clip may have. */
+export const MAX_KEYS = 64;
+
+/** Keys of one property: 1 to 64, in time order, every value inside the property's range. */
+const keyList = (min: number, max: number) =>
+  z
+    .array(z.object({ t: z.number().nonnegative(), v: z.number().min(min).max(max) }).strict())
+    .min(1)
+    .max(MAX_KEYS)
+    .refine((keys) => keys.every((k, i) => i === 0 || k.t > keys[i - 1].t), {
+      message: "keyframes must be in time order",
+    });
+
+/**
+ * Keyframes of a clip's transform. `t` is a source time (seconds in the media, like `sourceIn`), so
+ * trimming, splitting and speed keep every key on the same picture. A property with keys follows them
+ * instead of its fixed value: straight lines between keys, held before the first and after the last.
+ */
+export const KeyframesSchema = z
+  .object({
+    x: keyList(-TRANSFORM_LIMITS.offset, TRANSFORM_LIMITS.offset).optional(),
+    y: keyList(-TRANSFORM_LIMITS.offset, TRANSFORM_LIMITS.offset).optional(),
+    scale: keyList(TRANSFORM_LIMITS.minScale, TRANSFORM_LIMITS.maxScale).optional(),
+    rotation: keyList(-TRANSFORM_LIMITS.rotation, TRANSFORM_LIMITS.rotation).optional(),
+    opacity: keyList(0, 1).optional(),
+  })
+  .strict();
+
 export const TimelineClipSchema = z
   .object({
     id: Id,
@@ -322,6 +363,10 @@ export const TimelineClipSchema = z
     clean: AudioCleanSchema.optional(),
     /** Ducking: how far this clip is turned down while other clips make sound, 0 to 1; absent means off. */
     duck: z.number().min(0).max(1).optional(),
+    /** Keyframes of position, scale, rotation and opacity; absent means nothing is animated. */
+    keyframes: KeyframesSchema.optional(),
+    /** The transition this clip comes in with; absent means a plain cut. */
+    transitionIn: ClipTransitionSchema.optional(),
   })
   .strict()
   .refine((c) => c.sourceOut > c.sourceIn, {
@@ -401,6 +446,8 @@ export const ProjectSchema = z
 export type ColorAdjust = z.infer<typeof ColorAdjustSchema>;
 export type ClipLut = z.infer<typeof ClipLutSchema>;
 export type AudioClean = z.infer<typeof AudioCleanSchema>;
+export type Keyframes = z.infer<typeof KeyframesSchema>;
+export type ClipTransition = z.infer<typeof ClipTransitionSchema>;
 export type Crop = z.infer<typeof CropSchema>;
 export type TextSpec = z.infer<typeof TextSpecSchema>;
 export type TextStyle = z.infer<typeof TextStyleSchema>;

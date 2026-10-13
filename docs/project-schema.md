@@ -55,6 +55,19 @@ applies it to the clip's sound before speed, volume and fades; the preview plays
 A clip with sound may also carry `duck` (0 to 1): how far it is turned down while the clips that do not duck
 make sound. Absent means off. Export only; the preview plays the clip at its full level.
 
+## Keyframes and transitions (schemaVersion 7)
+
+A clip with a picture may carry `keyframes`: `{ "x", "y", "scale", "rotation", "opacity" }`, each optional
+and each a list of 1 to 64 `{ "t", "v" }` in time order. `t` is a **source time** (seconds in the media, like
+`sourceIn`), so trimming, splitting, speed and reverse keep every key on the same picture. A property that
+has keys follows them instead of its fixed value: straight lines between keys, the first value before the
+first key and the last value after the last. Values stay inside the property's own range.
+
+A clip on a video track may carry `transitionIn`: `{ "kind", "duration" }`. `kind` is an id from
+`presets/transitions.json`; `duration` is 0.1 to 3 seconds on the timeline and is shortened to the clip's
+length when applied. The clip comes in from where the kind starts; a clip that ends on the same track
+exactly where it starts holds its last frame underneath for that time.
+
 ## Crop (schemaVersion 6)
 
 A clip may carry `crop`: `left`, `top`, `right`, `bottom`, each the share (0–0.9) of the source picture cut away

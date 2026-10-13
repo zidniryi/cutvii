@@ -6,6 +6,7 @@ import type { MediaAsset, Project, TimelineClip, TimelineTrack } from "@/project
 import { clipEnd, clipSpeed, EPS } from "@/timeline/clips";
 import { isSoundOnly } from "@/timeline/audio";
 import { isTransformed } from "@/timeline/transform";
+import { holdAfter } from "@/timeline/transitions";
 
 /** Clips starting within this many seconds are mounted (paused) so they are ready when reached. */
 export const PRELOAD_SECONDS = 1;
@@ -25,7 +26,8 @@ export interface Layer {
   clip: TimelineClip;
   track: TimelineTrack;
   asset: MediaAsset;
-  role: "active" | "upcoming";
+  /** "held": the clip has ended and holds its last frame under the next clip's transition. */
+  role: "active" | "upcoming" | "held";
   /**
    * Visible picture layers, from the top track down: every text picture (they are transparent) and the first
    * video or image under them. Whatever lies below that one is covered.
@@ -43,13 +45,26 @@ export function layersAt(project: Project, t: number, horizon = PRELOAD_SECONDS)
       if (!asset) continue;
       const active = clip.timelineStart <= t + EPS && t < clipEnd(clip) - EPS;
       const upcoming = !active && clip.timelineStart > t && clip.timelineStart <= t + horizon;
-      if (active || upcoming)
-        layers.push({ clip, track, asset, role: active ? "active" : "upcoming", visible: false });
+      const end = clipEnd(clip);
+      const held =
+        !active &&
+        track.type === "video" &&
+        asset.type !== "audio" &&
+        t >= end - EPS &&
+        t < end + holdAfter(clip, track.clips) - EPS;
+      if (active || upcoming || held)
+        layers.push({
+          clip,
+          track,
+          asset,
+          role: active ? "active" : held ? "held" : "upcoming",
+          visible: false,
+        });
     }
   }
 
   const pictures = layers.filter(
-    (l) => l.role === "active" && l.track.type === "video" && !l.track.hidden && l.asset.type !== "audio",
+    (l) => l.role !== "upcoming" && l.track.type === "video" && !l.track.hidden && l.asset.type !== "audio",
   );
   // layers are in ascending track order, so walk from the end (the top) down to the first opaque picture
   const shown = new Set<Layer>();
@@ -129,7 +144,7 @@ export function planSync({
   const off = Math.abs(ahead);
   const plan: SyncPlan = {};
 
-  if (role === "upcoming" || !playing) {
+  if (role !== "active" || !playing) {
     if (!paused) plan.pause = true;
     if (off > SEEK_EPSILON) plan.seekTo = desired;
     plan.rate = 1;

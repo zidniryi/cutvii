@@ -1,4 +1,4 @@
-import { Redo2, Undo2, Upload } from "lucide-react";
+import { Gift, Redo2, Undo2, Upload } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { AiMenu } from "@/components/autoclips/AiMenu";
 import { FileMenu } from "@/components/FileMenu";
@@ -35,6 +35,26 @@ export function TopBar() {
       <span className="mx-2 hidden truncate text-sm text-text-muted sm:inline">{name}</span>
       <FileMenu />
       <AiMenu />
+      {/* on narrow screens this lives in the File menu */}
+      <span className="relative hidden sm:inline-flex">
+        {/* no tooltip (the user asked): the name is still there for screen readers */}
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Support CutVii"
+          className="pointer-coarse:size-11"
+          aria-haspopup="dialog"
+          onClick={() => useUiStore.getState().setSupportOpen(true)}
+        >
+          <Gift />
+        </Button>
+        {/* always there (the user asked): it does not go away once the popup has been opened */}
+        <span
+          data-testid="support-dot"
+          aria-hidden
+          className="pointer-events-none absolute top-1 right-1 size-1.5 rounded-full bg-danger"
+        />
+      </span>
       <IconButton
         label={undoLabel ? `Undo ${undoLabel}` : "Undo"}
         icon={<Undo2 />}

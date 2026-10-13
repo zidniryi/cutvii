@@ -5,6 +5,7 @@
  */
 import { TRANSFORM_LIMITS, type Project, type TimelineClip } from "@/project/model";
 import { findClip } from "./clips";
+import { remainingAt, transitionOf } from "./transitions";
 import type { EditResult } from "./edit";
 
 export { TRANSFORM_LIMITS };
@@ -33,7 +34,70 @@ export const NO_TRANSFORM: Transform = {
   opacity: 1,
 };
 
-type Transformable = Pick<TimelineClip, "x" | "y" | "scale" | "opacity" | "rotation" | "flipH" | "flipV">;
+type Transformable = Pick<
+  TimelineClip,
+  "x" | "y" | "scale" | "opacity" | "rotation" | "flipH" | "flipV" | "keyframes" | "transitionIn"
+>;
+
+export interface Key {
+  /** Source time: seconds in the media, like `sourceIn`. */
+  t: number;
+  v: number;
+}
+
+/** The properties that can have keyframes. */
+export const KEY_PROPS = ["x", "y", "scale", "rotation", "opacity"] as const;
+export type KeyProp = (typeof KEY_PROPS)[number];
+
+/**
+ * The value keys give at time `t`: straight lines between keys, the first value before the first key and
+ * the last value after the last. The export builds the same from the same keys (`piecewise` in Rust).
+ */
+export function valueAt(keys: readonly Key[], t: number): number {
+  if (t <= keys[0].t) return keys[0].v;
+  for (let i = 1; i < keys.length; i += 1) {
+    const [a, b] = [keys[i - 1], keys[i]];
+    if (t < b.t) return a.v + ((b.v - a.v) * (t - a.t)) / (b.t - a.t);
+  }
+  return keys[keys.length - 1].v;
+}
+
+type Timed = Transformable &
+  Pick<TimelineClip, "timelineStart" | "sourceIn" | "sourceOut" | "speed" | "reversed">;
+
+/** Source time shown at timeline `time`, kept inside the clip (the rule of `sourceTimeAt`). */
+export function keyTime(clip: Timed, time: number): number {
+  const used = (time - clip.timelineStart) * (clip.speed ?? 1);
+  const t = clip.reversed ? clip.sourceOut - used : clip.sourceIn + used;
+  return Math.min(clip.sourceOut, Math.max(clip.sourceIn, t));
+}
+
+/**
+ * The transform at timeline `time`: every property that has keyframes follows them, and while the clip's
+ * transition runs it is still on its way in from where the transition starts.
+ */
+export function transformAt(clip: Timed, time: number): Transform {
+  const t = transformOf(clip);
+  if (clip.keyframes) {
+    const at = keyTime(clip, time);
+    for (const prop of KEY_PROPS) {
+      const keys = clip.keyframes[prop];
+      if (keys && keys.length > 0) t[prop] = valueAt(keys, at);
+    }
+  }
+  const coming = transitionOf(clip);
+  if (coming) {
+    const left = remainingAt((time - clip.timelineStart) / coming.seconds);
+    if (left > 0) {
+      t.x += coming.from.x * left;
+      t.y += coming.from.y * left;
+      t.rotation += coming.from.rotation * left;
+      t.scale *= 1 + (coming.from.scale - 1) * left;
+      t.opacity *= 1 + (coming.from.opacity - 1) * left;
+    }
+  }
+  return t;
+}
 
 export const transformOf = (clip: Transformable): Transform => ({
   x: clip.x,
@@ -49,13 +113,18 @@ const same = (a: Transform, b: Transform) =>
   (Object.keys(NO_TRANSFORM) as (keyof Transform)[]).every((k) => a[k] === b[k]);
 
 /** A transformed layer no longer covers the canvas, so whatever is on the tracks below shows too. */
-export const isTransformed = (clip: Transformable) => !same(transformOf(clip), NO_TRANSFORM);
+export const isTransformed = (clip: Transformable) =>
+  clip.keyframes !== undefined || clip.transitionIn !== undefined || !same(transformOf(clip), NO_TRANSFORM);
 
 const tidy = (v: number) => Number(v.toFixed(4));
 
 /** CSS for a canvas-sized layer: mirror and scale first, then turn, then move (the export's order). */
-export function transformStyle(clip: Transformable): { transform?: string; opacity?: number } {
-  const t = transformOf(clip);
+export function transformStyle(
+  clip: Transformable | Timed,
+  /** Timeline time, for a clip with keyframes. */
+  time?: number,
+): { transform?: string; opacity?: number } {
+  const t = time !== undefined && "timelineStart" in clip ? transformAt(clip, time) : transformOf(clip);
   const parts: string[] = [];
   if (t.x !== 0 || t.y !== 0) parts.push(`translate(${tidy(t.x * 100)}%, ${tidy(t.y * 100)}%)`);
   if (t.rotation !== 0) parts.push(`rotate(${tidy(t.rotation)}deg)`);
@@ -101,10 +170,12 @@ export function setClipTransform(
       error: { code: "out-of-range", message: "That is outside what a clip can be moved or scaled to" },
     };
   }
-  if (same(current, next)) return { ok: true, project };
+  if (same(current, next) && (patch || !found.clip.keyframes)) return { ok: true, project };
 
   const apply = (c: TimelineClip): TimelineClip => {
     const out: TimelineClip = { ...c, x: next.x, y: next.y, scale: next.scale, opacity: next.opacity };
+    // a reset takes the keyframes away too
+    if (!patch) delete out.keyframes;
     // the optional ones are only stored when they are not the default
     if (next.rotation !== 0) out.rotation = next.rotation;
     else delete out.rotation;

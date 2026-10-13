@@ -7,4 +7,6 @@ pub mod media;
 pub mod menu;
 pub mod project;
 pub mod recent;
+pub mod support;
+pub mod update;
 pub mod upscale;

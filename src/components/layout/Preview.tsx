@@ -28,7 +28,7 @@ import { ensureReversePreviews } from "@/playback/reversePreview";
 import { usePlaybackStore } from "@/store/playback";
 import { reverseKey, useReverseStore, type ReversePreview } from "@/store/reverse";
 import { useProjectStore } from "@/store/project";
-import { clipSpeed, projectDuration } from "@/timeline/clips";
+import { clipEnd, clipSpeed, projectDuration } from "@/timeline/clips";
 import {
   backgroundColor as fitBackgroundColor,
   backgroundOf,
@@ -112,7 +112,11 @@ export function Preview() {
         const speed = clipSpeed(layer.clip);
         // same rule as export: no sound above 4x
         el.muted =
-          monitor.muted || layer.track.muted || (layer.clip.muted ?? false) || speed > MAX_AUDIBLE_SPEED;
+          monitor.muted ||
+          layer.track.muted ||
+          (layer.clip.muted ?? false) ||
+          speed > MAX_AUDIBLE_SPEED ||
+          layer.role === "held"; // a held last frame is a picture only
         const base = previewRate(speed * monitor.previewSpeed).rate; // preview speed is monitor-only
         if ("preservesPitch" in el) el.preservesPitch = layer.clip.keepPitch ?? true;
 
@@ -121,7 +125,12 @@ export function Preview() {
           playing: isPlaying,
           paused: el.paused,
           currentTime: el.currentTime,
-          desired: layer.role === "active" ? sourceTimeFor(layer.clip, playhead) : restTimeFor(layer.clip),
+          desired:
+            layer.role === "active"
+              ? sourceTimeFor(layer.clip, playhead)
+              : layer.role === "held"
+                ? sourceTimeFor(layer.clip, clipEnd(layer.clip) - HELD_FRAME)
+                : restTimeFor(layer.clip),
           lead: layer === lead,
           nudging: base > 0 ? el.playbackRate / base : 1,
         });
@@ -401,6 +410,9 @@ function TextPicture({
   );
 }
 
+/** A held clip rests this far (seconds) before its end: on its last frame, as the export holds it. */
+const HELD_FRAME = 1 / 30;
+
 function LayerView({
   layer,
   register,
@@ -422,6 +434,13 @@ function LayerView({
   onTextShown?: () => void;
 }) {
   const { asset, track, visible } = layer;
+  // Position, scale, rotation, mirroring and opacity of the whole layer (the export does the same). A clip
+  // with keyframes follows the playhead; any other is only drawn again when the clip itself changes.
+  const placed = usePlaybackStore(
+    useShallow((s) =>
+      transformStyle(layer.clip, layer.clip.keyframes || layer.clip.transitionIn ? s.playhead : undefined),
+    ),
+  );
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const setMediaError = usePlaybackStore.getState().setMediaError;
@@ -469,7 +488,6 @@ function LayerView({
   const mode = layer.clip.fitMode ?? DEFAULT_FIT_MODE;
   // Same geometry as the export: computed from the real picture size, never the native pixel size.
   // Position, scale, rotation, mirroring and opacity of the whole layer (the export does the same).
-  const placed = transformStyle(layer.clip);
   // A cropped clip is laid out by what is left of its picture, exactly as the export scales it after cropping.
   const crop = cropOf(layer.clip);
   const kept = croppedSize(asset.width ?? 0, asset.height ?? 0, crop);

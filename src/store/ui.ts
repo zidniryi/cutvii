@@ -33,6 +33,11 @@ interface UiState {
   /** CutVii's own About window. */
   aboutOpen: boolean;
   setAboutOpen: (open: boolean) => void;
+  /** The "Support CutVii" popup. Only a click opens it. */
+  settingsOpen: boolean;
+  setSettingsOpen: (open: boolean) => void;
+  supportOpen: boolean;
+  setSupportOpen: (open: boolean) => void;
   canvasDialogOpen: boolean;
   setCanvasDialogOpen: (open: boolean) => void;
   /** "Canvas set from your first video" banner. Undo is offered while `pastLength` is still the history top. */
@@ -83,6 +88,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   setNewProjectOpen: (newProjectOpen) => set({ newProjectOpen }),
   aboutOpen: false,
   setAboutOpen: (aboutOpen) => set({ aboutOpen }),
+  settingsOpen: false,
+  setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+  supportOpen: false,
+  setSupportOpen: (supportOpen) => set({ supportOpen }),
   canvasDialogOpen: false,
   setCanvasDialogOpen: (canvasDialogOpen) => set({ canvasDialogOpen }),
   canvasNotice: null,

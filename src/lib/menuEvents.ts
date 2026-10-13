@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { newProjectFlow, openProjectFlow, openRecentFlow, saveFlow } from "@/project/fileActions";
 import { useUiStore } from "@/store/ui";
+import { manualCheck } from "@/updates/updates";
 
 const ACTIONS: Record<string, () => unknown> = {
   "new-project": () => newProjectFlow(),
@@ -8,6 +9,12 @@ const ACTIONS: Record<string, () => unknown> = {
   "save-project": () => saveFlow(false),
   "save-project-as": () => saveFlow(true),
   about: () => useUiStore.getState().setAboutOpen(true),
+  "check-updates": () => manualCheck(),
+  settings: () => useUiStore.getState().setSettingsOpen(true),
+  support: () => {
+    useUiStore.getState().setAboutOpen(false);
+    useUiStore.getState().setSupportOpen(true);
+  },
 };
 
 /** Native menu bar (File > New Project, Open Project, Save, Save As) -> the same flows as the in-app menu. */

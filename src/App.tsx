@@ -1,5 +1,9 @@
 import { useEffect } from "react";
 import { AboutDialog } from "@/components/AboutDialog";
+import { SettingsDialog } from "@/components/SettingsDialog";
+import { SupportDialog } from "@/components/SupportDialog";
+import { UpdateDialog } from "@/components/UpdateDialog";
+import { startUpdateWatcher } from "@/updates/updates";
 import { AppDialog } from "@/components/AppDialog";
 import { AutoClipsWizard } from "@/components/autoclips/AutoClipsWizard";
 import { KaraokeDialog } from "@/components/karaoke/KaraokeDialog";
@@ -62,6 +66,7 @@ export default function App() {
   useFileDrop();
   useEffect(() => watchTextPictures(), []);
   useEffect(() => watchLongClips(), []);
+  useEffect(() => startUpdateWatcher(), []);
   useEffect(() => {
     const guard = installCloseGuard();
     const menu = onMenuAction();
@@ -96,6 +101,9 @@ export default function App() {
       <CanvasDialog />
       <AppDialog />
       <AboutDialog />
+      <SupportDialog />
+      <SettingsDialog />
+      <UpdateDialog />
       <StyleEditorSheet />
       <NoticeToast />
     </TooltipProvider>

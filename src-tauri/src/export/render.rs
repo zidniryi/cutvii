@@ -1238,6 +1238,183 @@ mod tests {
     }
 
     #[test]
+    fn keyframes_move_scale_turn_and_fade_a_clip_over_time() {
+        use crate::project::{Key, Keyframes};
+        let Some(e) = env("keyframes") else { return };
+        let (red, blue) = (e.red(), e.blue());
+        // red fills the 640x360 canvas for 2 s; blue lies over it and is animated
+        let render = |name: &str, change: &dyn Fn(&mut crate::project::TimelineClip)| {
+            let mut p = project(
+                vec![
+                    asset("red", &red, "video", Some(4.0)),
+                    asset("blue", &blue, "video", Some(4.0)),
+                ],
+                vec![
+                    track(
+                        "v1",
+                        "video",
+                        0,
+                        false,
+                        false,
+                        vec![clip("c1", "red", "v1", 0.0, 0.0, 2.0, 1.0)],
+                    ),
+                    track(
+                        "v2",
+                        "video",
+                        1,
+                        false,
+                        false,
+                        vec![clip("c2", "blue", "v2", 0.0, 0.0, 2.0, 1.0)],
+                    ),
+                ],
+            );
+            change(&mut p.tracks[1].clips[0]);
+            let out = e.dir.join(name);
+            e.export(&p, &opts(Quality::Draft), &out)
+                .0
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            out
+        };
+        let keys = |a: (f64, f64), b: (f64, f64)| {
+            Some(vec![Key { t: a.0, v: a.1 }, Key { t: b.0, v: b.1 }])
+        };
+        let check = |file: &Path, t: f64, crop: &str, blue: bool| {
+            let c = e.region(file, t, crop);
+            assert!(
+                if blue { is_blue(c) } else { is_red(c) },
+                "{} at {t} s in {crop}: {c:?}",
+                file.display()
+            );
+        };
+
+        // grows from a quarter to three quarters: a spot left of the middle is reached late
+        let grown = render("scale.mp4", &|c| {
+            c.keyframes = Some(Keyframes {
+                scale: keys((0.0, 0.25), (2.0, 0.75)),
+                ..Default::default()
+            })
+        });
+        check(&grown, 0.2, "40:30:180:165", false);
+        check(&grown, 1.8, "40:30:180:165", true);
+        check(&grown, 0.2, "40:30:300:165", true);
+
+        // half size, sliding right; the clip starts at 1 s, so its keys are a second later on the timeline
+        let moved = render("move.mp4", &|c| {
+            (c.timeline_start, c.source_out, c.scale) = (1.0, 1.0, 0.5);
+            c.keyframes = Some(Keyframes {
+                x: keys((0.0, 0.0), (1.0, 0.5)),
+                ..Default::default()
+            })
+        });
+        check(&moved, 0.5, "80:60:280:150", false); // not there yet
+        check(&moved, 1.1, "80:60:280:150", true);
+        check(&moved, 1.1, "80:60:500:150", false);
+        check(&moved, 1.9, "80:60:500:150", true);
+        check(&moved, 1.9, "80:60:200:150", false);
+
+        // fades away
+        let faded = render("fade.mp4", &|c| {
+            c.keyframes = Some(Keyframes {
+                opacity: keys((0.0, 1.0), (2.0, 0.0)),
+                ..Default::default()
+            })
+        });
+        check(&faded, 0.1, "80:60:280:150", true);
+        check(&faded, 1.9, "80:60:280:150", false);
+        let half = e.region(&faded, 1.0, "80:60:280:150");
+        assert!(half.0 > 70 && half.2 > 70, "half way both show: {half:?}");
+
+        // half size, turning a quarter: the 320x180 box ends up standing, so it reaches above the middle
+        let turned = render("turn.mp4", &|c| {
+            c.scale = 0.5;
+            c.keyframes = Some(Keyframes {
+                rotation: keys((0.0, 0.0), (2.0, 90.0)),
+                ..Default::default()
+            })
+        });
+        check(&turned, 0.1, "40:30:300:40", false);
+        check(&turned, 1.9, "40:30:300:40", true);
+        check(&turned, 1.9, "40:30:120:165", false); // and no longer out to the side
+        check(&turned, 0.1, "40:30:180:165", true);
+    }
+
+    #[test]
+    fn a_transition_brings_a_clip_in_over_the_held_last_frame_of_the_one_before() {
+        use crate::project::ClipTransition;
+        let Some(e) = env("transitions") else { return };
+        let (red, blue) = (e.red(), e.blue());
+        // one track: red for a second, then blue for a second
+        let render = |name: &str, kind: Option<&str>| {
+            let mut p = project(
+                vec![
+                    asset("red", &red, "video", Some(4.0)),
+                    asset("blue", &blue, "video", Some(4.0)),
+                ],
+                vec![track(
+                    "v1",
+                    "video",
+                    0,
+                    false,
+                    false,
+                    vec![
+                        clip("c1", "red", "v1", 0.0, 0.0, 1.0, 1.0),
+                        clip("c2", "blue", "v1", 1.0, 0.0, 1.0, 1.0),
+                    ],
+                )],
+            );
+            p.tracks[0].clips[1].transition_in = kind.map(|k| ClipTransition {
+                kind: k.into(),
+                duration: 0.8,
+            });
+            let out = e.dir.join(name);
+            e.export(&p, &opts(Quality::Draft), &out)
+                .0
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            out
+        };
+        let (left, right) = ("80:60:60:150", "80:60:500:150");
+
+        let cut = render("cut.mp4", None);
+        assert!(is_red(e.region(&cut, 0.5, left)) && is_blue(e.region(&cut, 1.1, left)));
+
+        // dissolve: just after the cut the red frame still shows, then both, then blue
+        let dissolve = render("dissolve.mp4", Some("dissolve"));
+        assert!(is_red(e.region(&dissolve, 0.5, left)));
+        let early = e.region(&dissolve, 1.1, left);
+        assert!(
+            is_red(early),
+            "red is held under the incoming clip: {early:?}"
+        );
+        let middle = e.region(&dissolve, 1.4, left);
+        assert!(middle.0 > 60 && middle.2 > 60, "both show: {middle:?}");
+        assert!(is_blue(e.region(&dissolve, 1.9, left)));
+
+        // slide from the left: blue enters at the left edge and reaches the right side last
+        let slide = render("slide.mp4", Some("slide-left"));
+        assert!(
+            is_red(e.region(&slide, 1.15, right)),
+            "{:?}",
+            e.region(&slide, 1.15, right)
+        );
+        assert!(
+            is_blue(e.region(&slide, 1.5, left)),
+            "{:?}",
+            e.region(&slide, 1.5, left)
+        );
+        assert!(is_blue(e.region(&slide, 1.9, right)));
+
+        // every kind renders
+        for kind in crate::export::transitions::kinds() {
+            let out = render(&format!("{}.mp4", kind.id), Some(&kind.id));
+            assert!(
+                is_blue(e.region(&out, 1.9, left)),
+                "{} ends on the clip",
+                kind.id
+            );
+        }
+    }
+
+    #[test]
     fn transformed_clips_show_the_track_below_around_them() {
         let Some(e) = env("transform") else { return };
         let (red, blue) = (e.red(), e.blue());

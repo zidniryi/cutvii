@@ -1,9 +1,27 @@
-import { useState } from "react";
-import { FlipHorizontal, FlipVertical } from "lucide-react";
+import { useId, useState } from "react";
+import { Diamond, FlipHorizontal, FlipVertical } from "lucide-react";
 import type { TimelineClip } from "@/project/model";
 import { cn } from "@/lib/utils";
-import { changeTransform, report } from "@/timeline/editor";
-import { isTransformed, transformOf, type Transform } from "@/timeline/transform";
+import { usePlaybackStore } from "@/store/playback";
+import { changeKey, changeTransform, deleteKey, report } from "@/timeline/editor";
+import { keyAt, keysOf } from "@/timeline/keyframes";
+import {
+  isTransformed,
+  keyTime,
+  transformAt,
+  transformOf,
+  type KeyProp,
+  type Transform,
+} from "@/timeline/transform";
+
+/** The keyframe button of one property. */
+interface Keyed {
+  /** The property has keyframes. */
+  any: boolean;
+  /** One of them is at the playhead. */
+  here: boolean;
+  toggle: () => void;
+}
 
 /** A slider that shows its value. Dragging only moves the number; the clip changes on release. */
 function Slider({
@@ -12,6 +30,7 @@ function Slider({
   min,
   max,
   unit,
+  keyed,
   onCommit,
 }: {
   label: string;
@@ -20,8 +39,10 @@ function Slider({
   min: number;
   max: number;
   unit: string;
+  keyed?: Keyed;
   onCommit: (v: number) => void;
 }) {
+  const id = useId();
   const [draft, setDraft] = useState<number | null>(null);
   const shown = draft ?? value;
   function commit() {
@@ -31,15 +52,35 @@ function Slider({
     if (v !== value) onCommit(v);
   }
   return (
-    <label className="block">
-      <span className="mb-1 flex justify-between text-xs text-text-muted">
-        {label}
-        <span className="tabular-nums">
+    <div>
+      <div className="mb-1 flex items-center justify-between text-xs text-text-muted">
+        <label htmlFor={id}>{label}</label>
+        <span className="flex items-center gap-1 tabular-nums">
           {shown}
           {unit}
+          {keyed && (
+            <button
+              type="button"
+              aria-pressed={keyed.here}
+              aria-label={`${keyed.here ? "Remove keyframe" : "Add keyframe"} for ${label}`}
+              title={keyed.here ? "Remove the keyframe at the playhead" : "Add a keyframe at the playhead"}
+              onClick={keyed.toggle}
+              className={cn(
+                "flex size-6 items-center justify-center rounded pointer-coarse:size-11 [&_svg]:size-3.5",
+                keyed.here
+                  ? "text-accent [&_svg]:fill-current"
+                  : keyed.any
+                    ? "text-accent"
+                    : "text-text-muted hover:text-text",
+              )}
+            >
+              <Diamond />
+            </button>
+          )}
         </span>
-      </span>
+      </div>
       <input
+        id={id}
         type="range"
         min={min}
         max={max}
@@ -54,7 +95,7 @@ function Slider({
         // double-click puts a slider back where it started
         onDoubleClick={() => setDraft(null)}
       />
-    </label>
+    </div>
   );
 }
 
@@ -69,6 +110,9 @@ const toggleClass = (on: boolean) =>
 /**
  * Move, scale, turn, mirror and fade a clip's picture. Smaller or moved pictures let the tracks below show
  * around them (picture-in-picture). Every change is one undo step, and the export does exactly the same.
+ *
+ * Keyframes: the diamond next to a value adds a keyframe at the playhead. A value that has keyframes shows
+ * what it is at the playhead, and changing it there sets (or adds) the keyframe at that moment.
  */
 export function TransformPanel({
   clip,
@@ -78,9 +122,25 @@ export function TransformPanel({
   clip: TimelineClip;
   position?: boolean;
 }) {
-  const t = transformOf(clip);
+  // only a clip with keyframes follows the playhead
+  const playhead = usePlaybackStore((s) => (clip.keyframes ? s.playhead : -1));
+  const t = clip.keyframes ? transformAt(clip, playhead) : transformOf(clip);
   const pct = (v: number) => Math.round(v * 100);
   const set = (patch: Partial<Transform>) => report(changeTransform(clip.id, patch));
+  const now = () => keyTime(clip, usePlaybackStore.getState().playhead);
+  /** Change a value: at the playhead's keyframe when the property is animated, otherwise for the whole clip. */
+  const change = (prop: KeyProp, v: number) =>
+    keysOf(clip, prop).length > 0 ? report(changeKey(clip.id, prop, now(), v)) : set({ [prop]: v });
+  const keyed = (prop: KeyProp): Keyed => ({
+    any: keysOf(clip, prop).length > 0,
+    here: keyAt(clip, prop, keyTime(clip, playhead)) !== undefined,
+    toggle: () => {
+      const at = now();
+      if (keyAt(clip, prop, at)) return void report(deleteKey(clip.id, prop, at));
+      const value = transformAt(clip, usePlaybackStore.getState().playhead)[prop];
+      report(changeKey(clip.id, prop, at, value));
+    },
+  });
 
   return (
     <div role="group" aria-label="Transform" className="space-y-2">
@@ -102,7 +162,8 @@ export function TransformPanel({
         min={5}
         max={400}
         unit="%"
-        onCommit={(v) => set({ scale: v / 100 })}
+        keyed={keyed("scale")}
+        onCommit={(v) => change("scale", v / 100)}
       />
       {position && (
         <div className="grid grid-cols-2 gap-x-3">
@@ -112,7 +173,8 @@ export function TransformPanel({
             min={-100}
             max={100}
             unit="%"
-            onCommit={(v) => set({ x: v / 100 })}
+            keyed={keyed("x")}
+            onCommit={(v) => change("x", v / 100)}
           />
           <Slider
             label="Move down"
@@ -120,7 +182,8 @@ export function TransformPanel({
             min={-100}
             max={100}
             unit="%"
-            onCommit={(v) => set({ y: v / 100 })}
+            keyed={keyed("y")}
+            onCommit={(v) => change("y", v / 100)}
           />
         </div>
       )}
@@ -130,7 +193,8 @@ export function TransformPanel({
         min={-180}
         max={180}
         unit="°"
-        onCommit={(v) => set({ rotation: v })}
+        keyed={keyed("rotation")}
+        onCommit={(v) => change("rotation", v)}
       />
       <Slider
         label="Opacity"
@@ -138,9 +202,16 @@ export function TransformPanel({
         min={0}
         max={100}
         unit="%"
-        onCommit={(v) => set({ opacity: v / 100 })}
+        keyed={keyed("opacity")}
+        onCommit={(v) => change("opacity", v / 100)}
       />
 
+      {clip.keyframes && (
+        <p className="text-xs text-text-muted">
+          Animated: move the playhead and change a value to add another keyframe. Reset transform removes them
+          all.
+        </p>
+      )}
       <div className="grid grid-cols-2 gap-1">
         <button
           type="button"

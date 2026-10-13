@@ -165,6 +165,37 @@ pub fn validate(project: &Project) -> Result<(), Vec<String>> {
                     err(format!("{at}.lut.name: must be 1 to 40 characters"));
                 }
             }
+            if let Some(tr) = &clip.transition_in {
+                use crate::export::transitions::{MAX_TRANSITION, MIN_TRANSITION, find};
+                if find(&tr.kind).is_none() {
+                    err(format!("{at}.transitionIn.kind: is not a transition"));
+                }
+                if !(MIN_TRANSITION..=MAX_TRANSITION).contains(&tr.duration) {
+                    err(format!(
+                        "{at}.transitionIn.duration: must be between {MIN_TRANSITION} and {MAX_TRANSITION} seconds"
+                    ));
+                }
+            }
+            if let Some(keys) = &clip.keyframes {
+                for (name, list, min, max) in keys.tracks() {
+                    let Some(list) = list else { continue };
+                    let here = format!("{at}.keyframes.{name}");
+                    if list.is_empty() || list.len() > MAX_KEYS {
+                        err(format!("{here}: must have 1 to {MAX_KEYS} keyframes"));
+                    }
+                    if list.iter().any(|k| !k.t.is_finite() || k.t < 0.0) {
+                        err(format!("{here}: a keyframe time must be 0 or more"));
+                    }
+                    if list.iter().any(|k| !(min..=max).contains(&k.v)) {
+                        err(format!(
+                            "{here}: every value must be between {min} and {max}"
+                        ));
+                    }
+                    if list.windows(2).any(|w| w[1].t <= w[0].t) {
+                        err(format!("{here}: keyframes must be in time order"));
+                    }
+                }
+            }
             if clip.duck.is_some_and(|d| !(0.0..=1.0).contains(&d)) {
                 err(format!("{at}.duck: must be between 0 and 1"));
             }

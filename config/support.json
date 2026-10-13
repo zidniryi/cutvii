@@ -1,0 +1,22 @@
+{
+  "donateUrl": "https://cutvii.xyz/donate",
+  "supportUrl": "https://cutvii.xyz/support",
+  "locales": {
+    "en": {
+      "title": "Support CutVii",
+      "message": "CutVii is free and open source, and it will stay that way. If it has been useful to you, a small donation helps us keep building it. Supporters get extra template packs (fonts, presets and caption styles), priority support, the chance to suggest new features, and, if you wish, a public thank-you on our social media. Every bit of support is truly appreciated. Thank you!",
+      "donate": "Donate",
+      "other": "Other ways to support",
+      "otherLine": "Star us on GitHub, follow us on YouTube, X and more. It is free and it means a lot.",
+      "footer": "No pressure. CutVii works the same for everyone."
+    },
+    "id": {
+      "title": "Dukung CutVii",
+      "message": "CutVii gratis dan open source, dan akan selalu begitu. Jika aplikasi ini bermanfaat untukmu, donasi kecil sangat membantu kami terus mengembangkannya. Para pendukung mendapat paket template tambahan (font, preset, dan gaya teks), dukungan prioritas, kesempatan mengusulkan fitur baru, serta, jika kamu berkenan, ucapan terima kasih di media sosial kami. Setiap dukungan sangat kami hargai. Terima kasih!",
+      "donate": "Donasi",
+      "other": "Cara lain untuk mendukung",
+      "otherLine": "Beri bintang di GitHub, ikuti kami di YouTube, X, dan lainnya. Gratis dan sangat berarti.",
+      "footer": "Tanpa paksaan. CutVii bekerja sama untuk semua orang."
+    }
+  }
+}

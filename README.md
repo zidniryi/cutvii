@@ -85,6 +85,18 @@ The webview can only reach Rust through a small set of typed commands. File dial
 never supplies a path to read or write; the asset protocol is limited to the thumbnail cache plus files you
 imported or opened; a strict Content-Security-Policy is set for production builds.
 
+## Update check
+
+CutVii can tell you when a newer release exists on GitHub. It is a notification only: nothing is downloaded
+or installed, and "Download" just opens the release page in your browser.
+
+- It is optional: turn off "Check for updates automatically" in Settings and no request is made at all.
+- When it is on, CutVii asks GitHub's releases API at most once every 24 hours, a few seconds after start.
+- The request carries nothing about you or your projects, only `User-Agent: CutVii/<version>`. As with any
+  request, GitHub sees your IP address.
+- The repository to ask is one constant, `UPDATE_REPO` in `src-tauri/src/commands/update.rs`. While it is
+  still the placeholder `OWNER/REPO`, no request is made.
+
 ## Licence
 
 The project licence has not been chosen yet. Add a `LICENSE` file before publishing. See `docs/licensing.md`
