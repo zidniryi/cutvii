@@ -5,6 +5,7 @@ import {
   addClip,
   deleteClip,
   moveClip,
+  placeClip,
   setClipVolume,
   setTrackFlag,
   splitClip,
@@ -86,6 +87,29 @@ describe("moveClip", () => {
     expect(code(moveClip(p, "c1", { start: 0, trackId: IDS.a1 }))).toBe("incompatible-track");
     expect(code(moveClip(p, "c1", { start: -0.5 }))).toBe("out-of-range");
     expect(code(moveClip(p, "zzz", { start: 0 }))).toBe("unknown-clip");
+  });
+
+  it("a clip dropped onto another goes in before or after it, and the rest makes room", () => {
+    // v1: c1 (10 s) at 0..10, c2 (4 s) at 12..16, c3 (4 s) at 16..20
+    let p = must(addClip(makeProject(), { assetId: IDS.vid, trackId: IDS.v1, start: 0, id: "c1" }));
+    p = must(addClip(p, { assetId: IDS.vid2, trackId: IDS.v1, start: 12, id: "c2" }));
+    p = must(addClip(p, { assetId: IDS.vid2, trackId: IDS.v1, start: 16, id: "c3" }));
+    const starts = (q: Project) => Object.fromEntries(q.tracks[0].clips.map((c) => [c.id, c.timelineStart]));
+
+    // the second clip dragged onto the front of the first: it becomes the first, the others move later
+    const swapped = must(placeClip(p, "c2", { start: 1 }));
+    expect(starts(swapped)).toEqual({ c2: 0, c1: 4, c3: 16 }); // c3 had room already: it stays
+    expect(swapped.tracks[0].clips.map((c) => c.id)).toEqual(["c2", "c1", "c3"]);
+
+    // onto the back half of the first: after it, where there was room, so nothing else moves
+    expect(starts(must(placeClip(p, "c2", { start: 7 })))).toEqual({ c1: 0, c2: 10, c3: 16 });
+    // the first clip onto the front of the second: 10 s go in at 12, and both later clips are pushed on
+    expect(starts(must(placeClip(p, "c1", { start: 11 })))).toEqual({ c1: 12, c2: 22, c3: 26 });
+    // a free place is just a move
+    expect(starts(must(placeClip(p, "c3", { start: 30 })))).toEqual({ c1: 0, c2: 12, c3: 30 });
+    // still refused: the wrong kind of track, before 0
+    expect(code(placeClip(p, "c1", { start: 0, trackId: IDS.a1 }))).toBe("incompatible-track");
+    expect(code(placeClip(p, "c1", { start: -1 }))).toBe("out-of-range");
   });
 
   it("moving a clip onto its own old position is not an overlap, and no-ops keep the same project", () => {

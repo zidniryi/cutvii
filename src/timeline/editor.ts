@@ -11,6 +11,7 @@ import {
   applyFitBackgroundToAll,
   deleteClip,
   moveClip,
+  placeClip,
   setClipCrop,
   setClipFit,
   setClipFitBackground,
@@ -108,6 +109,11 @@ export function addAssetToTimeline(
 
 export function moveClipTo(clipId: string, start: number, trackId?: string): EditResult {
   return run("Move clip", (p) => moveClip(p, clipId, { start, trackId }));
+}
+
+/** Drop a clip on the timeline: onto another clip it goes in before or after it and makes room. */
+export function dropClipAt(clipId: string, start: number, trackId?: string): EditResult {
+  return run("Move clip", (p) => placeClip(p, clipId, { start, trackId }));
 }
 
 export function trimClipEdge(clipId: string, edge: "start" | "end", time: number): EditResult {

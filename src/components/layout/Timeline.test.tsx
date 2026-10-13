@@ -80,9 +80,10 @@ describe("Timeline", () => {
     expectValid(state().project);
   });
 
-  it("rejects a drag onto another clip and leaves the project untouched", () => {
+  it("a clip dragged onto the front of another takes its place, and that one moves later", () => {
     addAssetToTimeline(IDS.vid, { start: 0 }); // 0..10
     addAssetToTimeline(IDS.vid2, { start: 12 }); // 12..16
+    const first = clips().find((c) => c.assetId === IDS.vid)!.id;
     const id = clips().find((c) => c.assetId === IDS.vid2)!.id;
     const past = state().past.length;
     setup();
@@ -93,13 +94,14 @@ describe("Timeline", () => {
       clientX: 600,
       clientY: y,
     });
-    fireEvent.pointerMove(window, { clientX: 300, clientY: y }); // -6s -> would start at 6, overlapping
-    expect(screen.getByTestId("drag-ghost")).toBeInTheDocument();
+    fireEvent.pointerMove(window, { clientX: 100, clientY: y }); // -10s -> would start at 2, on the first half
     fireEvent.pointerUp(window);
 
-    expect(findClip(state().project, id)!.clip.timelineStart).toBe(12);
-    expect(state().past).toHaveLength(past);
-    expect(useUiStore.getState().notice).toMatch(/overlap/);
+    expect(findClip(state().project, id)!.clip.timelineStart).toBe(0); // it is the first clip now
+    expect(findClip(state().project, first)!.clip.timelineStart).toBe(4); // and the other follows it
+    expect(state().past).toHaveLength(past + 1); // one undo step for both
+    expect(useUiStore.getState().notice).toBeNull(); // no "would overlap" any more
+    expectValid(state().project);
   });
 
   it("trims with the edge handle", () => {
