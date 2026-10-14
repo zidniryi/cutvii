@@ -8,7 +8,7 @@ mod project;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Release builds abort on a panic and leave only "abort() called" in the crash report, so keep
+    // A panic that does take the app down leaves only "abort() called" in the crash report, so keep
     // the message and location in a file the user can send.
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {

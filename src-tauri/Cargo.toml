@@ -48,5 +48,7 @@ opt-level = 3
 codegen-units = 1
 lto = true
 opt-level = 3
-panic = "abort"
+# NOT "abort": wry catches the Objective-C exception WebKit throws when a media request is answered
+# just after the preview cancelled it (seek / scrub), and that catch cannot work under panic=abort
+# (objc2 `exception::catch` docs). With "abort" every such race closed the app.
 strip = true
