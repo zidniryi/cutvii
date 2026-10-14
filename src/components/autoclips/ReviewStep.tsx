@@ -78,7 +78,9 @@ function Card({
           />
         </label>
         <div className="min-w-0 flex-1 space-y-1.5">
-          {thumbs && <Thumbs clip={clip} path={thumbs} />}
+          {/* Frames only on the selected card: a video element per frame per card made dozens of
+              simultaneous range requests on one big file and crashed the release build. */}
+          {thumbs && selected && <Thumbs clip={clip} path={thumbs} />}
           <input
             aria-label="Clip title"
             className="h-9 w-full rounded-md border border-transparent bg-transparent px-1 text-sm font-medium hover:border-border focus:border-border focus:bg-surface-1 pointer-coarse:h-11 focus-visible:outline-accent"

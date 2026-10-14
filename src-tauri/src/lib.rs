@@ -8,6 +8,20 @@ mod project;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Release builds abort on a panic and leave only "abort() called" in the crash report, so keep
+    // the message and location in a file the user can send.
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        use std::io::Write;
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(std::env::temp_dir().join("cutvii-panic.log"))
+        {
+            let _ = writeln!(file, "{info}");
+        }
+        previous(info);
+    }));
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(commands::project::CurrentProjectPath::default())
