@@ -35,6 +35,12 @@ export interface Layer {
   visible: boolean;
 }
 
+/**
+ * Pictures laid over the tracks below with their transparency and no background of their own: text, and
+ * images with see-through pixels (stickers, logos). The export treats the same assets the same way.
+ */
+export const isSeeThrough = (asset: MediaAsset) => asset.type === "image" && (!!asset.text || !!asset.alpha);
+
 export function layersAt(project: Project, t: number, horizon = PRELOAD_SECONDS): Layer[] {
   const assets = new Map(project.assets.map((a) => [a.id, a]));
   const layers: Layer[] = [];
@@ -70,8 +76,9 @@ export function layersAt(project: Project, t: number, horizon = PRELOAD_SECONDS)
   const shown = new Set<Layer>();
   for (let i = pictures.length - 1; i >= 0; i--) {
     shown.add(pictures[i]);
-    // text is transparent and a transformed clip no longer covers the canvas: keep going down
-    if (!pictures[i].asset.text && !isTransformed(pictures[i].clip)) break;
+    // text and see-through pictures are transparent, and a transformed clip no longer covers the canvas:
+    // keep going down
+    if (!isSeeThrough(pictures[i].asset) && !isTransformed(pictures[i].clip)) break;
   }
   return layers.map((l) => (shown.has(l) ? { ...l, visible: true } : l));
 }

@@ -19,6 +19,7 @@ const MIGRATIONS: &[Migration] = &[
     v4_to_v5,
     v5_to_v6,
     v6_to_v7,
+    v7_to_v8,
 ];
 
 fn no_version_zero(_: Value) -> Result<Value, String> {
@@ -57,6 +58,12 @@ fn v5_to_v6(doc: Value) -> Result<Value, String> {
 
 /// v7 adds the optional `lut` on clips (an imported `.cube` table). Older clips have none: nothing changes.
 fn v6_to_v7(doc: Value) -> Result<Value, String> {
+    Ok(doc)
+}
+
+/// v8 adds the optional `alpha` on image assets (pictures with see-through pixels). Older assets have none and
+/// stay opaque, as they were drawn before: nothing changes.
+fn v7_to_v8(doc: Value) -> Result<Value, String> {
     Ok(doc)
 }
 
@@ -181,9 +188,9 @@ mod tests {
         let v1: Value =
             serde_json::from_str(include_str!("../../../fixtures/project-v1.json")).unwrap();
         let current: Value =
-            serde_json::from_str(include_str!("../../../fixtures/project-v7.json")).unwrap();
+            serde_json::from_str(include_str!("../../../fixtures/project-v8.json")).unwrap();
         let migrated = migrate_to_current(v1).unwrap();
-        assert_eq!(migrated["schemaVersion"], 7);
+        assert_eq!(migrated["schemaVersion"], 8);
         assert_eq!(migrated["tracks"][0]["clips"][0]["speed"], 1);
         assert_eq!(migrated["tracks"][0]["clips"][0]["keepPitch"], true);
         assert_eq!(migrated["tracks"][0]["clips"][0]["fitMode"], "fit");
@@ -211,7 +218,7 @@ mod tests {
         let v2: Value =
             serde_json::from_str(include_str!("../../../fixtures/project-v2.json")).unwrap();
         let current: Value =
-            serde_json::from_str(include_str!("../../../fixtures/project-v7.json")).unwrap();
+            serde_json::from_str(include_str!("../../../fixtures/project-v8.json")).unwrap();
         assert_eq!(migrate_to_current(v2.clone()).unwrap(), current);
 
         // explicit choices are carried over, `blur` is renamed, and the old key is gone
@@ -234,7 +241,7 @@ mod tests {
         let v3: Value =
             serde_json::from_str(include_str!("../../../fixtures/project-v3.json")).unwrap();
         let v4: Value =
-            serde_json::from_str(include_str!("../../../fixtures/project-v7.json")).unwrap();
+            serde_json::from_str(include_str!("../../../fixtures/project-v8.json")).unwrap();
         assert_eq!(migrate_to_current(v3.clone()).unwrap(), v4);
 
         // black project -> black; video-track clips only
@@ -265,7 +272,7 @@ mod tests {
         let v4: Value =
             serde_json::from_str(include_str!("../../../fixtures/project-v4.json")).unwrap();
         let v5: Value =
-            serde_json::from_str(include_str!("../../../fixtures/project-v7.json")).unwrap();
+            serde_json::from_str(include_str!("../../../fixtures/project-v8.json")).unwrap();
         assert_eq!(migrate_to_current(v4).unwrap(), v5);
     }
 
@@ -274,7 +281,7 @@ mod tests {
         let v5: Value =
             serde_json::from_str(include_str!("../../../fixtures/project-v5.json")).unwrap();
         let v6: Value =
-            serde_json::from_str(include_str!("../../../fixtures/project-v7.json")).unwrap();
+            serde_json::from_str(include_str!("../../../fixtures/project-v8.json")).unwrap();
         assert_eq!(migrate_to_current(v5).unwrap(), v6);
     }
 
@@ -283,13 +290,22 @@ mod tests {
         let v6: Value =
             serde_json::from_str(include_str!("../../../fixtures/project-v6.json")).unwrap();
         let v7: Value =
-            serde_json::from_str(include_str!("../../../fixtures/project-v7.json")).unwrap();
+            serde_json::from_str(include_str!("../../../fixtures/project-v8.json")).unwrap();
         assert_eq!(migrate_to_current(v6).unwrap(), v7);
     }
 
     #[test]
+    fn v7_projects_only_get_the_new_version_number() {
+        let v7: Value =
+            serde_json::from_str(include_str!("../../../fixtures/project-v7.json")).unwrap();
+        let v8: Value =
+            serde_json::from_str(include_str!("../../../fixtures/project-v8.json")).unwrap();
+        assert_eq!(migrate_to_current(v7).unwrap(), v8);
+    }
+
+    #[test]
     fn current_version_passes_through_untouched() {
-        let doc = json!({"schemaVersion": 7, "name": "x"});
+        let doc = json!({"schemaVersion": 8, "name": "x"});
         assert_eq!(migrate_to_current(doc.clone()).unwrap(), doc);
     }
 

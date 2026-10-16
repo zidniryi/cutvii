@@ -55,6 +55,7 @@ struct Stream {
     duration: Option<String>,
     avg_frame_rate: Option<String>,
     r_frame_rate: Option<String>,
+    pix_fmt: Option<String>,
     #[serde(default)]
     side_data_list: Vec<SideData>,
     tags: Option<StreamTags>,
@@ -126,6 +127,23 @@ fn parse_seconds(s: &Option<String>) -> Option<f64> {
         .filter(|d| d.is_finite() && *d >= 0.0)
 }
 
+/// Pixel formats that can carry transparency (FFmpeg names): with an alpha plane, or a palette (PNG / GIF
+/// palettes may hold see-through entries).
+pub fn pix_fmt_has_alpha(f: &str) -> bool {
+    [
+        "rgba", "bgra", "argb", "abgr", "ya8", "ya16", "yuva", "gbrap", "pal8",
+    ]
+    .iter()
+    .any(|p| f.starts_with(p))
+}
+
+/// Read the smallest alpha value FFmpeg's `signalstats` printed (`lavfi.signalstats.YMIN=<n>`).
+pub fn parse_min_alpha(out: &str) -> Option<u32> {
+    out.lines()
+        .find_map(|l| l.trim().strip_prefix("lavfi.signalstats.YMIN="))
+        .and_then(|v| v.trim().parse().ok())
+}
+
 /// Turn `ffprobe -print_format json -show_format -show_streams` output into [`MediaInfo`],
 /// checking that the file actually contains the stream kind its extension promised.
 pub fn parse_probe_json(json: &str, media_type: MediaType) -> AppResult<MediaInfo> {
@@ -179,6 +197,11 @@ pub fn parse_probe_json(json: &str, media_type: MediaType) -> AppResult<MediaInf
         height,
         fps_num: rate.map(|r| r.0),
         fps_den: rate.map(|r| r.1),
+        // only a candidate: the backend looks at the pixels before it keeps this
+        alpha: media_type == MediaType::Image
+            && video
+                .and_then(|v| v.pix_fmt.as_deref())
+                .is_some_and(pix_fmt_has_alpha),
     })
 }
 
@@ -315,6 +338,24 @@ pub fn parse_stream_summary(json: &str) -> AppResult<StreamSummary> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_formats_that_can_hold_transparency_are_checked_further() {
+        for f in [
+            "rgba", "bgra", "ya8", "pal8", "rgba64be", "yuva420p", "gbrap",
+        ] {
+            assert!(pix_fmt_has_alpha(f), "{f}");
+        }
+        for f in ["rgb24", "yuvj420p", "gray", "yuv420p"] {
+            assert!(!pix_fmt_has_alpha(f), "{f}");
+        }
+        assert_eq!(
+            parse_min_alpha("frame:0 pts:0\nlavfi.signalstats.YMIN=0\n"),
+            Some(0)
+        );
+        assert_eq!(parse_min_alpha("lavfi.signalstats.YMIN=255"), Some(255));
+        assert_eq!(parse_min_alpha("nothing here"), None);
+    }
 
     const VIDEO_JSON: &str = r#"{"streams":[{"codec_type":"video","width":1920,"height":1080,"duration":"12.500000"},{"codec_type":"audio","duration":"12.48"}],"format":{"duration":"12.500000"}}"#;
     const AUDIO_JSON: &str = r#"{"streams":[{"codec_type":"audio","duration":"60.0"}],"format":{"duration":"60.026000"}}"#;

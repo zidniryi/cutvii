@@ -12,6 +12,8 @@ export interface ImportedMedia {
   /** Exact frame rate of a video, e.g. 30000 / 1001. */
   fpsNum?: number;
   fpsDen?: number;
+  /** A still whose pixels were found to be partly see-through. */
+  alpha?: boolean;
 }
 
 export interface ImportReport {

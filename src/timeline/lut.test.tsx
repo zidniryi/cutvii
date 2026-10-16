@@ -51,7 +51,7 @@ function tableFile(): ArrayBuffer {
 
 describe("a LUT in the project", () => {
   it("is schema version 7: an optional lut per clip, checked in project files", () => {
-    expect(SCHEMA_VERSION).toBe(7);
+    expect(SCHEMA_VERSION).toBe(8);
     const p = withLut(project(), "video", film(0.6));
     expectValid(p);
     expect(clipOf(p, "video").lut).toEqual({ id: FILM.id, name: "Film", intensity: 0.6 });

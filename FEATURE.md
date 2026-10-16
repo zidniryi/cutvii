@@ -59,6 +59,14 @@ unless a line says otherwise.
   with its picture. "Fade out" on one clip and "Fade from black" on the next gives a fade through black.
 - **Crop:** sliders or the preview box; shapes Free, 16:9, 9:16, 1:1, 4:5, 4:3.
 - **Fit:** fill, fit, or fit over a blurred copy; background black, a colour or a picture; apply to all clips.
+- **Move, resize and turn in the preview:** select a picture or video clip and a box appears: drag it to move
+  (it snaps to the centre lines; Alt = free), drag a corner to resize about the clip's own centre, drag the round
+  handle to turn (Shift = steps of 15 degrees). On a Mac trackpad, pinch resizes and a two-finger twist turns.
+  Click a picture in the preview to select its clip. Each gesture is one undo step and sets the same values as
+  Transform in the inspector (a keyframed value gets a keyframe at the playhead).
+- **See-through pictures (stickers, logos):** a picture with transparent pixels (PNG, WebP, GIF) is found on
+  import and laid over the tracks below with its transparency, in the preview and the export. It is fitted whole
+  with no background of its own; size and place it with Transform. A fully opaque RGBA file stays an ordinary picture.
 - **Speed:** presets and custom speed (0.1× to 10×), keep pitch, reverse, freeze frame.
 - **Info:** resolution, codecs, audio details, file size, bit rate, location, Show in Finder / folder, Replace media.
 

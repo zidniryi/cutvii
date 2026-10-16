@@ -324,7 +324,7 @@ pub fn build_plan(
                     .lut
                     .clone()
                     .filter(|l| video && l.intensity > 0.0 && asset.text.is_none()),
-                transparent: asset.text.is_some(),
+                transparent: asset.text.is_some() || asset.alpha == Some(true),
                 video,
                 audio,
             });
@@ -862,7 +862,7 @@ mod tests {
 
     pub fn project(assets: serde_json::Value, tracks: serde_json::Value) -> Project {
         serde_json::from_value(json!({
-            "id": "p", "name": "t", "schemaVersion": 7,
+            "id": "p", "name": "t", "schemaVersion": 8,
             "createdAt": "2026-01-01T00:00:00.000Z", "modifiedAt": "2026-01-01T00:00:00.000Z",
             "settings": {"width": 1280, "height": 720, "fps": 30, "backgroundColor": "#102030"},
             "assets": assets, "tracks": tracks

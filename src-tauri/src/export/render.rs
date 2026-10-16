@@ -666,7 +666,7 @@ mod tests {
     }
     fn project(assets: Vec<Value>, tracks: Vec<Value>) -> Project {
         serde_json::from_value(json!({
-            "id": "p", "name": "t", "schemaVersion": 7,
+            "id": "p", "name": "t", "schemaVersion": 8,
             "createdAt": "2026-01-01T00:00:00.000Z", "modifiedAt": "2026-01-01T00:00:00.000Z",
             "settings": {"width": 640, "height": 360, "fps": 30, "backgroundColor": "#202020"},
             "assets": assets, "tracks": tracks
@@ -967,6 +967,82 @@ mod tests {
             let middle = e.region(&out, t, "400:90:120:135");
             assert!(near(middle, (255, 0, 0), 60), "no text at {t}: {middle:?}");
         }
+    }
+
+    /// A sticker (a picture with see-through pixels) is found to be one on import and keeps its transparency
+    /// in the export: the video below shows around it, not the clip's background colour. A fully opaque RGBA
+    /// picture stays an ordinary one.
+    #[test]
+    fn a_see_through_picture_is_laid_over_the_video_below_it() {
+        let Some(e) = env("alpha") else { return };
+        let red = e.red();
+        // a blue square in the middle of an otherwise fully transparent 320x180 picture
+        let sticker = e.make(
+            "sticker.png",
+            &[
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=black@0.0:s=320x180,format=rgba,drawbox=x=110:y=40:w=100:h=100:c=blue@1.0:t=fill:replace=1",
+                "-frames:v",
+                "1",
+            ],
+        );
+        let opaque = e.make(
+            "opaque.png",
+            &[
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=blue:s=320x180",
+                "-frames:v",
+                "1",
+                "-pix_fmt",
+                "rgba",
+            ],
+        );
+        assert!(e.backend.probe(Path::new(&sticker)).unwrap().alpha);
+        assert!(!e.backend.probe(Path::new(&opaque)).unwrap().alpha);
+
+        let mut picture = asset("sticker", &sticker, "image", None);
+        picture["alpha"] = json!(true);
+        let mut on_top = clip("c2", "sticker", "v2", 1.0, 0.0, 1.0, 1.0);
+        // a fit choice with a background would hide the video; a see-through picture never has one
+        on_top["fitMode"] = json!("fill");
+        let p = project(
+            vec![asset("red", &red, "video", Some(4.0)), picture],
+            vec![
+                track(
+                    "v1",
+                    "video",
+                    0,
+                    false,
+                    false,
+                    vec![clip("c1", "red", "v1", 0.0, 0.0, 3.0, 1.0)],
+                ),
+                track("v2", "video", 1, false, false, vec![on_top]),
+            ],
+        );
+        let out = e.dir.join("alpha.mp4");
+        let (r, _) = e.export(&p, &opts(Quality::Draft), &out);
+        r.unwrap();
+        assert!(e.decodes_cleanly(&out));
+        // the 320x180 picture is fitted whole to the 640x360 canvas: the square is 200x200 in the middle
+        let corner = e.region(&out, 1.5, "80:60:0:0");
+        assert!(
+            near(corner, (255, 0, 0), 60),
+            "video around the sticker: {corner:?}"
+        );
+        let middle = e.region(&out, 1.5, "120:120:260:120");
+        assert!(
+            near(middle, (0, 0, 255), 60),
+            "the sticker's square: {middle:?}"
+        );
+        let middle = e.region(&out, 2.5, "120:120:260:120");
+        assert!(
+            near(middle, (255, 0, 0), 60),
+            "after the sticker clip: {middle:?}"
+        );
     }
 
     /// Auto clips export: each clip is its own small 9:16 project holding one trimmed, canvas-filling clip.

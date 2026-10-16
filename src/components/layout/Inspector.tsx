@@ -778,7 +778,13 @@ function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset;
         tabIndex={0}
         className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3"
       >
-        {active === "video" && (
+        {active === "video" && asset.alpha && (
+          <p className="text-xs text-text-muted">
+            This picture has see-through parts, so it is laid over the tracks below as it is. Use Transform to
+            size and place it.
+          </p>
+        )}
+        {active === "video" && !asset.alpha && (
           <Section id="fit" title="Fit to canvas">
             <FitChips clip={clip} />
             {showsBackground(clip.fitMode ?? DEFAULT_FIT_MODE) && (
@@ -802,11 +808,12 @@ function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset;
           </Section>
         )}
         {active === "transition" && <TransitionPanel key={`${clip.id}-transition`} clip={clip} />}
-        {active === "video" && ((asset.type === "image" && !asset.text) || asset.type === "video") && (
-          <Section id="upscale" title="Upscale with AI">
-            <UpscalePanel key={`${clip.id}-upscale`} clip={clip} asset={asset} />
-          </Section>
-        )}
+        {active === "video" &&
+          ((asset.type === "image" && !asset.text && !asset.alpha) || asset.type === "video") && (
+            <Section id="upscale" title="Upscale with AI">
+              <UpscalePanel key={`${clip.id}-upscale`} clip={clip} asset={asset} />
+            </Section>
+          )}
         {active === "audio" && (
           <Section id="volume" title="Volume and fades">
             <VolumeField

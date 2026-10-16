@@ -299,7 +299,7 @@ mod tests {
     use super::*;
 
     fn fixture() -> Project {
-        serde_json::from_str(include_str!("../../../fixtures/project-v7.json"))
+        serde_json::from_str(include_str!("../../../fixtures/project-v8.json"))
             .expect("fixture parses")
     }
 
@@ -314,7 +314,7 @@ mod tests {
     #[test]
     fn unknown_fields_are_rejected() {
         let mut v: serde_json::Value =
-            serde_json::from_str(include_str!("../../../fixtures/project-v7.json")).unwrap();
+            serde_json::from_str(include_str!("../../../fixtures/project-v8.json")).unwrap();
         v["extra"] = 1.into();
         assert!(serde_json::from_value::<Project>(v).is_err());
     }

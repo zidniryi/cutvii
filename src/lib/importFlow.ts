@@ -28,6 +28,7 @@ export function commitImportedMedia(m: ImportedMedia): CommitResult {
     thumbnailPath: m.thumbnailPath,
     fpsNum: m.fpsNum,
     fpsDen: m.fpsDen,
+    alpha: m.alpha || undefined,
   });
   if (!parsed.success) return { status: "invalid" };
   const result = useProjectStore.getState().addAsset(parsed.data);

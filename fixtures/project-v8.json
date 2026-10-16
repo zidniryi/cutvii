@@ -1,0 +1,113 @@
+{
+  "id": "6f1c2a52-8c7e-4b0e-9d5a-0d6b3d2a1f01",
+  "name": "Fixture project",
+  "schemaVersion": 8,
+  "createdAt": "2026-10-10T12:00:00.000Z",
+  "modifiedAt": "2026-10-10T12:30:00.000Z",
+  "settings": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "backgroundColor": "#000000"
+  },
+  "assets": [
+    {
+      "id": "asset-video",
+      "path": "/media/clip.mp4",
+      "type": "video",
+      "duration": 12.5,
+      "width": 1920,
+      "height": 1080
+    },
+    {
+      "id": "asset-audio",
+      "path": "/media/music.mp3",
+      "type": "audio",
+      "duration": 60
+    },
+    {
+      "id": "asset-image",
+      "path": "/media/logo.png",
+      "type": "image",
+      "width": 512,
+      "height": 512,
+      "thumbnailPath": "/cache/logo.jpg"
+    }
+  ],
+  "tracks": [
+    {
+      "id": "track-v1",
+      "name": "Video 1",
+      "type": "video",
+      "order": 0,
+      "muted": false,
+      "hidden": false,
+      "clips": [
+        {
+          "id": "clip-1",
+          "assetId": "asset-video",
+          "trackId": "track-v1",
+          "timelineStart": 0,
+          "sourceIn": 1,
+          "sourceOut": 6,
+          "volume": 1,
+          "x": 0,
+          "y": 0,
+          "scale": 1,
+          "opacity": 1,
+          "speed": 1,
+          "keepPitch": true,
+          "fitMode": "fit",
+          "fitBackground": {
+            "kind": "black"
+          }
+        },
+        {
+          "id": "clip-2",
+          "assetId": "asset-image",
+          "trackId": "track-v1",
+          "timelineStart": 5,
+          "sourceIn": 0,
+          "sourceOut": 3,
+          "volume": 1,
+          "x": 0,
+          "y": 0,
+          "scale": 1,
+          "opacity": 0.8,
+          "speed": 1,
+          "keepPitch": true,
+          "fitMode": "fit",
+          "fitBackground": {
+            "kind": "black"
+          }
+        }
+      ]
+    },
+    {
+      "id": "track-a1",
+      "name": "Audio 1",
+      "type": "audio",
+      "order": 1,
+      "muted": false,
+      "hidden": false,
+      "clips": [
+        {
+          "id": "clip-3",
+          "assetId": "asset-audio",
+          "trackId": "track-a1",
+          "timelineStart": 0,
+          "sourceIn": 0,
+          "sourceOut": 8,
+          "volume": 0.5,
+          "x": 0,
+          "y": 0,
+          "scale": 1,
+          "opacity": 1,
+          "speed": 1,
+          "keepPitch": true,
+          "fitMode": "fit"
+        }
+      ]
+    }
+  ]
+}

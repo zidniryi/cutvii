@@ -2,7 +2,7 @@ import { z } from "zod";
 import transitionKinds from "../../presets/transitions.json";
 
 /** Bump when the on-disk shape changes, and add a migration in `src-tauri/src/project/migrate.rs`. v2: clip speed. v3: fitMode. v4: fitBackground. v5: text assets. v6: clip crop, text font, rotation and flip, clip mute and fades, clip colour, text styles. v7: clip LUT. */
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 /** Tolerance (seconds) when comparing a clip's sourceOut with the asset duration. */
 const DURATION_EPSILON = 1e-3;
@@ -179,11 +179,17 @@ export const MediaAssetSchema = z
     ...rationalParts,
     /** A text picture drawn by CutVii from these properties; `path` is the drawn picture. Images only. */
     text: TextSpecSchema.optional(),
+    /** A picture with see-through pixels (sticker, logo): laid over the tracks below with no background. */
+    alpha: z.boolean().optional(),
   })
   .strict()
   .refine((a) => a.text === undefined || a.type === "image", {
     message: "only an image asset can be text",
     path: ["text"],
+  })
+  .refine((a) => !a.alpha || a.type === "image", {
+    message: "only an image asset can be transparent",
+    path: ["alpha"],
   })
   .refine((a) => (a.fpsNum === undefined) === (a.fpsDen === undefined), {
     message: "fpsNum and fpsDen must be given together",

@@ -1,7 +1,7 @@
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import fixtureV2 from "../../fixtures/project-v2.json";
-import fixtureV3 from "../../fixtures/project-v7.json";
+import fixtureV3 from "../../fixtures/project-v8.json";
 import App from "@/App";
 import { createProject } from "@/project/factory";
 import type { Project } from "@/project/model";

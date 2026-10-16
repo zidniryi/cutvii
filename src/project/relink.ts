@@ -8,6 +8,8 @@ export interface ReplacementMedia {
   width?: number;
   height?: number;
   thumbnailPath?: string;
+  /** A still whose pixels were found to be partly see-through. */
+  alpha?: boolean;
 }
 
 export type RelinkResult = { ok: true; project: Project } | { ok: false; reason: string };
@@ -42,6 +44,8 @@ export function relinkAsset(project: Project, assetId: string, media: Replacemen
   if (media.width !== undefined) next.width = media.width;
   if (media.height !== undefined) next.height = media.height;
   if (media.thumbnailPath !== undefined) next.thumbnailPath = media.thumbnailPath;
+  // the new file decides whether the picture is see-through
+  if (asset.type === "image" && media.alpha) next.alpha = true;
 
   return {
     ok: true,

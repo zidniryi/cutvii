@@ -54,6 +54,10 @@ pub struct MediaInfo {
     pub fps_num: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fps_den: Option<u32>,
+    /// A still with see-through pixels (a sticker, a logo): it is laid over the tracks below like a text
+    /// picture, with no background of its own. Only set after the pixels were actually checked.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub alpha: bool,
 }
 
 /// Everything a backend needs to render: the resolved plan and where to write.

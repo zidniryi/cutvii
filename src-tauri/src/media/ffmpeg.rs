@@ -5,7 +5,7 @@ use super::MediaType;
 use super::color::ensure_lut;
 use super::probe::{
     MediaDetails, apply_rotation, classify_extension, parse_details, parse_frame_rotation,
-    parse_probe_json, parse_stream_summary,
+    parse_min_alpha, parse_probe_json, parse_stream_summary,
 };
 use super::reverse::{ReverseProfile, SourceShape, extract_frame, reverse_range};
 use super::tools::{FFMPEG_ENV, FFPROBE_ENV, command, locate_tool};
@@ -271,6 +271,27 @@ impl MediaBackend for FfmpegBackend {
                 .and_then(|o| parse_frame_rotation(&String::from_utf8_lossy(&o.stdout)))
             {
                 apply_rotation(&mut info, deg);
+            }
+            // A picture that could be see-through only counts as such when some pixel really is (many
+            // RGBA files are fully opaque). If the check fails, it stays an ordinary picture.
+            if info.alpha {
+                let out = command(&self.ffmpeg)
+                    .args(["-v", "error", "-i"])
+                    .arg(path)
+                    .args([
+                        "-frames:v",
+                        "1",
+                        "-vf",
+                        "format=rgba,alphaextract,signalstats,metadata=mode=print:key=lavfi.signalstats.YMIN:file=-",
+                        "-f",
+                        "null",
+                        "-",
+                    ])
+                    .output();
+                info.alpha = out
+                    .ok()
+                    .and_then(|o| parse_min_alpha(&String::from_utf8_lossy(&o.stdout)))
+                    .is_some_and(|min| min < 255);
             }
         }
         Ok(info)

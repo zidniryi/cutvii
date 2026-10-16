@@ -60,6 +60,9 @@ interface UiState {
   inspectorFocus: { tab: InspectorTab; n: number } | null;
   focusInspectorTab: (tab: InspectorTab) => void;
   /** The clip whose crop box is being adjusted in the preview, if any. */
+  /** Values of a move / resize / turn in progress in the preview; the clip itself changes on release. */
+  transformDraft: { clipId: string; patch: Partial<Record<"x" | "y" | "scale" | "rotation", number>> } | null;
+  setTransformDraft: (draft: UiState["transformDraft"]) => void;
   cropEdit: { clipId: string } | null;
   setCropEdit: (cropEdit: { clipId: string } | null) => void;
   /** Aspect preset chosen for a clip's crop: the crop box keeps this width / height while it is resized. */
@@ -117,6 +120,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   setInspectorTab: (kind, tab) => set((s) => ({ inspectorTab: { ...s.inspectorTab, [kind]: tab } })),
   inspectorFocus: null,
   focusInspectorTab: (tab) => set((s) => ({ inspectorFocus: { tab, n: (s.inspectorFocus?.n ?? 0) + 1 } })),
+  transformDraft: null,
+  setTransformDraft: (transformDraft) => set({ transformDraft }),
   cropEdit: null,
   setCropEdit: (cropEdit) => set({ cropEdit }),
   cropLock: null,

@@ -4,7 +4,7 @@ use crate::media::MediaType;
 use crate::media::color::ColorAdjust;
 use crate::media::text::TextSpec;
 
-pub const SCHEMA_VERSION: u32 = 7;
+pub const SCHEMA_VERSION: u32 = 8;
 
 /// An imported colour table (`.cube`) on a clip. The table itself is not in the project: CutVii keeps its
 /// own checked copy in the app data folder (`media/cube.rs`), found by `id`.
@@ -95,6 +95,10 @@ pub struct MediaAsset {
     /// drawn picture (made again when it is missing), with transparency kept over the tracks below.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<TextSpec>,
+    /// A picture with see-through pixels (a sticker, a logo): kept transparent over the tracks below, like
+    /// a text picture. Images only; absent means opaque.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alpha: Option<bool>,
 }
 
 /// How a video or image clip is scaled to the canvas. Absent means `Fill`.

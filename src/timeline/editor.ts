@@ -33,6 +33,7 @@ import { setColorOnAll } from "./looks";
 import { planPlacement, type DropPlacement } from "./placement";
 import { setTextFade } from "./text";
 import { setClipTransform, type Transform } from "./transform";
+import { setTransformAt } from "./transformBox";
 
 export { newDropPlacement, type DropPlacement, type DropTarget } from "./placement";
 
@@ -202,6 +203,15 @@ export function applyColorToAll(color: ColorAdjust | null): EditResult {
 
 export function changeTransform(clipId: string, patch: Partial<Transform> | null): EditResult {
   return run(patch ? "Transform" : "Reset transform", (p) => setClipTransform(p, clipId, patch));
+}
+
+/** Move, size or turn a clip by hand in the preview: keyed values get a keyframe at `time`. One undo step. */
+export function changeTransformAt(
+  clipId: string,
+  patch: Partial<Record<"x" | "y" | "scale" | "rotation", number>>,
+  time: number,
+): EditResult {
+  return run("Transform", (p) => setTransformAt(p, clipId, patch, time));
 }
 
 /** Give a clip a transition in, change it, or take it away (`null`). One undo step. */

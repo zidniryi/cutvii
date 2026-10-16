@@ -44,6 +44,8 @@ import {
 } from "@/timeline/fit";
 import { useImagePreviewStore } from "@/store/imagePreviews";
 import { ColorCanvas } from "@/components/preview/ColorCanvas";
+import { TransformOverlay } from "@/components/preview/TransformOverlay";
+import { boxCorners, inside, layerBox, ownTransformAt, withDraft } from "@/timeline/transformBox";
 import { useLutStore } from "@/store/luts";
 import { fadeGain, isSoundOnly, soundGain } from "@/timeline/audio";
 import { colorOf, gradeKey, isGraded, lutOf } from "@/timeline/color";
@@ -215,6 +217,43 @@ export function Preview() {
   useEffect(() => {
     if (cropEdit && !cropLayer) useUiStore.getState().setCropEdit(null);
   }, [cropEdit, cropLayer]);
+  // The box for moving, sizing and turning: the one selected clip, when its picture is on screen. Text has
+  // its own drag; crop editing has its own box.
+  const selectedIds = useSelectionStore((s) => s.selectedClipIds);
+  const boxLayer =
+    !cropLayer && selectedIds.length === 1
+      ? layers.find(
+          (l) =>
+            l.clip.id === selectedIds[0] &&
+            l.role === "active" &&
+            l.visible &&
+            l.track.type === "video" &&
+            l.asset.type !== "audio" &&
+            !l.asset.text,
+        )
+      : undefined;
+  /** A press on the picture selects the top clip under the pointer (text is handled by its own drag). */
+  function selectUnder(e: React.PointerEvent<HTMLElement>) {
+    if (e.button !== 0 || e.defaultPrevented) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return;
+    const p = { x: ((e.clientX - r.left) / r.width) * width, y: ((e.clientY - r.top) / r.height) * height };
+    const hit = [...layers].reverse().find((l) => {
+      if (!l.visible || l.role !== "active" || l.track.type !== "video" || l.asset.type === "audio")
+        return false;
+      if (l.asset.text) return false;
+      const corners = boxCorners(
+        layerBox(l.clip, l.asset, { width, height }),
+        ownTransformAt(l.clip, usePlaybackStore.getState().playhead),
+        {
+          width,
+          height,
+        },
+      );
+      return inside(corners, p);
+    });
+    if (hit) useSelectionStore.getState().select(hit.clip.id);
+  }
   const activeErrors = layers
     .filter((l) => l.role === "active" && mediaErrors[l.asset.id])
     .map((l) => `${assetName(l.asset)} ${mediaErrors[l.asset.id]}`);
@@ -236,6 +275,10 @@ export function Preview() {
             data-testid="preview-stage"
             className="relative touch-none overflow-hidden rounded-md border"
             {...textDrag.handlers}
+            onPointerDown={(e) => {
+              textDrag.handlers.onPointerDown(e);
+              selectUnder(e);
+            }}
             style={{
               aspectRatio: ratio,
               width: `min(100cqw, calc(100cqh * ${ratio}))`,
@@ -262,6 +305,15 @@ export function Preview() {
             ))}
 
             {textDrag.guides && <PositionGuides safe={safeMargin} {...textDrag.guides} />}
+
+            {boxLayer && (
+              <TransformOverlay
+                key={boxLayer.clip.id}
+                clip={boxLayer.clip}
+                asset={boxLayer.asset}
+                canvas={{ width, height }}
+              />
+            )}
 
             {cropLayer && (
               <CropOverlay
@@ -436,11 +488,16 @@ function LayerView({
   const { asset, track, visible } = layer;
   // Position, scale, rotation, mirroring and opacity of the whole layer (the export does the same). A clip
   // with keyframes follows the playhead; any other is only drawn again when the clip itself changes.
+  // a move / resize / turn in progress in the preview is shown before it is saved
+  const transformDraft = useUiStore((s) =>
+    s.transformDraft?.clipId === layer.clip.id ? s.transformDraft : null,
+  );
+  const drawn = transformDraft ? withDraft(layer.clip, transformDraft.patch) : layer.clip;
   const placed = usePlaybackStore(
     useShallow((s) =>
       transformStyle(
-        layer.clip,
-        layer.clip.keyframes || layer.clip.transitionIn || layer.clip.transitionOut ? s.playhead : undefined,
+        drawn,
+        drawn.keyframes || drawn.transitionIn || drawn.transitionOut ? s.playhead : undefined,
       ),
     ),
   );
@@ -488,7 +545,9 @@ function LayerView({
   if (isSoundOnly(track, asset)) {
     return <audio ref={register} aria-hidden {...common} />;
   }
-  const mode = layer.clip.fitMode ?? DEFAULT_FIT_MODE;
+  // A see-through picture is always fitted whole with nothing behind it, as the export draws it.
+  const seeThrough = asset.type === "image" && !!asset.alpha;
+  const mode = seeThrough ? "fit" : (layer.clip.fitMode ?? DEFAULT_FIT_MODE);
   // Same geometry as the export: computed from the real picture size, never the native pixel size.
   // Position, scale, rotation, mirroring and opacity of the whole layer (the export does the same).
   // A cropped clip is laid out by what is left of its picture, exactly as the export scales it after cropping.
@@ -551,9 +610,13 @@ function LayerView({
         data-testid="image-layer"
         data-fit={mode}
         className="absolute inset-0 overflow-hidden"
-        style={{ zIndex: track.order, backgroundColor: fitBackgroundColor(background), ...placed }}
+        style={{
+          zIndex: track.order,
+          backgroundColor: seeThrough ? undefined : fitBackgroundColor(background),
+          ...placed,
+        }}
       >
-        {backdropImage}
+        {!seeThrough && backdropImage}
         {layout.backdrop &&
           framed(layout.backdrop, blur, (style) => (
             <img src={src} alt="" aria-hidden className="absolute max-w-none" style={style} />

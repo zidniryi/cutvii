@@ -60,8 +60,8 @@ const visible = (p: Project, t: number) =>
     .map((l) => l.clip.id);
 
 describe("text in the project file", () => {
-  it("is schema version 7: an image asset may carry text, nothing else may", () => {
-    expect(SCHEMA_VERSION).toBe(7);
+  it("is schema version 8: an image asset may carry text, nothing else may", () => {
+    expect(SCHEMA_VERSION).toBe(8);
     const p = withText(2);
     expectValid(p);
     expect(p.assets.at(-1)).toMatchObject({
@@ -425,12 +425,12 @@ describe("moving text in the preview", () => {
     const text = () => screen.getByTestId("text-layer");
     const stored = () => useProjectStore.getState().project.assets.find((a) => a.id === "text")!;
 
-    // pressing beside the text does nothing
+    // pressing beside the text moves nothing; it selects the video under the pointer instead
     fireEvent.pointerDown(stage, { button: 0, clientX: 120, clientY: 60 });
     fireEvent.pointerMove(stage, { clientX: 300, clientY: 200 });
     fireEvent.pointerUp(stage);
     expect(text().style.transform).toBe("");
-    expect(useSelectionStore.getState().selectedClipIds).toEqual([]);
+    expect(useSelectionStore.getState().selectedClipIds).toEqual(["video"]);
 
     // a click on the text selects it without moving it
     fireEvent.pointerDown(stage, { button: 0, clientX: 500, clientY: 275 });
