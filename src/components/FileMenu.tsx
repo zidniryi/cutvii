@@ -19,12 +19,20 @@ import { cn } from "@/lib/utils";
 import { newProjectFlow, openProjectFlow, saveFlow } from "@/project/fileActions";
 import { useSelectionStore } from "@/store/selection";
 import { exportSrt } from "@/timeline/srt";
+import { importSrtFromMenu } from "@/timeline/srtImport";
 
 const ITEMS = [
   { id: "new", label: "New project", Icon: FilePlus2, keys: "", run: () => newProjectFlow() },
   { id: "open", label: "Open…", Icon: FolderOpen, keys: "Ctrl/⌘ O", run: () => openProjectFlow() },
   { id: "save", label: "Save", Icon: Save, keys: "Ctrl/⌘ S", run: () => saveFlow(false) },
   { id: "saveAs", label: "Save as…", Icon: SaveAll, keys: "Ctrl/⌘ Shift S", run: () => saveFlow(true) },
+  {
+    id: "srtImport",
+    label: "Import subtitles (.srt)…",
+    Icon: Captions,
+    keys: "",
+    run: () => importSrtFromMenu(),
+  },
   {
     id: "srt",
     label: "Export subtitles (.srt)…",

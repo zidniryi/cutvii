@@ -100,6 +100,14 @@ unless a line says otherwise.
 
 - **Auto subtitles:** speech to text with Whisper (Tiny, Base, Small, Medium, Large Turbo, Large, and Medium
   Indonesia), language choice, one text clip per line in a chosen subtitle style.
+  Long sentences are cut into readable captions (lines, characters a line, words, time, reading speed;
+  starting limits by canvas shape, editable under "Caption length" and remembered).
+  "Re-split long captions" (Text tab, text clip menu) cuts a track's over-long captions as one undo step;
+  a red "Too long: N lines" badge marks them on the timeline.
+- **Import subtitles (.srt):** File menu, then an Import subtitles dialog: the first cues, a time shift
+  (typed seconds or "First subtitle at the playhead"), the subtitle style / position / size (shared with auto
+  subtitles) and the caption length. Long cues are cut into captions; everything lands on a new track as one
+  undo step.
 - **Subtitles as a file:** "Export subtitles (.srt)…" in a text clip's menu (the texts of its track) and in
   the File menu (the selected text's track, otherwise every text on the timeline).
 - **Auto clips:** finds short clips in a long video, a review step with a player and cut handles, then adds

@@ -624,7 +624,7 @@ pub struct LyricsFile {
 pub fn read_lyrics(path: &Path) -> AppResult<String> {
     let bad = |m: &str| AppError::InvalidInput(m.to_string());
     if std::fs::metadata(path)?.len() > MAX_LYRICS_BYTES {
-        return Err(bad("the file is too large to be lyrics (1 MB at most)"));
+        return Err(bad("the file is too large (1 MB at most)"));
     }
     let bytes = std::fs::read(path)?;
     let text = String::from_utf8(bytes).map_err(|_| bad("this is not a text file"))?;
@@ -638,11 +638,26 @@ pub fn read_lyrics(path: &Path) -> AppResult<String> {
 /// user cancels.
 #[tauri::command]
 pub async fn open_lyrics_file(app: AppHandle) -> AppResult<Option<LyricsFile>> {
+    pick_text_file(app, "Lyrics", &["lrc", "srt", "txt"]).await
+}
+
+/// Native "Import subtitles" dialog (`.srt` only), read like a lyrics file: text, 1 MB at most. `None` when
+/// the user cancels.
+#[tauri::command]
+pub async fn open_srt_file(app: AppHandle) -> AppResult<Option<LyricsFile>> {
+    pick_text_file(app, "Subtitles", &["srt"]).await
+}
+
+async fn pick_text_file(
+    app: AppHandle,
+    kind: &'static str,
+    extensions: &'static [&'static str],
+) -> AppResult<Option<LyricsFile>> {
     tauri::async_runtime::spawn_blocking(move || {
         let Some(path) = app
             .dialog()
             .file()
-            .add_filter("Lyrics", &["lrc", "srt", "txt"])
+            .add_filter(kind, extensions)
             .blocking_pick_file()
             .and_then(|p| p.into_path().ok())
         else {
@@ -658,7 +673,7 @@ pub async fn open_lyrics_file(app: AppHandle) -> AppResult<Option<LyricsFile>> {
         }))
     })
     .await
-    .map_err(|e| AppError::InvalidInput(format!("lyrics task failed: {e}")))?
+    .map_err(|e| AppError::InvalidInput(format!("file task failed: {e}")))?
 }
 
 /// Subtitles longer than this are not written.
@@ -677,6 +692,35 @@ pub fn checked_srt(text: &str) -> AppResult<&str> {
         return Err(bad("the subtitles are not plain text"));
     }
     Ok(text)
+}
+/// The real line count of each text (the rasterizer's wrapping), for the "Too long" warning. At most
+/// `MAX_LINE_COUNTS` texts at once.
+#[tauri::command]
+pub async fn text_line_counts(
+    specs: Vec<TextSpec>,
+    width: u32,
+    height: u32,
+) -> AppResult<Vec<u32>> {
+    if specs.len() > MAX_LINE_COUNTS {
+        return Err(AppError::InvalidInput("too many texts at once".into()));
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        specs
+            .iter()
+            .map(|s| crate::media::text::line_count(s, width, height))
+            .collect()
+    })
+    .await
+    .map_err(|e| AppError::InvalidInput(format!("text task failed: {e}")))?
+}
+const MAX_LINE_COUNTS: usize = 5000;
+
+/// Cut captions into readable pieces (`media/captions.rs`). Pure work; the limits are checked there.
+#[tauri::command]
+pub fn split_captions(
+    request: crate::media::captions::Request,
+) -> AppResult<Vec<crate::media::captions::Caption>> {
+    crate::media::captions::split(&request)
 }
 
 /// Save subtitles as a `.srt` file. The native dialog picks the place; the name only suggests the file
