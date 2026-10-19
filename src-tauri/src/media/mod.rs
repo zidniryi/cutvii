@@ -6,6 +6,7 @@ use std::sync::atomic::AtomicBool;
 
 use serde::{Deserialize, Serialize};
 
+pub mod captions;
 pub mod clean;
 pub mod clipper;
 pub mod clipper_job;

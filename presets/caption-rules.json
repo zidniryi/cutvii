@@ -1,0 +1,44 @@
+{
+  "_note": "How long captions are cut into readable pieces. Read by Rust (media/captions.rs) and the UI (timeline/captionRules.ts). Starting points, not rules of nature.",
+  "landscapeFrom": 1.3,
+  "verticalBelow": 0.7,
+  "uppercaseFactor": 0.85,
+  "defaults": {
+    "landscape": {
+      "maxLines": 2,
+      "maxChars": 42,
+      "maxWords": null,
+      "maxSeconds": 6,
+      "minSeconds": 1,
+      "maxCps": 20
+    },
+    "square": {
+      "maxLines": 2,
+      "maxChars": 32,
+      "maxWords": null,
+      "maxSeconds": 6,
+      "minSeconds": 1,
+      "maxCps": 20
+    },
+    "vertical": {
+      "maxLines": 2,
+      "maxChars": 24,
+      "maxWords": 5,
+      "maxSeconds": 6,
+      "minSeconds": 1,
+      "maxCps": 20
+    }
+  },
+  "ranges": {
+    "maxLines": [1, 4],
+    "maxChars": [10, 80],
+    "maxWords": [1, 30],
+    "maxSeconds": [1, 15],
+    "minSeconds": [0.2, 5],
+    "maxCps": [5, 40]
+  },
+  "functionWords": {
+    "id": ["yang", "dan", "di", "ke", "dari", "untuk", "dengan", "atau", "pada", "itu", "ini"],
+    "en": ["a", "an", "the", "of", "to", "and", "or", "in", "on", "for"]
+  }
+}

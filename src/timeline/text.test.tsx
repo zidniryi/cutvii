@@ -59,6 +59,9 @@ const visible = (p: Project, t: number) =>
     .filter((l) => l.visible)
     .map((l) => l.clip.id);
 
+/** The text pictures drawn so far (other Rust calls, such as line counts, are not drawing). */
+const draws = () => vi.mocked(invoke).mock.calls.filter((c) => c[0] === "render_text");
+
 describe("text in the project file", () => {
   it("is schema version 8: an image asset may carry text, nothing else may", () => {
     expect(SCHEMA_VERSION).toBe(8);
@@ -304,11 +307,13 @@ describe("editing text", () => {
 
   it("keeps what is typed while a redraw is running, and then draws only the newest text", async () => {
     const release: ((v: string) => void)[] = [];
-    vi.mocked(invoke).mockImplementation(() => new Promise<string>((r) => release.push(r)) as never);
+    vi.mocked(invoke).mockImplementation(((cmd: string) =>
+      cmd === "text_line_counts"
+        ? Promise.resolve([1])
+        : new Promise<string>((r) => release.push(r))) as never);
     render(<Inspector />);
     const box = screen.getByRole("textbox", { name: "Text" });
-    const contents = () =>
-      vi.mocked(invoke).mock.calls.map(([, args]) => (args as { spec: TextSpec }).spec.content);
+    const contents = () => draws().map(([, args]) => (args as { spec: TextSpec }).spec.content);
 
     vi.useFakeTimers();
     for (const typed of ["A", "AB", "ABC"]) {
@@ -327,7 +332,7 @@ describe("editing text", () => {
       expect(textOf()).toMatchObject({ path: "/data/text/abc.png", text: { content: "ABC" } }),
     );
     expect(box).toHaveValue("ABC");
-    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(draws()).toHaveLength(2);
   });
 
   it("edits from the inspector: typing waits, the other fields apply at once", async () => {
@@ -338,11 +343,11 @@ describe("editing text", () => {
     vi.useFakeTimers();
     fireEvent.change(box, { target: { value: "Hi" } });
     fireEvent.change(box, { target: { value: "Hi there" } });
-    expect(invoke).not.toHaveBeenCalled(); // still typing
+    expect(draws()).toHaveLength(0); // still typing
     await act(() => vi.advanceTimersByTimeAsync(TYPING_DELAY_MS + 10));
     vi.useRealTimers();
     await waitFor(() => expect(textOf().text?.content).toBe("Hi there"));
-    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(draws()).toHaveLength(1);
 
     fireEvent.change(box, { target: { value: " " } });
     fireEvent.blur(box);

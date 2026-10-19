@@ -20,6 +20,7 @@ interface Props {
   onClips?: () => void;
   /** Present for a text clip: save the texts of its track as a `.srt` file. */
   onSrt?: () => void;
+  onResplit?: () => void;
   onClose: () => void;
 }
 
@@ -33,6 +34,7 @@ export function ContextMenu({
   onAi,
   onClips,
   onSrt,
+  onResplit,
   onClose,
 }: Props) {
   useEffect(() => {
@@ -84,6 +86,11 @@ export function ContextMenu({
       {onClips && (
         <button role="menuitem" className={item} onClick={onClips}>
           <Film className="size-4 text-accent" /> Find short clips…
+        </button>
+      )}
+      {onResplit && (
+        <button role="menuitem" className={item} onClick={onResplit}>
+          <Captions className="size-4" /> Re-split long captions
         </button>
       )}
       {onSrt && (

@@ -1,4 +1,5 @@
 import { ClipPosition } from "@/components/text/PositionControl";
+import { CaptionCheck } from "./CaptionCheck";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AlignCenter, AlignLeft, AlignRight, Bold } from "lucide-react";
 import { FontPicker } from "@/components/inspector/FontPicker";
@@ -256,6 +257,8 @@ export function TextPanel({
           ))}
         </div>
       </div>
+
+      <CaptionCheck clipId={clipId} spec={spec} />
 
       <ClipPosition clipId={clipId} spec={spec} onProblem={setProblem} />
 

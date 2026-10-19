@@ -9,6 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { create } from "zustand";
 import { StylePresetSchema, TextStyleSchema, type StylePreset, type TextStyle } from "@/project/model";
 import { STYLE_PRESETS } from "@/timeline/textStyles";
+import { CaptionLimitsSchema, type CaptionLimits, type CanvasShape } from "@/timeline/captionRules";
 
 export const PREFS_KEY = "cutvii.text-styles.v1";
 export const MAX_OWN_STYLES = 200;
@@ -36,6 +37,15 @@ const PrefsSchema = z
     subtitleSize: z.number().min(0.02).max(0.2).nullable().default(null),
     /** Anchors and guides keep texts inside the safe margin. */
     safeMargin: z.boolean().default(true),
+    /** The user's caption limits per canvas shape; a shape without an entry uses the starting limits. */
+    captionLimits: z
+      .object({
+        landscape: CaptionLimitsSchema.optional(),
+        square: CaptionLimitsSchema.optional(),
+        vertical: CaptionLimitsSchema.optional(),
+      })
+      .strict()
+      .default({}),
   })
   .strict();
 type Prefs = z.infer<typeof PrefsSchema>;
@@ -48,6 +58,7 @@ const EMPTY: Prefs = {
   subtitlePosition: null,
   subtitleSize: null,
   safeMargin: true,
+  captionLimits: {},
 };
 const BUILT_IN = new Set(STYLE_PRESETS.map((p) => p.id));
 
@@ -110,6 +121,8 @@ interface StyleState extends Prefs {
   setSubtitlePosition: (at: { x: number; y: number } | null) => void;
   setSubtitleSize: (share: number | null) => void;
   setSafeMargin: (on: boolean) => void;
+  /** Keep (or with `null` forget) the user's caption limits for a canvas shape. Invalid limits are not kept. */
+  setCaptionLimits: (shape: CanvasShape, limits: CaptionLimits | null) => void;
   /** Replace the whole list of the user's styles (a pack import). Each one is checked; bad ones are dropped. */
   setMine: (mine: StylePreset[]) => void;
   /** Write one of the user's styles to a `.cutvii-textstyle` file they pick. Path, or null if cancelled. */
@@ -133,6 +146,7 @@ const prefsOf = (s: Prefs): Prefs => ({
   subtitlePosition: s.subtitlePosition,
   subtitleSize: s.subtitleSize,
   safeMargin: s.safeMargin,
+  captionLimits: s.captionLimits,
 });
 
 export const useTextStyleStore = create<StyleState>((set, get) => {
@@ -314,6 +328,14 @@ export const useTextStyleStore = create<StyleState>((set, get) => {
         subtitleSize: share !== null && Number.isFinite(share) ? Math.min(0.2, Math.max(0.02, share)) : null,
       })),
     setSafeMargin: (safeMargin) => keep(() => ({ safeMargin })),
+    setCaptionLimits: (shape, limits) =>
+      keep((s) => {
+        const captionLimits = { ...s.captionLimits };
+        const checked = limits && CaptionLimitsSchema.safeParse(limits);
+        if (checked && checked.success) captionLimits[shape] = checked.data;
+        else delete captionLimits[shape];
+        return { captionLimits };
+      }),
     setSubtitleCustom: (id, custom) =>
       keep((s) => {
         const subtitleCustom = { ...s.subtitleCustom };

@@ -66,7 +66,11 @@ export function soundFadesOf(clip: Sounding): { fadeIn: number; fadeOut: number 
   const coming = transitionOf(clip)?.seconds ?? 0;
   const going = transitionOutOf(clip)?.seconds ?? 0;
   if (coming === 0 && going === 0) return fadesOf(clip);
-  return fadesOf({ ...clip, fadeIn: Math.max(clip.fadeIn ?? 0, coming), fadeOut: Math.max(clip.fadeOut ?? 0, going) });
+  return fadesOf({
+    ...clip,
+    fadeIn: Math.max(clip.fadeIn ?? 0, coming),
+    fadeOut: Math.max(clip.fadeOut ?? 0, going),
+  });
 }
 
 /**

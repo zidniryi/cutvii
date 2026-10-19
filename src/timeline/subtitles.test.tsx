@@ -137,6 +137,12 @@ describe("subtitle timing", () => {
   });
 });
 
+/** What `split_captions` answers when nothing needs cutting: every source as one caption. */
+const passThrough = (args: unknown) =>
+  (args as { request: { sources: { start: number; end: number; text: string }[] } }).request.sources.map(
+    (s) => ({ ...s, lines: 1, fast: false }),
+  );
+
 describe("subtitles from the AI tab", () => {
   /** What Rust has on disk and answers; `models` is mutated by a successful download. */
   let models: SpeechModel[];
@@ -162,6 +168,7 @@ describe("subtitles from the AI tab", () => {
       }
       if (cmd === "transcribe_media") return SEGMENTS;
       if (cmd === "render_text") return `/data/text/${args?.spec?.content}.png`;
+      if (cmd === "split_captions") return passThrough(args);
       return undefined;
     }) as never);
   }

@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { ClipView } from "@/components/timeline/ClipView";
 import { TransitionBlock } from "@/components/timeline/TransitionBlock";
+import { TooLongBadge } from "@/components/inspector/CaptionCheck";
 import { ContextMenu, type MenuState } from "@/components/timeline/ContextMenu";
 import { Ruler } from "@/components/timeline/Ruler";
 import { IconButton } from "@/components/IconButton";
@@ -36,6 +37,8 @@ import { selectClipsReady, useAutoClipsStore } from "@/store/autoClips";
 import { useVoiceoverStore } from "@/store/voiceover";
 import { aiKindOf, openAiTools, openAutoClips, openKaraoke } from "@/timeline/ai";
 import { exportSrt, textTrackOf } from "@/timeline/srt";
+import { resplitNotice, resplitTrack } from "@/timeline/resplit";
+import { useUiStore } from "@/store/ui";
 import { copySelected, cutSelected } from "@/timeline/clipboard";
 import { freezeFrameAtPlayhead } from "@/timeline/freeze";
 import { deleteSelected, report, splitAtPlayhead, toggleTrackFlag } from "@/timeline/editor";
@@ -370,6 +373,9 @@ export function Timeline() {
                           onContextMenu={onContextMenu}
                           onActivate={onActivate}
                         />
+                        {asset?.text && (
+                          <TooLongBadge spec={asset.text} left={timeToX(clip.timelineStart, pps) + 2} />
+                        )}
                         {/* a transition is a block of its own over its end of the clip, not part of the clip */}
                         {coming && clip.transitionIn && (
                           <TransitionBlock clip={clip} way="in" seconds={coming.seconds} pps={pps} />
@@ -483,6 +489,15 @@ export function Timeline() {
               ? () => {
                   closeMenu();
                   void exportSrt(menu.clipId);
+                }
+              : undefined
+          }
+          onResplit={
+            textTrackOf(project, menu.clipId)
+              ? () => {
+                  closeMenu();
+                  const trackId = textTrackOf(project, menu.clipId)!;
+                  void resplitTrack(trackId).then((r) => useUiStore.getState().setNotice(resplitNotice(r)));
                 }
               : undefined
           }

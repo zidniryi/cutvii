@@ -456,6 +456,53 @@ fn highlighted(lines: usize, rule: Option<HighlightLines>) -> Vec<bool> {
         .collect()
 }
 
+/// Lay `spec` out in lines exactly as `render` draws it (font, size, wrap width, case, alignment).
+fn shape(font_system: &mut FontSystem, spec: &TextSpec, width: u32, family: &str) -> Buffer {
+    let size = spec.font_size as f32;
+    let box_width = (width as f64 * spec.wrap.unwrap_or(WRAP_WIDTH)) as f32;
+    let mut buffer = Buffer::new(font_system, Metrics::new(size, size * LINE_HEIGHT));
+    buffer.set_size(Some(box_width), None);
+    let attrs = Attrs::new()
+        .family(Family::Name(family))
+        .weight(if spec.bold {
+            Weight::BOLD
+        } else {
+            Weight::NORMAL
+        });
+    let align = match spec.align {
+        TextAlign::Left => Align::Left,
+        TextAlign::Center => Align::Center,
+        TextAlign::Right => Align::Right,
+    };
+    let content = if spec.uppercase {
+        spec.content.to_uppercase()
+    } else {
+        spec.content.clone()
+    };
+    buffer.set_text(&content, &attrs, Shaping::Advanced, Some(align));
+    buffer.shape_until_scroll(font_system, false);
+    buffer
+}
+
+/// How many lines `spec` takes when drawn on a canvas `width` wide: the rasterizer's own wrapping, so a
+/// caption's real line count (explicit breaks plus wrapping) is known without drawing it.
+pub fn line_count(spec: &TextSpec, width: u32, height: u32) -> AppResult<u32> {
+    spec.validate()?;
+    check_canvas(width, height)?;
+    let mut guard = fonts().lock().unwrap_or_else(|e| e.into_inner());
+    let family = spec
+        .font
+        .as_deref()
+        .filter(|f| family_names(guard.system.db()).contains(*f))
+        .unwrap_or(FONT_FAMILY)
+        .to_string();
+    let buffer = shape(&mut guard.system, spec, width, &family);
+    Ok(buffer
+        .layout_runs()
+        .filter(|run| !run.glyphs.is_empty())
+        .count() as u32)
+}
+
 /// Draw `spec` on a transparent canvas. Returns straight-alpha RGBA, `width * height * 4` bytes.
 /// This is the only text rasterizer: the preview shows its picture and the export overlays the same one.
 pub fn render(spec: &TextSpec, width: u32, height: u32) -> AppResult<Vec<u8>> {
@@ -484,27 +531,7 @@ pub fn render(spec: &TextSpec, width: u32, height: u32) -> AppResult<Vec<u8>> {
     } = &mut *guard;
     let size = spec.font_size as f32;
     let box_width = (width as f64 * spec.wrap.unwrap_or(WRAP_WIDTH)) as f32;
-    let mut buffer = Buffer::new(font_system, Metrics::new(size, size * LINE_HEIGHT));
-    buffer.set_size(Some(box_width), None);
-    let attrs = Attrs::new()
-        .family(Family::Name(&family))
-        .weight(if spec.bold {
-            Weight::BOLD
-        } else {
-            Weight::NORMAL
-        });
-    let align = match spec.align {
-        TextAlign::Left => Align::Left,
-        TextAlign::Center => Align::Center,
-        TextAlign::Right => Align::Right,
-    };
-    let content = if spec.uppercase {
-        spec.content.to_uppercase()
-    } else {
-        spec.content.clone()
-    };
-    buffer.set_text(&content, &attrs, Shaping::Advanced, Some(align));
-    buffer.shape_until_scroll(font_system, false);
+    let buffer = shape(font_system, spec, width, &family);
     let block_height = buffer
         .layout_runs()
         .map(|run| run.line_top + run.line_height)
@@ -1054,6 +1081,19 @@ mod tests {
             x: 0.5,
             y: 0.5,
         }
+    }
+
+    #[test]
+    fn line_count_follows_the_rasterizer_breaks_and_wrapping() {
+        assert_eq!(line_count(&spec("One"), W, H).unwrap(), 1);
+        assert_eq!(line_count(&spec("One\nTwo"), W, H).unwrap(), 2);
+        let long = "a caption that is far too long to fit on one line of this small canvas at all";
+        let wrapped = line_count(&spec(long), W, H).unwrap();
+        assert!(wrapped >= 3, "{wrapped}");
+        let mut caps = spec(long);
+        caps.uppercase = true;
+        assert!(line_count(&caps, W, H).unwrap() >= wrapped);
+        assert!(line_count(&spec(""), 0, H).is_err());
     }
 
     /// (left, top, right, bottom) of the painted pixels and the summed alpha.

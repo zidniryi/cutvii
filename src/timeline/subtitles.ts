@@ -10,6 +10,7 @@ import { setTextFade, TEXT_FONT_LIMITS } from "./text";
 import type { TextStyle } from "@/project/model";
 import { DEFAULT_SUBTITLE_POSITION, type Position } from "./textPosition";
 import { withStyle } from "./textStyles";
+import { canvasShape, DEFAULT_CAPTION_LIMITS, splitCaptions, type CaptionLimits } from "./captionRules";
 
 /** One stretch of speech; times are seconds from the start of the clip's used source range. */
 export interface SpeechSegment {
@@ -181,6 +182,8 @@ export async function generateSubtitles(
   at?: Position,
   /** Font size as a share of the canvas height; the usual subtitle size when absent. */
   share?: number,
+  /** How long a caption may be; the starting limits for the canvas shape when absent. */
+  limits?: CaptionLimits,
 ): Promise<SubtitleResult> {
   const before = useProjectStore.getState().project;
   const found = findClip(before, clipId);
@@ -208,16 +211,71 @@ export async function generateSubtitles(
   // the clip may have been edited while listening: place the words by where it is now
   const now = findClip(useProjectStore.getState().project, clipId);
   if (!now) return { ok: false, reason: "The clip was removed while listening" };
-  const subtitles = subtitlesFor(now.clip, Array.isArray(segments) ? segments : []);
-  if (subtitles.length === 0) return { ok: false, reason: "No speech was found in this clip" };
+  const whole = subtitlesFor(now.clip, Array.isArray(segments) ? segments : []);
+  if (whole.length === 0) return { ok: false, reason: "No speech was found in this clip" };
 
   const { width, height } = useProjectStore.getState().project.settings;
-  const wrap = subtitleWrap(now.clip, asset, width, height);
+  return placeSubtitles(whole, {
+    label: "Add subtitles",
+    language,
+    endLimit: now.clip.timelineStart + clipDuration(now.clip),
+    wrap: subtitleWrap(now.clip, asset, width, height),
+    onStage,
+    style,
+    at,
+    share,
+    limits,
+  });
+}
+
+export interface PlaceOptions {
+  /** The undo label. */
+  label: string;
+  /** Language of the words ("id", "en"); null when unknown. */
+  language: string | null;
+  /** No caption runs past this timeline time. */
+  endLimit: number;
+  /** Share of the canvas width the lines may take; the usual text width when absent. */
+  wrap?: number;
+  onStage?: (stage: string) => void;
+  style?: { style: TextStyle; fade?: number };
+  at?: Position;
+  share?: number;
+  /** How long a caption may be; the starting limits for the canvas shape when absent. */
+  limits?: CaptionLimits;
+}
+
+/**
+ * Cut `whole` (timeline times) into readable captions with the one splitter, draw them and put them on a
+ * subtitle track as ONE undo step. Used by auto subtitles and by `.srt` import. Nothing changes on failure.
+ */
+export async function placeSubtitles(whole: Subtitle[], o: PlaceOptions): Promise<SubtitleResult> {
+  const { width, height, fps } = useProjectStore.getState().project.settings;
+  const { style, at, share, onStage = () => {} } = o;
+  // a segment can be a whole long sentence: cut it into captions a viewer can read
+  let subtitles: Subtitle[];
+  try {
+    const pieces = await splitCaptions(
+      whole.map((s) => ({ start: s.start, end: s.start + s.duration, text: s.text })),
+      {
+        limits: o.limits ?? DEFAULT_CAPTION_LIMITS[canvasShape(width, height)],
+        language: o.language,
+        fps,
+        endLimit: o.endLimit,
+        uppercase: style?.style.uppercase === true,
+        bottom: (at ?? DEFAULT_SUBTITLE_POSITION).y >= 0.5,
+      },
+    );
+    subtitles = pieces.map((p) => ({ start: p.start, duration: p.end - p.start, text: p.text }));
+  } catch (e) {
+    return { ok: false, reason: `Could not cut the subtitles into captions: ${message(e)}` };
+  }
+
   const drawn: DrawnSubtitle[] = [];
   try {
     for (const [i, subtitle] of subtitles.entries()) {
       onStage(`Drawing subtitle ${i + 1} of ${subtitles.length}`);
-      const plain = subtitleSpec(subtitle.text, height, at, share, wrap);
+      const plain = subtitleSpec(subtitle.text, height, at, share, o.wrap);
       const spec = style ? withStyle(plain, style.style) : plain;
       const picture = await invoke<string>("render_text", { spec, width, height });
       drawn.push({
@@ -232,9 +290,10 @@ export async function generateSubtitles(
   } catch (e) {
     return { ok: false, reason: `Could not draw the subtitles: ${message(e)}` };
   }
+  if (drawn.length === 0) return { ok: false, reason: "There are no subtitles to add" };
   const trackId = crypto.randomUUID();
   const result = useProjectStore.getState().execute({
-    label: "Add subtitles",
+    label: o.label,
     apply: (p) => addSubtitleClips(p, drawn, trackId),
   });
   if (!result.ok) return { ok: false, reason: result.error.message };
