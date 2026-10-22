@@ -39,22 +39,22 @@ jobs:
         with:
           workspaces: src-tauri
 
-      # Tauri's Linux system dependencies, plus FFmpeg (the Rust tests render real video with it)
+      # Tauri's Linux system dependencies
       - name: Install system packages (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev ffmpeg
-
-      - name: Install FFmpeg (macOS)
-        if: runner.os == 'macOS'
-        run: brew install ffmpeg
-
-      - name: Install FFmpeg (Windows)
-        if: runner.os == 'Windows'
-        run: choco install ffmpeg -y --no-progress
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
 
       - run: pnpm install --frozen-lockfile
+
+      # The FFmpeg the installers ship (pinned GPL build). The Rust tests render real video with this same copy.
+      # Not Chocolatey's: its ffmpeg.exe is a shim that starts the real one, so killing it does not stop the render.
+      - uses: actions/cache@v4
+        with:
+          path: .cache/ffmpeg
+          key: ffmpeg-${{ matrix.ffmpeg }}-${{ hashFiles('config/ffmpeg-binaries.json') }}
+      - run: node scripts/fetch-ffmpeg.mjs --target ${{ matrix.ffmpeg }}
 
       - name: Frontend checks
         run: |
@@ -65,17 +65,15 @@ jobs:
 
       - name: Rust checks
         working-directory: src-tauri
+        env:
+          CUTVII_FFMPEG: ${{ github.workspace }}/src-tauri/binaries/ffmpeg${{ runner.os == 'Windows' && '.exe' || '' }}
+          CUTVII_FFPROBE: ${{ github.workspace }}/src-tauri/binaries/ffprobe${{ runner.os == 'Windows' && '.exe' || '' }}
         run: |
           cargo fmt --check
           cargo clippy --all-targets -- -D warnings
           cargo test
 
       # Packaging check: does the app still bundle on this OS, with its own FFmpeg inside?
-      - uses: actions/cache@v4
-        with:
-          path: .cache/ffmpeg
-          key: ffmpeg-${{ matrix.ffmpeg }}-${{ hashFiles('config/ffmpeg-binaries.json') }}
-      - run: node scripts/fetch-ffmpeg.mjs --target ${{ matrix.ffmpeg }}
       - name: Build bundles
         run: pnpm tauri build --ci
 
