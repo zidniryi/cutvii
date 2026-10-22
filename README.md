@@ -1,4 +1,33 @@
-# CutVii
+<p align="center">
+  <img src="docs/images/logo.png" alt="CutVii logo" width="128" height="128">
+</p>
+
+<h1 align="center">CutVii</h1>
+
+<p align="center"><b>Creative editing. Flexible workflow. On-device AI.</b><br>Version 1.0.0</p>
+
+<p align="center">
+  <a href="https://github.com/zidniryi/cutvii/releases/latest"><img src="https://img.shields.io/github/v/release/zidniryi/cutvii?style=for-the-badge&color=E5733A&label=release" alt="Latest release"></a>
+  <a href="https://github.com/zidniryi/cutvii/releases"><img src="https://img.shields.io/github/downloads/zidniryi/cutvii/total?style=for-the-badge&color=E5733A&label=downloads" alt="Downloads"></a>
+  <a href="https://github.com/zidniryi/cutvii/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/zidniryi/cutvii/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI status"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/zidniryi/cutvii?style=for-the-badge&color=3FB27F" alt="MIT License"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/zidniryi/cutvii/stargazers"><img src="https://img.shields.io/github/stars/zidniryi/cutvii?style=flat-square&color=E5733A" alt="Stars"></a>
+  <a href="https://github.com/zidniryi/cutvii/issues"><img src="https://img.shields.io/github/issues/zidniryi/cutvii?style=flat-square" alt="Issues"></a>
+  <a href="https://github.com/zidniryi/cutvii/commits/main"><img src="https://img.shields.io/github/last-commit/zidniryi/cutvii?style=flat-square" alt="Last commit"></a>
+  <a href="https://github.com/zidniryi/cutvii/graphs/contributors"><img src="https://img.shields.io/github/contributors/zidniryi/cutvii?style=flat-square" alt="Contributors"></a>
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-1C1C1F?style=flat-square" alt="Platforms">
+  <img src="https://img.shields.io/badge/Tauri-2-24C8DB?style=flat-square&logo=tauri&logoColor=white" alt="Tauri 2">
+  <img src="https://img.shields.io/badge/React-TypeScript-61DAFB?style=flat-square&logo=react&logoColor=white" alt="React and TypeScript">
+  <img src="https://img.shields.io/badge/Rust-stable-000000?style=flat-square&logo=rust&logoColor=white" alt="Rust">
+  <img src="https://img.shields.io/badge/offline-first-3FB27F?style=flat-square" alt="Offline first">
+</p>
+
+<p align="center">
+  <img src="docs/images/app-preview.png" alt="CutVii: media library, preview, inspector and timeline" width="900">
+</p>
 
 An open-source, cross-platform desktop video editor: **import → edit on a multi-track timeline → preview → export MP4**.
 Local-first and offline: no account, no analytics, your media is never modified or uploaded. The one thing
@@ -94,10 +123,14 @@ or installed, and "Download" just opens the release page in your browser.
 - When it is on, CutVii asks GitHub's releases API at most once every 24 hours, a few seconds after start.
 - The request carries nothing about you or your projects, only `User-Agent: CutVii/<version>`. As with any
   request, GitHub sees your IP address.
-- The repository to ask is one constant, `UPDATE_REPO` in `src-tauri/src/commands/update.rs`. While it is
-  still the placeholder `OWNER/REPO`, no request is made.
+- The repository to ask is one constant, `UPDATE_REPO` in `src-tauri/src/commands/update.rs`; it is
+  `zidniryi/cutvii`.
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTORS.md](CONTRIBUTORS.md) for how to help and who has.
 
 ## Licence
 
-The project licence has not been chosen yet. Add a `LICENSE` file before publishing. See `docs/licensing.md`
-for the constraints that choice has to respect (FFmpeg, MPL-2.0 crates).
+CutVii is released under the [MIT License](LICENSE). Third-party fonts and dependencies keep their own licences;
+see `docs/licensing.md` for the constraints (FFmpeg is not bundled, MPL-2.0 crates are used unmodified).

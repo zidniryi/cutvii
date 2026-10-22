@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import {
   Captions,
   FilePlus2,
-  FlaskConical,
   FolderOpen,
   Gift,
   Package,
@@ -11,7 +10,7 @@ import {
   SaveAll,
   Settings,
 } from "lucide-react";
-import { manualCheck, showSampleUpdate } from "@/updates/updates";
+import { manualCheck } from "@/updates/updates";
 import { useUiStore } from "@/store/ui";
 import { useStylePackStore } from "@/store/stylePacks";
 import { IconButton } from "@/components/IconButton";
@@ -54,14 +53,6 @@ const ITEMS = [
     Icon: RefreshCw,
     keys: "",
     run: () => manualCheck(),
-  },
-  {
-    // development builds only (filtered out below): look at the update popup with made-up data
-    id: "sample-update",
-    label: "Sample update popup (dev)",
-    Icon: FlaskConical,
-    keys: "",
-    run: () => showSampleUpdate(),
   },
   {
     id: "settings",
@@ -115,26 +106,24 @@ export function FileMenu() {
           aria-label="File"
           className="absolute top-full left-0 z-50 mt-1 min-w-52 rounded-md border bg-popover p-1 shadow-lg"
         >
-          {ITEMS.filter((item) => item.id !== "sample-update" || import.meta.env.DEV).map(
-            ({ id, label, Icon, keys, run }) => (
-              <button
-                key={id}
-                role="menuitem"
-                aria-label={label}
-                className={cn(
-                  "flex h-9 w-full items-center gap-2 rounded-sm px-2 text-left text-sm hover:bg-accent-soft pointer-coarse:h-11",
-                  id === "support" && "sm:hidden",
-                )}
-                onClick={() => {
-                  setOpen(false);
-                  void run();
-                }}
-              >
-                <Icon className="size-4" /> {label}
-                {keys && <kbd className="ml-auto pl-4 text-xs text-text-muted">{keys}</kbd>}
-              </button>
-            ),
-          )}
+          {ITEMS.map(({ id, label, Icon, keys, run }) => (
+            <button
+              key={id}
+              role="menuitem"
+              aria-label={label}
+              className={cn(
+                "flex h-9 w-full items-center gap-2 rounded-sm px-2 text-left text-sm hover:bg-accent-soft pointer-coarse:h-11",
+                id === "support" && "sm:hidden",
+              )}
+              onClick={() => {
+                setOpen(false);
+                void run();
+              }}
+            >
+              <Icon className="size-4" /> {label}
+              {keys && <kbd className="ml-auto pl-4 text-xs text-text-muted">{keys}</kbd>}
+            </button>
+          ))}
         </div>
       )}
     </div>

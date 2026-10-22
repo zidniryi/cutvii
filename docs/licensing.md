@@ -41,7 +41,7 @@ not a reliable option on Android; the media backend there is decided in Phase 8.
 
 1. Ship FFmpeg at all, or require users to install it? (Today: users install it.)
 2. If shipping: LGPL build (needs an encoder plan, see above) or GPL build (then document the combined licensing).
-3. Pick the CutVii licence (none chosen yet).
+3. The CutVii licence is MIT (`LICENSE`, chosen 2026-10-22). Every dependency listed below is compatible with it.
 
 To bundle a binary later, Tauri's sidecar mechanism (`bundle.externalBin`, `binaries/ffmpeg-<target-triple>`) is the
 intended route; the lookup in `src-tauri/src/media/tools.rs` is where a bundled path would be checked first.

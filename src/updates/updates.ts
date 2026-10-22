@@ -129,9 +129,6 @@ export async function manualCheck(now = Date.now()): Promise<void> {
       });
     } else if (status.status === "upToDate") {
       useUpdateStore.setState({ manual: { kind: "upToDate", current: status.current } });
-    } else if (import.meta.env.DEV && import.meta.env.MODE !== "test") {
-      // a development build with no repository set: show the popup with made-up data, to look at it
-      showSampleUpdate();
     } else {
       useUpdateStore.setState({ manual: { kind: "notSet" } });
     }
@@ -160,23 +157,6 @@ export async function downloadUpdate(): Promise<void> {
   } catch (e) {
     useUiStore.getState().setNotice(`Could not open the release page: ${message(e)}`);
   }
-}
-
-/**
- * Development only: put the popup on screen with made-up data, to look at it. No request is made. Its
- * Download button is refused by Rust (the address is not a real release page), which shows as a notice.
- */
-export function showSampleUpdate(): void {
-  useUpdateStore.setState({
-    manual: null,
-    pending: null,
-    offer: {
-      version: "9.9.9",
-      notes:
-        "SAMPLE DATA, not a real release.\nNew: transitions between clips\nNew: keyframes for position, scale, rotation and opacity\nFixed: a few export problems",
-      url: "https://github.com/OWNER/REPO/releases/tag/v9.9.9",
-    },
-  });
 }
 
 export const closeManualResult = () => useUpdateStore.setState({ manual: null });

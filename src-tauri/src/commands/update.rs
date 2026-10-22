@@ -14,9 +14,8 @@ use serde::Serialize;
 use super::support::open_in_browser;
 use crate::errors::{AppError, AppResult};
 
-/// The project's repository on GitHub, as `owner/name`. THE one place to set it. While it is still the
-/// placeholder below, no request is ever made.
-pub const UPDATE_REPO: &str = "OWNER/REPO";
+/// The project's repository on GitHub, as `owner/name`. THE one place to set it.
+pub const UPDATE_REPO: &str = "zidniryi/cutvii";
 
 const API_HOST: &str = "https://api.github.com/";
 const TIMEOUT: Duration = Duration::from_secs(5);
@@ -369,7 +368,6 @@ mod tests {
     #[test]
     fn the_placeholder_repo_asks_nothing() {
         for repo in [
-            UPDATE_REPO,
             "OWNER/REPO",
             "",
             "no-slash",
