@@ -44,8 +44,12 @@ including the heavy display face Anton (OFL 1.1, © 2020 The Anton Project Autho
 ## Install
 
 Download the installer for your system from the [releases page](https://github.com/zidniryi/cutvii/releases). FFmpeg
-is included, so there is nothing else to install. The builds are not code-signed yet, so macOS and Windows will
-warn about an unknown developer the first time.
+is included, so there is nothing else to install. The builds are not code-signed yet, so your system will warn you
+the first time:
+
+- **macOS:** if it says CutVii is "damaged", run `xattr -cr /Applications/CutVii.app` in Terminal once, then open it again.
+- **Windows:** if SmartScreen blocks it, click "More info", then "Run anyway".
+- **Linux:** `chmod +x CutVii*.AppImage`, then run it (or install the `.deb`).
 
 ## Install and run (development)
 

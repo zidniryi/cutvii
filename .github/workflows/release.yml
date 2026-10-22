@@ -74,7 +74,13 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: CutVii ${{ github.ref_name }}
-          releaseBody: See the assets below to download CutVii. Builds are not code-signed yet.
+          releaseBody: |
+            Download the installer for your system below. FFmpeg is included.
+
+            **These builds are not code-signed yet**, so your system will warn you the first time:
+            - **macOS:** if it says CutVii is "damaged", open Terminal and run `xattr -cr /Applications/CutVii.app` once, then open it again.
+            - **Windows:** if SmartScreen blocks it, click "More info", then "Run anyway".
+            - **Linux:** `chmod +x CutVii*.AppImage`, then run it (or install the `.deb`).
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
