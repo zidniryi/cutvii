@@ -1,6 +1,6 @@
 name: Release
 
-# Push a tag like v1.0.0 to build installers for macOS (Apple Silicon + Intel), Windows and Linux and attach
+# Push a tag like v1.0.0 to build installers for macOS (Apple Silicon), Windows and Linux and attach
 # them to a DRAFT GitHub release. Review the draft, then publish it. The builds are not code-signed.
 on:
   push:
@@ -16,6 +16,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
+      # No macOS Intel build: ONNX Runtime (the `ort` crate, used by upscale and voice-over) has no prebuilt
+      # library for x86_64-apple-darwin.
       matrix:
         include:
           - {
@@ -24,13 +26,6 @@ jobs:
               args: "--target aarch64-apple-darwin",
               rust: aarch64-apple-darwin,
               ffmpeg: macos-arm64,
-            }
-          - {
-              name: macOS (Intel),
-              os: macos-15-intel,
-              args: "--target x86_64-apple-darwin",
-              rust: x86_64-apple-darwin,
-              ffmpeg: macos-x64,
             }
           - { name: Linux, os: ubuntu-24.04, args: "", rust: "", ffmpeg: linux-x64 }
           - { name: Windows, os: windows-latest, args: "", rust: "", ffmpeg: windows-x64 }
