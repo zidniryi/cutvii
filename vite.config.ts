@@ -41,5 +41,7 @@ export default defineConfig(() => ({
     setupFiles: ["./src/test/setup.ts"],
     globals: true,
     css: false,
+    // CI runners (Windows especially) are slow: a test that takes 1 s here took more than 5 s there
+    testTimeout: 30_000,
   },
 }));
