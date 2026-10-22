@@ -10,7 +10,6 @@
   <a href="https://github.com/zidniryi/cutvii/releases/latest"><img src="https://img.shields.io/github/v/release/zidniryi/cutvii?style=for-the-badge&color=E5733A&label=release" alt="Latest release"></a>
   <a href="https://github.com/zidniryi/cutvii/releases"><img src="https://img.shields.io/github/downloads/zidniryi/cutvii/total?style=for-the-badge&color=E5733A&label=downloads" alt="Downloads"></a>
   <a href="https://github.com/zidniryi/cutvii/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/zidniryi/cutvii/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI status"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/zidniryi/cutvii?style=for-the-badge&color=3FB27F" alt="MIT License"></a>
 </p>
 
 <p align="center">
