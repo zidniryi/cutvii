@@ -14,10 +14,6 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/zidniryi/cutvii/stargazers"><img src="https://img.shields.io/github/stars/zidniryi/cutvii?style=flat-square&color=E5733A" alt="Stars"></a>
-  <a href="https://github.com/zidniryi/cutvii/issues"><img src="https://img.shields.io/github/issues/zidniryi/cutvii?style=flat-square" alt="Issues"></a>
-  <a href="https://github.com/zidniryi/cutvii/commits/main"><img src="https://img.shields.io/github/last-commit/zidniryi/cutvii?style=flat-square" alt="Last commit"></a>
-  <a href="https://github.com/zidniryi/cutvii/graphs/contributors"><img src="https://img.shields.io/github/contributors/zidniryi/cutvii?style=flat-square" alt="Contributors"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-1C1C1F?style=flat-square" alt="Platforms">
   <img src="https://img.shields.io/badge/Tauri-2-24C8DB?style=flat-square&logo=tauri&logoColor=white" alt="Tauri 2">
   <img src="https://img.shields.io/badge/React-TypeScript-61DAFB?style=flat-square&logo=react&logoColor=white" alt="React and TypeScript">
