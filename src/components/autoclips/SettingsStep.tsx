@@ -1,11 +1,20 @@
-import { useEffect } from "react";
-import { Check, Download, ShieldCheck, Timer } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Check, Download, FileText, ShieldCheck, Timer } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { downloadWithConsent, modelSize, SPEECH_LANGUAGES, useAiStore } from "@/store/ai";
 import { usableModel, useAutoClipsStore } from "@/store/autoClips";
 import { subtitleStyleOf, useTextStyleStore } from "@/store/textStyles";
 import { useUiStore } from "@/store/ui";
+import { formatDuration } from "@/lib/timecode";
+import { useProjectStore } from "@/store/project";
+import { findClip } from "@/timeline/clips";
 import {
+  chooseTranscript,
+  findTranscriptsNear,
+  type TranscriptInfo,
+  clampOffset,
+  durationWarning,
+  OFFSET_LIMIT,
   COUNT_CHOICES,
   LENGTH_LIMITS,
   LENGTH_PRESETS,
@@ -27,9 +36,18 @@ const chip = (on: boolean) =>
 const fieldClass =
   "h-9 rounded-md border bg-surface-2 px-2 text-sm pointer-coarse:h-11 focus-visible:outline-accent";
 
-function Group({ title, children }: { title: string; children: React.ReactNode }) {
+function Group({
+  title,
+  children,
+  className,
+}: {
+  title: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <fieldset className="space-y-2">
+    // min-w-0: a fieldset will not shrink below its content, so a long file name pushed it over the next column
+    <fieldset className={cn("min-w-0 space-y-2", className)}>
       <legend className="mb-1 text-xs font-medium text-text-muted">{title}</legend>
       {children}
     </fieldset>
@@ -51,6 +69,178 @@ function Soon({ label }: { label: string }) {
 
 const minutes = (seconds: number) =>
   seconds < 90 ? `${Math.max(1, Math.round(seconds))} s` : `${Math.round(seconds / 60)} min`;
+
+/**
+ * Transcript files found in the video's own folder. They are only suggested: nothing is switched on until
+ * the user presses "Use". With the file source on, the same list lets them switch between candidates.
+ */
+function NearbyTranscripts({ disabled }: { disabled: boolean }) {
+  const source = useAutoClipsStore((s) => s.settings.source);
+  const chosen = useAutoClipsStore((s) => s.settings.transcript);
+  const clipId = useAutoClipsStore((s) => s.clipId);
+  const patch = useAutoClipsStore((s) => s.patchSettings);
+  const project = useProjectStore((s) => s.project);
+  const [near, setNear] = useState<{ path: string; list: TranscriptInfo[] } | null>(null);
+  const clip = clipId ? findClip(project, clipId)?.clip : undefined;
+  const videoPath = clip && project.assets.find((a) => a.id === clip.assetId)?.path;
+
+  useEffect(() => {
+    if (!videoPath) return;
+    let current = true;
+    void findTranscriptsNear(videoPath).then((list) => current && setNear({ path: videoPath, list }));
+    return () => {
+      current = false;
+    };
+  }, [videoPath]);
+
+  const list = near && near.path === videoPath ? near.list : [];
+  if (list.length === 0) return null;
+  const use = (info: TranscriptInfo) => patch({ transcript: info, source: "file" });
+
+  if (source === "file") {
+    if (list.length < 2) return null;
+    return (
+      <label className="flex min-w-0 items-center gap-2 text-sm">
+        <span className="shrink-0 text-text-muted">Found next to the video</span>
+        <select
+          aria-label="Transcript files next to the video"
+          className={cn(fieldClass, "min-w-0 max-w-full flex-1 truncate")}
+          disabled={disabled}
+          value={chosen?.path ?? ""}
+          onChange={(e) => {
+            const picked = list.find((i) => i.path === e.target.value);
+            if (picked) use(picked);
+          }}
+        >
+          {!list.some((i) => i.path === chosen?.path) && <option value="">Another file</option>}
+          {list.map((i) => (
+            <option key={i.path} value={i.path}>
+              {i.name} ({i.format})
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+  const best = list[0];
+  return (
+    <div
+      role="status"
+      className="flex flex-wrap items-center gap-2 rounded-md border border-accent/40 bg-accent-soft px-2 py-1.5 text-xs"
+    >
+      <span className="min-w-0 flex-1">
+        Found <strong className="break-all font-medium">{best.name}</strong> next to the video
+        {list.length > 1 ? ` (and ${list.length - 1} more)` : ""}.
+      </span>
+      <button
+        type="button"
+        disabled={disabled}
+        className={cn(chip(false), "shrink-0")}
+        onClick={() => use(best)}
+      >
+        Use {best.name.length > 24 ? "it" : best.name}
+      </button>
+    </div>
+  );
+}
+
+/** The "Import file" part of the Transcript row: file facts, offset, and a button to choose another. */
+function TranscriptFile({ disabled }: { disabled: boolean }) {
+  const info = useAutoClipsStore((s) => s.settings.transcript);
+  const offset = useAutoClipsStore((s) => s.settings.transcriptOffset);
+  const clipId = useAutoClipsStore((s) => s.clipId);
+  const patch = useAutoClipsStore((s) => s.patchSettings);
+  const project = useProjectStore((s) => s.project);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const clip = clipId ? findClip(project, clipId)?.clip : undefined;
+  const asset = clip && project.assets.find((a) => a.id === clip.assetId);
+  const warning = info ? durationWarning(info, offset, asset?.duration) : null;
+
+  const choose = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const picked = await chooseTranscript();
+      if (picked) patch({ transcript: picked, source: "file" });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "That file could not be used.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        disabled={disabled || busy}
+        className={cn(chip(false), "flex w-full items-center justify-center gap-2 [&_svg]:size-4")}
+        onClick={() => void choose()}
+      >
+        <FileText />
+        {info ? "Choose another file…" : "Choose file…"}
+      </button>
+      {error && (
+        <p role="alert" className="text-xs text-danger">
+          {error}
+        </p>
+      )}
+      {info && (
+        <dl
+          className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-xs"
+          aria-label="Transcript file"
+        >
+          <dt className="text-text-muted">File</dt>
+          <dd className="min-w-0 truncate" title={info.name}>
+            {info.name}
+          </dd>
+          <dt className="text-text-muted">Format</dt>
+          <dd>{info.format}</dd>
+          <dt className="text-text-muted">Lines</dt>
+          <dd>{info.lines}</dd>
+          <dt className="text-text-muted">Span</dt>
+          <dd>
+            {formatDuration(info.spanStart)} to {formatDuration(info.spanEnd)}
+          </dd>
+          <dt className="text-text-muted">Word timing</dt>
+          <dd>
+            {info.wordLevel
+              ? "Found. Captions still follow whole lines for now."
+              : `No (${info.wordReason}). Word-by-word styles show whole lines.`}
+          </dd>
+        </dl>
+      )}
+      {warning && (
+        <p role="status" className="text-xs text-amber-400">
+          {warning}
+        </p>
+      )}
+      {info && (
+        <label className="flex items-center gap-2 text-sm">
+          <span className="text-text-muted">Offset (seconds)</span>
+          <input
+            type="number"
+            aria-label="Offset, seconds"
+            className={cn(fieldClass, "w-24")}
+            min={-OFFSET_LIMIT}
+            max={OFFSET_LIMIT}
+            step={0.1}
+            value={offset}
+            disabled={disabled}
+            onChange={(e) => patch({ transcriptOffset: clampOffset(e.target.valueAsNumber) })}
+          />
+        </label>
+      )}
+      {!info && (
+        <p className="text-xs text-text-muted">
+          Use a transcript you already have: a .json list, YouTube json3, .srt or .vtt. Nothing is uploaded.
+        </p>
+      )}
+    </div>
+  );
+}
 
 /** Step 1: what to look for. One screen, sensible defaults. */
 export function SettingsStep() {
@@ -154,59 +344,88 @@ export function SettingsStep() {
         <p className="text-xs text-text-muted">Auto suggests about one clip for every two minutes.</p>
       </Group>
 
-      <Group title="Speech">
-        <select
-          aria-label="Language spoken"
-          className={cn(fieldClass, "w-full")}
-          value={settings.language}
-          disabled={running}
-          onChange={(e) => set("language", e.target.value)}
-        >
-          {SPEECH_LANGUAGES.map((l) => (
-            <option key={l.code ?? "auto"} value={l.code ?? ""}>
-              {l.name}
-            </option>
-          ))}
-        </select>
-        {!loaded && <p className="text-xs text-text-muted">Checking for speech models…</p>}
-        <div role="radiogroup" aria-label="Speech model" className="flex flex-wrap gap-1.5">
-          {models.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              role="radio"
-              aria-checked={chosen?.id === m.id}
-              aria-label={`${m.label}, ${modelSize(m.approxMb)}${m.installed ? ", downloaded" : ""}`}
-              disabled={running || download !== null}
-              className={cn(chip(chosen?.id === m.id), "flex items-center gap-1.5")}
-              onClick={() => set("model", m.id)}
-            >
-              {m.label.split(" (")[0]}
-              {m.installed && <Check className="size-3.5 text-success" aria-hidden />}
-            </button>
-          ))}
-        </div>
-        {chosen && !chosen.installed && (
+      <Group title="Transcript" className="md:col-span-2">
+        <div role="radiogroup" aria-label="Transcript source" className="flex flex-wrap gap-1.5">
           <button
             type="button"
-            disabled={download !== null || running}
-            className="flex min-h-9 w-full items-center justify-center gap-2 rounded-md border border-accent/60 bg-accent-soft px-2 text-sm hover:border-accent disabled:opacity-50 pointer-coarse:min-h-11 [&_svg]:size-4"
-            onClick={() =>
-              void downloadWithConsent(chosen).then((note) => {
-                if (note) useUiStore.getState().setNotice(note.text);
-              })
-            }
+            role="radio"
+            aria-checked={settings.source === "whisper"}
+            disabled={running}
+            className={chip(settings.source === "whisper")}
+            onClick={() => set("source", "whisper")}
           >
-            <Download />
-            {download
-              ? `Downloading… ${Math.round(download.received / 1048576)} MB`
-              : `Download model (about ${modelSize(chosen.approxMb)})…`}
+            Transcribe with Whisper
           </button>
-        )}
-        <p className="text-xs text-text-muted">
-          A transcript made before with the same model is reused, so searching again is quick.
-        </p>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={settings.source === "file"}
+            disabled={running}
+            className={chip(settings.source === "file")}
+            onClick={() => set("source", "file")}
+          >
+            Import file
+          </button>
+        </div>
+        <NearbyTranscripts disabled={running} />
+        {settings.source === "file" && <TranscriptFile disabled={running} />}
       </Group>
+
+      {settings.source === "whisper" && (
+        <Group title="Speech">
+          <select
+            aria-label="Language spoken"
+            className={cn(fieldClass, "w-full")}
+            value={settings.language}
+            disabled={running}
+            onChange={(e) => set("language", e.target.value)}
+          >
+            {SPEECH_LANGUAGES.map((l) => (
+              <option key={l.code ?? "auto"} value={l.code ?? ""}>
+                {l.name}
+              </option>
+            ))}
+          </select>
+          {!loaded && <p className="text-xs text-text-muted">Checking for speech models…</p>}
+          <div role="radiogroup" aria-label="Speech model" className="flex flex-wrap gap-1.5">
+            {models.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                role="radio"
+                aria-checked={chosen?.id === m.id}
+                aria-label={`${m.label}, ${modelSize(m.approxMb)}${m.installed ? ", downloaded" : ""}`}
+                disabled={running || download !== null}
+                className={cn(chip(chosen?.id === m.id), "flex items-center gap-1.5")}
+                onClick={() => set("model", m.id)}
+              >
+                {m.label.split(" (")[0]}
+                {m.installed && <Check className="size-3.5 text-success" aria-hidden />}
+              </button>
+            ))}
+          </div>
+          {chosen && !chosen.installed && (
+            <button
+              type="button"
+              disabled={download !== null || running}
+              className="flex min-h-9 w-full items-center justify-center gap-2 rounded-md border border-accent/60 bg-accent-soft px-2 text-sm hover:border-accent disabled:opacity-50 pointer-coarse:min-h-11 [&_svg]:size-4"
+              onClick={() =>
+                void downloadWithConsent(chosen).then((note) => {
+                  if (note) useUiStore.getState().setNotice(note.text);
+                })
+              }
+            >
+              <Download />
+              {download
+                ? `Downloading… ${Math.round(download.received / 1048576)} MB`
+                : `Download model (about ${modelSize(chosen.approxMb)})…`}
+            </button>
+          )}
+          <p className="text-xs text-text-muted">
+            A transcript made before with the same model is reused, so searching again is quick.
+          </p>
+        </Group>
+      )}
 
       <Group title="Output">
         <div role="radiogroup" aria-label="Output shape" className="flex flex-wrap gap-1.5">
@@ -272,7 +491,7 @@ export function SettingsStep() {
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            disabled={!modelId || running || estimate?.status === "running"}
+            disabled={!modelId || running || settings.source === "file" || estimate?.status === "running"}
             title={modelId ? undefined : "Download a speech model first"}
             className={cn(chip(false), "flex items-center gap-2 [&_svg]:size-4")}
             onClick={() => void useAutoClipsStore.getState().estimateTime()}

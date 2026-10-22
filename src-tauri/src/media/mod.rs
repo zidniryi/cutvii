@@ -21,6 +21,7 @@ pub mod reverse;
 pub mod text;
 pub mod text_fx;
 pub mod tools;
+pub mod transcript_import;
 pub mod tts;
 pub mod upscale;
 pub mod upscale_video;

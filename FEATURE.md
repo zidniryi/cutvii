@@ -111,7 +111,8 @@ unless a line says otherwise.
 - **Subtitles as a file:** "Export subtitles (.srt)…" in a text clip's menu (the texts of its track) and in
   the File menu (the selected text's track, otherwise every text on the timeline).
 - **Auto clips:** finds short clips in a long video, a review step with a player and cut handles, then adds
-  them to the timeline or exports each as its own file.
+  them to the timeline or exports each as its own file. Step 1 can use a transcript file you already have
+  (.json list, YouTube json3, .srt, .vtt; "Import file", offset -30..+30 s) instead of Whisper.
 - **Voice-over from text:** the "Voice-over" button in the timeline toolbar turns typed words into speech
   (Supertonic 3: Indonesian, English and 29 more languages, ten voices, speed) and puts it on a
   "Voice-over" audio track at the playhead. Two sizes of the voice model can be chosen and downloaded

@@ -30,6 +30,7 @@ pub fn run() {
         .manage(commands::export::BatchFolder::default())
         .manage(commands::drop::DropState::default())
         .manage(commands::ai::AiJob::default())
+        .manage(commands::transcript::TranscriptGrants::default())
         .manage(commands::recent::RecentProjects::default())
         .setup(|app| {
             commands::clip_tools::load_fonts(app.handle());
@@ -85,6 +86,9 @@ pub fn run() {
             commands::ai::delete_whisper_model,
             commands::ai::transcribe_media,
             commands::clipper::find_clips_in_media,
+            commands::transcript::choose_transcript_file,
+            commands::transcript::inspect_transcript,
+            commands::transcript::find_transcripts_near,
             commands::tts::tts_status,
             commands::tts::download_tts_model,
             commands::tts::delete_tts_model,

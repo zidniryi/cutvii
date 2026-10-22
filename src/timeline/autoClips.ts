@@ -28,6 +28,71 @@ export const OUTPUTS: { id: OutputShape; label: string; hint: string }[] = [
   { id: "keep", label: "Keep canvas", hint: "Same shape as the project" },
 ];
 
+export type TranscriptSource = "whisper" | "file";
+
+/** How far an imported transcript may be shifted, in seconds either way (the same limit as the engine's). */
+export const OFFSET_LIMIT = 30;
+
+/** What Rust says about a transcript file it has read (`TranscriptInfo`). */
+export const TranscriptInfoSchema = z.object({
+  path: z.string(),
+  name: z.string(),
+  format: z.string(),
+  lines: z.number(),
+  wordLevel: z.boolean(),
+  wordReason: z.string(),
+  spanStart: z.number(),
+  spanEnd: z.number(),
+  hash: z.string(),
+});
+export type TranscriptInfo = z.infer<typeof TranscriptInfoSchema>;
+
+/** Open the native file dialog. `null` when cancelled. Throws a readable message for a bad file. */
+export async function chooseTranscript(): Promise<TranscriptInfo | null> {
+  let raw: unknown;
+  try {
+    raw = await invoke("choose_transcript_file");
+  } catch (e) {
+    throw new Error(message(e), { cause: e });
+  }
+  if (raw === null) return null;
+  const parsed = TranscriptInfoSchema.safeParse(raw);
+  if (!parsed.success) throw new Error("The transcript check returned something unexpected.");
+  return parsed.data;
+}
+
+/** Transcript files next to the video, best first. Never throws: no folder access just means no list. */
+export async function findTranscriptsNear(videoPath: string): Promise<TranscriptInfo[]> {
+  try {
+    const parsed = z
+      .array(TranscriptInfoSchema)
+      .safeParse(await invoke("find_transcripts_near", { path: videoPath }));
+    return parsed.success ? parsed.data : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * A warning when the transcript clearly belongs to a different recording: it ends long before the video
+ * does, or well after. Never blocks.
+ */
+export function durationWarning(
+  info: Pick<TranscriptInfo, "spanEnd">,
+  offset: number,
+  videoSeconds: number | undefined,
+): string | null {
+  if (!videoSeconds || !Number.isFinite(videoSeconds)) return null;
+  const end = info.spanEnd + offset;
+  if (end < videoSeconds * 0.5 - 5) {
+    return `The transcript ends at ${Math.round(end)} s but the video is ${Math.round(videoSeconds)} s long. It may belong to another video.`;
+  }
+  if (end > videoSeconds * 1.1 + 5) {
+    return `The transcript runs to ${Math.round(end)} s but the video is only ${Math.round(videoSeconds)} s long. It may belong to another video.`;
+  }
+  return null;
+}
+
 export interface AutoClipsSettings {
   length: LengthId;
   customMin: number;
@@ -38,6 +103,12 @@ export interface AutoClipsSettings {
   language: string;
   /** Speech model id; `null` = pick one that is installed. */
   model: string | null;
+  /** Where the transcript comes from: speech recognition here, or a file the user already has. */
+  source: TranscriptSource;
+  /** The chosen transcript file (when `source` is "file"). */
+  transcript: TranscriptInfo | null;
+  /** Seconds added to every time in the transcript file. */
+  transcriptOffset: number;
   output: OutputShape;
   /** Burn the subtitle style in when the clips are created (step 3). */
   subtitles: boolean;
@@ -54,6 +125,9 @@ export const DEFAULT_SETTINGS: AutoClipsSettings = {
   count: null,
   language: "",
   model: null,
+  source: "whisper",
+  transcript: null,
+  transcriptOffset: 0,
   output: "vertical",
   subtitles: true,
   subtitleSize: 0.045,
@@ -159,6 +233,9 @@ export interface SourceSpan {
 const message = (e: unknown) =>
   typeof e === "string" ? e : e instanceof Error ? e.message : "The search failed.";
 
+export const clampOffset = (v: number) =>
+  Number.isFinite(v) ? Math.min(OFFSET_LIMIT, Math.max(-OFFSET_LIMIT, v)) : 0;
+
 /** What to ask the engine for, from a timeline clip and the user's settings. */
 export function searchRequest(
   project: Project,
@@ -173,6 +250,7 @@ export function searchRequest(
   if (!found || !asset) throw new Error("The clip is missing from the project.");
   if (!range.ok) throw new Error(range.reason);
   const { clip } = found;
+  const file = settings.source === "file" && settings.transcript;
   return {
     path: asset.path,
     sourceIn: clip.sourceIn,
@@ -182,6 +260,7 @@ export function searchRequest(
     reversed: clip.reversed === true,
     model,
     language: settings.language === "" ? null : settings.language,
+    transcript: file ? { path: file.path, offset: clampOffset(settings.transcriptOffset) } : null,
     minSeconds: range.min,
     maxSeconds: range.max,
     count: options.count === undefined ? settings.count : options.count,

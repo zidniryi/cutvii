@@ -117,6 +117,15 @@ const spanOf = (c: Pick<FoundClip, "sourceIn" | "sourceOut">): SourceSpan => ({
 });
 
 /** The speech model to use: the chosen one if it is on this machine, otherwise any that is. */
+/**
+ * The model to send with a search: none is needed when the transcript comes from a file ("" is sent), and
+ * `null` means a speech model is needed but none is downloaded (or no file was chosen).
+ */
+export function searchModel(settings: AutoClipsSettings): string | null {
+  if (settings.source === "file") return settings.transcript ? "" : null;
+  return usableModel(settings);
+}
+
 export function usableModel(settings: Pick<AutoClipsSettings, "model">): string | null {
   const models = useAiStore.getState().models;
   const installed = models.filter((m) => m.installed);
@@ -210,8 +219,16 @@ export const useAutoClipsStore = create<AutoClipsState>((set, get) => {
       if (blocker) return set({ status: "error", error: blocker });
       const range = lengthRange(s.settings);
       if (!range.ok) return set({ status: "error", error: range.reason });
-      const model = usableModel(s.settings);
-      if (!model) return set({ status: "error", error: "Download a speech model first." });
+      const model = searchModel(s.settings);
+      if (model === null) {
+        return set({
+          status: "error",
+          error:
+            s.settings.source === "file"
+              ? "Choose a transcript file first."
+              : "Download a speech model first.",
+        });
+      }
 
       const mine = ++generation;
       const source = findClip(project, s.clipId)!;
@@ -327,8 +344,8 @@ export const useAutoClipsStore = create<AutoClipsState>((set, get) => {
       attach();
       const s = get();
       const old = s.clips.find((c) => c.id === id);
-      const model = usableModel(s.settings);
-      if (!old || !s.clipId || !model || s.replacing || s.status === "running") return;
+      const model = searchModel(s.settings);
+      if (!old || !s.clipId || model === null || s.replacing || s.status === "running") return;
       const project = useProjectStore.getState().project;
       const mine = generation;
       set({ replacing: id, notice: null });

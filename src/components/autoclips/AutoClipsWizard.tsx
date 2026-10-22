@@ -3,7 +3,7 @@ import { Check, Scissors, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { cn } from "@/lib/utils";
-import { useAutoClipsStore, usableModel, type WizardStep } from "@/store/autoClips";
+import { useAutoClipsStore, searchModel, type WizardStep } from "@/store/autoClips";
 import { useAiStore } from "@/store/ai";
 import { useUiStore } from "@/store/ui";
 import { lengthRange } from "@/timeline/autoClips";
@@ -76,7 +76,7 @@ function WizardBody() {
 
   const running = status === "running";
   const range = lengthRange(settings);
-  const canSearch = range.ok && usableModel(settings) !== null && !running;
+  const canSearch = range.ok && searchModel(settings) !== null && !running;
   const included = clips.filter((c) => c.included).length;
   const reachable = (n: WizardStep) => n === 1 || (clips.length > 0 && !running && (n === 2 || included > 0));
 
@@ -183,7 +183,15 @@ function WizardBody() {
                 )}
                 <Button
                   disabled={!canSearch}
-                  title={canSearch ? undefined : range.ok ? "Download a speech model first" : range.reason}
+                  title={
+                    canSearch
+                      ? undefined
+                      : range.ok
+                        ? settings.source === "file"
+                          ? "Choose a transcript file first"
+                          : "Download a speech model first"
+                        : range.reason
+                  }
                   className="pointer-coarse:h-11"
                   onClick={() => void store().start()}
                 >

@@ -14,12 +14,14 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use super::ai::{AiJob, models_dir};
 use super::clip_tools::{allowed_source, derived_key};
+use super::transcript::{TranscriptGrants, load};
 use crate::errors::{AppError, AppResult};
 use crate::media::clipper::{Placement, energy_envelope};
 use crate::media::clipper_job::{
     CACHE_VERSION, ENERGY_STEP, FoundClips, Settings, Transcriber, Transcript, find_clips,
 };
 use crate::media::tools::{FFMPEG_ENV, locate_tool};
+use crate::media::transcript_import;
 use crate::media::whisper::{SAMPLE_RATE, is_installed, model_spec, read_samples, transcribe};
 
 pub const CLIPS_EVENT: &str = "auto-clips-progress";
@@ -56,9 +58,14 @@ pub struct FindClipsRequest {
     /// Reversed clips were not recognised forwards and are skipped.
     #[serde(default)]
     pub reversed: bool,
+    /// Speech model; not needed when `transcript` is set.
+    #[serde(default)]
     pub model: String,
     #[serde(default)]
     pub language: Option<String>,
+    /// Use this transcript file instead of speech recognition.
+    #[serde(default)]
+    pub transcript: Option<TranscriptRequest>,
     pub min_seconds: f64,
     pub max_seconds: f64,
     /// `None` = Auto.
@@ -71,6 +78,19 @@ pub struct FindClipsRequest {
     #[serde(default)]
     pub exclude: Vec<TimeSpan>,
 }
+
+/// A transcript file the user chose, and how far to move its times.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptRequest {
+    pub path: String,
+    /// Seconds added to every time in the file.
+    #[serde(default)]
+    pub offset: f64,
+}
+
+/// Largest shift of an imported transcript, in seconds either way.
+const MAX_OFFSET: f64 = 30.0;
 
 /// Check everything the webview sent and turn it into engine settings.
 pub fn validate(req: &FindClipsRequest) -> AppResult<Settings> {
@@ -116,6 +136,13 @@ pub fn validate(req: &FindClipsRequest) -> AppResult<Settings> {
             .any(|s| !(s.start.is_finite() && s.end.is_finite() && s.end > s.start))
     {
         return bad("invalid excluded spans");
+    }
+    if req
+        .transcript
+        .as_ref()
+        .is_some_and(|t| !(t.offset.is_finite() && t.offset.abs() <= MAX_OFFSET))
+    {
+        return bad("the transcript offset must be between -30 and 30 seconds");
     }
     Ok(Settings {
         min_seconds: req.min_seconds,
@@ -166,12 +193,56 @@ impl Transcriber for WhisperTranscriber {
     }
 }
 
+/// An imported transcript file behind the engine's [`Transcriber`] trait. The file is parsed here, inside the
+/// background job; the loudness (which the scoring needs) is read from the video's own sound.
+struct ImportedTranscriber {
+    src: PathBuf,
+    bytes: Vec<u8>,
+    offset: f64,
+    start: f64,
+    seconds: f64,
+}
+
+impl Transcriber for ImportedTranscriber {
+    fn transcribe(
+        &self,
+        mut progress: Box<dyn FnMut(i32) + 'static>,
+        cancel: Arc<AtomicBool>,
+    ) -> AppResult<Transcript> {
+        let imported = transcript_import::parse(&self.bytes)?;
+        let segments = transcript_import::to_range(
+            &imported.segments,
+            self.offset,
+            self.start,
+            self.start + self.seconds,
+        );
+        if segments.is_empty() {
+            return Err(AppError::InvalidInput(
+                "the transcript has no lines inside the part of the video you are using; check the offset"
+                    .into(),
+            ));
+        }
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(AppError::Cancelled);
+        }
+        let ffmpeg = locate_tool("ffmpeg", FFMPEG_ENV)?;
+        let samples = read_samples(&ffmpeg, &self.src, self.start, self.seconds)?;
+        progress(100);
+        Ok(Transcript {
+            version: CACHE_VERSION,
+            segments,
+            energy: energy_envelope(&samples, SAMPLE_RATE, ENERGY_STEP),
+        })
+    }
+}
+
 /// Find clip candidates in the used range of an imported file. Progress arrives as `auto-clips-progress`
 /// events while the speech model runs (none when the transcript is already cached).
 #[tauri::command]
 pub async fn find_clips_in_media(
     app: AppHandle,
     job: State<'_, AiJob>,
+    grants: State<'_, TranscriptGrants>,
     request: FindClipsRequest,
 ) -> AppResult<FoundClips> {
     let settings = validate(&request)?;
@@ -183,44 +254,72 @@ pub async fn find_clips_in_media(
     {
         return Err(AppError::InvalidInput("unknown language".into()));
     }
-    let spec = model_spec(&request.model)?;
-    let model_file = models_dir(&app)?.join(spec.file);
-    if !is_installed(spec, &model_file) {
-        return Err(AppError::InvalidInput(
-            "that speech model is not downloaded yet".into(),
-        ));
-    }
-    // The transcript depends on the file, the range, the model and the language, and on nothing else.
-    let key = derived_key(
-        &src,
-        &format!(
-            "autoclips-v{CACHE_VERSION}|{:.3}|{:.3}|{}|{}",
-            request.source_in,
-            request.source_out,
-            request.model,
-            spec.language(request.language.as_deref()).unwrap_or("auto")
-        ),
-    )?;
-    let cache_file = app
+    let cache_dir = app
         .path()
         .app_cache_dir()
         .map_err(|e| AppError::InvalidInput(format!("no cache directory: {e}")))?
-        .join("auto-clips")
-        .join(format!("{key}.json"));
-    let transcriber = WhisperTranscriber {
-        src,
-        model_file,
-        start: request.source_in,
-        seconds: request.source_out - request.source_in,
-        language: spec.language(request.language.as_deref()).map(Into::into),
+        .join("auto-clips");
+    // The transcript depends on the file, the range and where it came from, and on nothing else. A
+    // transcript file is part of the key by its content hash and its offset.
+    let (key, transcriber): (String, Box<dyn Transcriber + Send>) = match &request.transcript {
+        Some(t) => {
+            let (info, bytes) = load(&grants, &t.path)?;
+            let key = derived_key(
+                &src,
+                &format!(
+                    "autoclips-v{CACHE_VERSION}|file|{}|{:.3}|{:.3}|{:.3}",
+                    info.hash, t.offset, request.source_in, request.source_out
+                ),
+            )?;
+            (
+                key,
+                Box::new(ImportedTranscriber {
+                    src: src.clone(),
+                    bytes,
+                    offset: t.offset,
+                    start: request.source_in,
+                    seconds: request.source_out - request.source_in,
+                }),
+            )
+        }
+        None => {
+            let spec = model_spec(&request.model)?;
+            let model_file = models_dir(&app)?.join(spec.file);
+            if !is_installed(spec, &model_file) {
+                return Err(AppError::InvalidInput(
+                    "that speech model is not downloaded yet".into(),
+                ));
+            }
+            let key = derived_key(
+                &src,
+                &format!(
+                    "autoclips-v{CACHE_VERSION}|{:.3}|{:.3}|{}|{}",
+                    request.source_in,
+                    request.source_out,
+                    request.model,
+                    spec.language(request.language.as_deref()).unwrap_or("auto")
+                ),
+            )?;
+            (
+                key,
+                Box::new(WhisperTranscriber {
+                    src,
+                    model_file,
+                    start: request.source_in,
+                    seconds: request.source_out - request.source_in,
+                    language: spec.language(request.language.as_deref()).map(Into::into),
+                }),
+            )
+        }
     };
+    let cache_file = cache_dir.join(format!("{key}.json"));
 
     let cancel = job.start()?;
     let events = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         find_clips(
             &cache_file,
-            &transcriber,
+            transcriber.as_ref(),
             &settings,
             Box::new(move |percent| {
                 events.emit(CLIPS_EVENT, ClipsProgress { percent }).ok();
@@ -247,6 +346,7 @@ mod tests {
             reversed: false,
             model: "base".into(),
             language: None,
+            transcript: None,
             min_seconds: 30.0,
             max_seconds: 60.0,
             count: None,
@@ -312,6 +412,16 @@ mod tests {
                 "short recording",
                 FindClipsRequest {
                     source_out: 20.0,
+                    ..request()
+                },
+            ),
+            (
+                "offset",
+                FindClipsRequest {
+                    transcript: Some(TranscriptRequest {
+                        path: "t.srt".into(),
+                        offset: 31.0,
+                    }),
                     ..request()
                 },
             ),
