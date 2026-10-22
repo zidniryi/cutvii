@@ -36,6 +36,7 @@ pub fn locate_tool(name: &str, env_var: &str) -> AppResult<PathBuf> {
         };
     }
 
+    #[allow(unused_mut)] // only macOS adds more folders below
     let mut dirs: Vec<PathBuf> = env::var_os("PATH")
         .map(|p| env::split_paths(&p).collect())
         .unwrap_or_default();
