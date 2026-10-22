@@ -26,11 +26,11 @@ jobs:
             }
           - {
               name: macOS (Intel),
-              os: macos-13,
+              os: macos-15-intel,
               args: "--target x86_64-apple-darwin",
               rust: x86_64-apple-darwin,
             }
-          - { name: Linux, os: ubuntu-22.04, args: "", rust: "" }
+          - { name: Linux, os: ubuntu-24.04, args: "", rust: "" }
           - { name: Windows, os: windows-latest, args: "", rust: "" }
 
     steps:
