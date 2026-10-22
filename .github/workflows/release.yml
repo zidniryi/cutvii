@@ -23,15 +23,17 @@ jobs:
               os: macos-latest,
               args: "--target aarch64-apple-darwin",
               rust: aarch64-apple-darwin,
+              ffmpeg: macos-arm64,
             }
           - {
               name: macOS (Intel),
               os: macos-15-intel,
               args: "--target x86_64-apple-darwin",
               rust: x86_64-apple-darwin,
+              ffmpeg: macos-x64,
             }
-          - { name: Linux, os: ubuntu-24.04, args: "", rust: "" }
-          - { name: Windows, os: windows-latest, args: "", rust: "" }
+          - { name: Linux, os: ubuntu-24.04, args: "", rust: "", ffmpeg: linux-x64 }
+          - { name: Windows, os: windows-latest, args: "", rust: "", ffmpeg: windows-x64 }
 
     steps:
       - uses: actions/checkout@v4
@@ -58,6 +60,13 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
 
       - run: pnpm install --frozen-lockfile
+
+      # The installer carries its own FFmpeg (GPL build, see docs/licensing.md), checked against a pinned SHA-256
+      - uses: actions/cache@v4
+        with:
+          path: .cache/ffmpeg
+          key: ffmpeg-${{ matrix.ffmpeg }}-${{ hashFiles('config/ffmpeg-binaries.json') }}
+      - run: node scripts/fetch-ffmpeg.mjs --target ${{ matrix.ffmpeg }}
 
       - uses: tauri-apps/tauri-action@v0
         env:

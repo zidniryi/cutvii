@@ -13,6 +13,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "ffmpeg:fetch": "node scripts/fetch-ffmpeg.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },

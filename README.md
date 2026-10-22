@@ -41,6 +41,12 @@ including the heavy display face Anton (OFL 1.1, © 2020 The Anton Project Autho
 - Export H.264/AAC MP4 (resolution, frame rate, quality), with progress, cancel and ffprobe verification.
 - Audio-only export: M4A, MP3 or WAV.
 
+## Install
+
+Download the installer for your system from the [releases page](https://github.com/zidniryi/cutvii/releases). FFmpeg
+is included, so there is nothing else to install. The builds are not code-signed yet, so macOS and Windows will
+warn about an unknown developer the first time.
+
 ## Install and run (development)
 
 Requirements:
@@ -124,4 +130,5 @@ Contributions are welcome. See [CONTRIBUTORS.md](CONTRIBUTORS.md) for how to hel
 ## Licence
 
 CutVii is released under the [MIT License](LICENSE). Third-party fonts and dependencies keep their own licences;
-see `docs/licensing.md` for the constraints (FFmpeg is not bundled, MPL-2.0 crates are used unmodified).
+the installers also contain FFmpeg (GPL build, run as a separate program; see `src-tauri/binaries/FFMPEG-LICENSE.md`).
+See `docs/licensing.md` for the details.

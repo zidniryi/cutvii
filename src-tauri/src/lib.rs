@@ -38,6 +38,9 @@ pub fn run() {
         .manage(commands::recent::RecentProjects::default())
         .setup(|app| {
             commands::clip_tools::load_fonts(app.handle());
+            if let Ok(dir) = app.path().resource_dir() {
+                media::tools::set_bundled_dir(dir.join("binaries"));
+            }
             Ok(())
         })
         .menu(commands::menu::build)

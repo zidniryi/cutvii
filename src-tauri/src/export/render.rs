@@ -167,8 +167,16 @@ pub fn run(
 
     let tmp = temp_path(job.output, plan.format);
     fs::remove_file(&tmp).ok();
+    // On Windows the file can stay locked for a moment after FFmpeg is killed (or while a virus scanner
+    // looks at it), so a failed delete is retried for about two seconds.
     let cleanup = || {
-        fs::remove_file(&tmp).ok();
+        for _ in 0..40 {
+            match fs::remove_file(&tmp) {
+                Ok(()) => return,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+                Err(_) => std::thread::sleep(Duration::from_millis(50)),
+            }
+        }
     };
 
     let mut child = command(job.ffmpeg)

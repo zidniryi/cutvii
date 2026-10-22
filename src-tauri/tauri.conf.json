@@ -62,7 +62,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["assets/fonts/*.ttf", "assets/fonts/licenses/*"],
+    "resources": ["assets/fonts/*.ttf", "assets/fonts/licenses/*", "binaries/*"],
     "category": "Video",
     "shortDescription": "Creative editing. Flexible workflow. On-device AI.",
     "longDescription": "CutVii is a local-first, offline-friendly desktop video editor: import, edit on a multi-track timeline, preview and export MP4. Your media is never modified or uploaded.",

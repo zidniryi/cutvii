@@ -3,3 +3,4 @@ node_modules
 src-tauri
 pnpm-lock.yaml
 CLAUDE.md
+.cache

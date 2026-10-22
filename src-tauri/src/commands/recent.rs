@@ -170,7 +170,16 @@ mod tests {
     use super::*;
 
     fn p(s: &str) -> PathBuf {
-        PathBuf::from(s)
+        PathBuf::from(abs(s))
+    }
+
+    /// "/a/x" is only absolute on Unix; Windows needs a drive letter.
+    fn abs(s: &str) -> String {
+        if cfg!(windows) {
+            format!("C:{s}")
+        } else {
+            s.to_string()
+        }
     }
 
     #[test]
@@ -192,18 +201,22 @@ mod tests {
     #[test]
     fn a_stored_list_is_read_as_untrusted_input() {
         assert_eq!(
-            parse(r#"["/a/one.cutvii", "relative.cutvii", "/a/one.cutvii", "/b/two.cutvii"]"#),
+            parse(&format!(
+                r#"["{0}", "relative.cutvii", "{0}", "{1}"]"#,
+                abs("/a/one.cutvii"),
+                abs("/b/two.cutvii")
+            )),
             [p("/a/one.cutvii"), p("/b/two.cutvii")]
         );
         assert!(parse("not json").is_empty());
         assert!(parse(r#"{"paths": []}"#).is_empty());
         assert!(parse(r#"[1, 2]"#).is_empty());
-        let many: Vec<String> = (0..50).map(|i| format!("/a/{i}.cutvii")).collect();
+        let many: Vec<String> = (0..50).map(|i| abs(&format!("/a/{i}.cutvii"))).collect();
         assert_eq!(
             parse(&serde_json::to_string(&many).unwrap()).len(),
             MAX_RECENT
         );
-        let long = format!("[\"/{}\"]", "x".repeat(5000));
+        let long = format!("[\"{}\"]", abs(&format!("/{}", "x".repeat(5000))));
         assert!(parse(&long).is_empty());
     }
 

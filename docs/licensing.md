@@ -2,14 +2,24 @@
 
 ## FFmpeg (the one that matters)
 
-CutVii **does not bundle FFmpeg**. It runs the `ffmpeg` / `ffprobe` executables it finds on the machine
-(see the README for the lookup order) as separate processes, and never links against FFmpeg libraries.
+The CutVii installers **include FFmpeg 9.0.2** (`ffmpeg` and `ffprobe`, **GPL builds**, GPL-3.0-or-later, with
+libx264). CutVii runs them as separate programs and never links against FFmpeg libraries, so CutVii's own code stays
+under the MIT licence; the two FFmpeg programs keep theirs. The notice shipped inside every installer is
+`src-tauri/binaries/FFMPEG-LICENSE.md`.
+
+- The exact archives, with their SHA-256, are pinned in `config/ffmpeg-binaries.json`; `pnpm ffmpeg:fetch` (or
+  `scripts/fetch-ffmpeg.mjs`) downloads and verifies them into `src-tauri/binaries/`, and Tauri bundles that folder.
+- Sources: Windows / Linux builds from BtbN FFmpeg-Builds, macOS builds from Martin Riedl's static builds. FFmpeg's own
+  source for the same version is at <https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz>.
+- At run time the order is: `CUTVII_FFMPEG` / `CUTVII_FFPROBE`, the bundled copy, then `PATH`.
+- **Not tried:** the packaged installers (nobody has built and launched one with the bundled FFmpeg yet), and macOS
+  code-signing / notarisation of the bundled executables.
 
 What that means depends on how you obtain and ship FFmpeg:
 
 | Scenario                                                  | Obligations                                                                                                                                             |
 | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| User installs FFmpeg themselves (current behaviour)       | None for CutVii; the user's FFmpeg licence applies to their copy.                                                                                       |
+| User installs FFmpeg themselves (still works)             | None for CutVii; the user's FFmpeg licence applies to their copy.                                                                                       |
 | You ship an **LGPL** FFmpeg build next to the app         | Provide the FFmpeg source/build config and licence text; allow replacing the binary. No GPL obligations on CutVii.                                      |
 | You ship a **GPL** build (e.g. Homebrew's, Gyan's "full") | GPL applies to that binary: provide its source and licence text. Check whether you want CutVii distributed together with it under GPL-compatible terms. |
 | Any build with `--enable-nonfree`                         | **Not redistributable.** Do not ship.                                                                                                                   |
@@ -39,8 +49,8 @@ not a reliable option on Android; the media backend there is decided in Phase 8.
 
 ### Decision needed from the maintainer
 
-1. Ship FFmpeg at all, or require users to install it? (Today: users install it.)
-2. If shipping: LGPL build (needs an encoder plan, see above) or GPL build (then document the combined licensing).
+1. ~~Ship FFmpeg at all?~~ Decided 2026-10-22: yes, a GPL build, bundled (see the top of this file).
+2. ~~LGPL or GPL~~ GPL.
 3. The CutVii licence is MIT (`LICENSE`, chosen 2026-10-22). Every dependency listed below is compatible with it.
 
 To bundle a binary later, Tauri's sidecar mechanism (`bundle.externalBin`, `binaries/ffmpeg-<target-triple>`) is the
