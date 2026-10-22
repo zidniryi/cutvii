@@ -1,3 +1,7 @@
+// Newer clippy (1.99) wants `as_chunks` instead of `chunks_exact(N)`; it needs Rust 1.88, and the README
+// says 1.85+, so the lint is allowed (the older toolchains do not know it yet).
+#![allow(unknown_lints, clippy::chunks_exact_to_as_chunks)]
+
 use tauri::Manager;
 
 mod commands;
