@@ -49,7 +49,10 @@ the first time:
 
 - **macOS:** if it says CutVii is "damaged", run `xattr -cr /Applications/CutVii.app` in Terminal once, then open it again.
 - **Windows:** if SmartScreen blocks it, click "More info", then "Run anyway".
-- **Linux:** `chmod +x CutVii*.AppImage`, then run it (or install the `.deb`).
+- **Linux:** `chmod +x CutVii*.AppImage`, then run it (or install the `.deb`). The preview plays video through
+  GStreamer; if it says a file cannot be played, install the codecs:
+  `sudo apt install gstreamer1.0-libav gstreamer1.0-plugins-good gstreamer1.0-plugins-bad` (Fedora:
+  `gstreamer1-libav gstreamer1-plugins-good gstreamer1-plugins-bad-free`).
 
 ## Install and run (development)
 

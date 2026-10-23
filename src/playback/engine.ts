@@ -189,6 +189,12 @@ export function pickLead(layers: Layer[]): Layer | undefined {
   return active.find((l) => isSoundOnly(l.track, l.asset)) ?? active.find((l) => l.visible) ?? active[0];
 }
 
+/** The Linux webview (WebKitGTK) plays media through GStreamer, whose H.264 / AAC decoders are often not installed. */
+function isLinux(): boolean {
+  const ua = typeof navigator === "undefined" ? "" : navigator.userAgent;
+  return ua.includes("Linux") && !ua.includes("Android");
+}
+
 export function mediaErrorMessage(code: number | undefined): string {
   switch (code) {
     case 2:
@@ -196,7 +202,9 @@ export function mediaErrorMessage(code: number | undefined): string {
     case 3:
       return "could not be decoded";
     case 4:
-      return "is missing, or its format is not supported by the preview";
+      return isLinux()
+        ? "cannot be played by the preview: install the GStreamer codecs (Debian / Ubuntu / Mint: gstreamer1.0-libav gstreamer1.0-plugins-good gstreamer1.0-plugins-bad), then restart CutVii"
+        : "is missing, or its format is not supported by the preview";
     default:
       return "could not be played";
   }

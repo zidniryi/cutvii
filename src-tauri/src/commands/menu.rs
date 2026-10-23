@@ -53,11 +53,18 @@ fn install_about(app: &AppHandle, menu: &Menu<tauri::Wry>) -> tauri::Result<()> 
             return Ok(());
         }
     }
-    // platforms whose default menu has no About: put it in Help, or leave the menu unchanged
+    // Windows / Linux: About sits in Help. On Linux a predefined item has no text until the menu is attached
+    // to a window, so the search above misses it; the default Help holds only that About, so drop every
+    // predefined item there (otherwise GTK's own About dialog opens instead of ours).
     for item in menu.items()? {
         if let MenuItemKind::Submenu(sub) = item
             && sub.text().ok().as_deref() == Some("Help")
         {
+            for (index, existing) in sub.items()?.into_iter().enumerate().rev() {
+                if matches!(existing, MenuItemKind::Predefined(_)) {
+                    sub.remove_at(index)?;
+                }
+            }
             sub.append(&about)?;
             sub.append(&support)?;
             sub.append(&updates)?;
