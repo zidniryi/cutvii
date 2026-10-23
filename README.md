@@ -4,7 +4,7 @@
 
 <h1 align="center">CutVii</h1>
 
-<p align="center"><b>Creative editing. Flexible workflow. On-device AI.</b><br>Version 1.0.0</p>
+<p align="center"><b>Creative editing. Flexible workflow. On-device AI.</b></p>
 
 <p align="center">
   <a href="https://github.com/zidniryi/cutvii/releases/latest"><img src="https://img.shields.io/github/v/release/zidniryi/cutvii?style=for-the-badge&color=E5733A&label=release" alt="Latest release"></a>
