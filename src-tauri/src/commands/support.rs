@@ -10,9 +10,9 @@ use crate::errors::{AppError, AppResult};
 use crate::media::tools::command;
 
 /// The only place a support link may point to.
-const ALLOWED_PREFIX: &str = "https://cutvii.xyz/";
-const DEFAULT_DONATE: &str = "https://cutvii.xyz/donate";
-const DEFAULT_SUPPORT: &str = "https://cutvii.xyz/support";
+const ALLOWED_PREFIX: &str = "https://cutvii.space/";
+const DEFAULT_DONATE: &str = "https://cutvii.space/donate";
+const DEFAULT_SUPPORT: &str = "https://cutvii.space/support";
 
 const CONFIG: &str = include_str!("../../../config/support.json");
 
@@ -30,7 +30,7 @@ struct Links {
     support_url: String,
 }
 
-/// https, on cutvii.xyz, short, and made only of characters that mean nothing to a shell or a browser bar.
+/// https, on cutvii.space, short, and made only of characters that mean nothing to a shell or a browser bar.
 pub fn is_allowed(url: &str) -> bool {
     url.len() <= 200
         && url.starts_with(ALLOWED_PREFIX)
@@ -102,19 +102,19 @@ mod tests {
     #[test]
     fn only_https_pages_on_cutvii_xyz_are_opened() {
         for good in [
-            "https://cutvii.xyz/donate",
-            "https://cutvii.xyz/a/b?x=1&y=2",
+            "https://cutvii.space/donate",
+            "https://cutvii.space/a/b?x=1&y=2",
         ] {
             assert!(is_allowed(good), "{good}");
         }
         for bad in [
-            "http://cutvii.xyz/donate",
-            "https://cutvii.xyz.evil.com/donate",
-            "https://evil.com/https://cutvii.xyz/",
-            "https://cutvii.xyz@evil.com/",
-            "https://cutvii.xyz/../x",
-            "https://cutvii.xyz/a b",
-            "https://cutvii.xyz/a;rm",
+            "http://cutvii.space/donate",
+            "https://cutvii.space.evil.com/donate",
+            "https://evil.com/https://cutvii.space/",
+            "https://cutvii.space@evil.com/",
+            "https://cutvii.space/../x",
+            "https://cutvii.space/a b",
+            "https://cutvii.space/a;rm",
             "file:///etc/passwd",
             "",
         ] {
@@ -122,11 +122,11 @@ mod tests {
         }
         // a config that points elsewhere, or is broken, falls back to the built-in address
         let elsewhere =
-            r#"{"donateUrl":"https://evil.com/","supportUrl":"https://cutvii.xyz/thanks"}"#;
+            r#"{"donateUrl":"https://evil.com/","supportUrl":"https://cutvii.space/thanks"}"#;
         assert_eq!(link_from(elsewhere, SupportLink::Donate), DEFAULT_DONATE);
         assert_eq!(
             link_from(elsewhere, SupportLink::Support),
-            "https://cutvii.xyz/thanks"
+            "https://cutvii.space/thanks"
         );
         assert_eq!(link_from("not json", SupportLink::Support), DEFAULT_SUPPORT);
     }
