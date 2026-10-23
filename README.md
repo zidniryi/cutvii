@@ -28,9 +28,6 @@ Text is drawn with 38 bundled font families (37 under the SIL Open Font License 
 including the heavy display face Anton (OFL 1.1, © 2020 The Anton Project Authors). The licence texts are in
 `src-tauri/assets/fonts/licenses/`; see `docs/licensing.md`.
 
-> Status: desktop MVP (Phases 1–7). Developed and tested on macOS (Apple Silicon). Windows and Linux are built in
-> CI but have not been run by hand yet. Android is planned (Phase 8).
-
 ## Features
 
 - Import video, audio and images (probed with FFprobe, thumbnails cached).
