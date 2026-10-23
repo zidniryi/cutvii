@@ -38,6 +38,38 @@ including the heavy display face Anton (OFL 1.1, © 2020 The Anton Project Autho
 - Export H.264/AAC MP4 (resolution, frame rate, quality), with progress, cancel and ffprobe verification.
 - Audio-only export: M4A, MP3 or WAV.
 
+## Screenshots
+
+Taken from CutVii 1.0.3 on macOS while editing a one-minute pumpkin video: titles, an on-device voice-over,
+auto subtitles, colour, transitions, AI upscale and Auto Clips.
+
+<table>
+  <tr>
+    <td><img src="docs/images/screenshots/01-editor.png" alt="The editor: media library, preview with a title and subtitles, inspector and timeline"></td>
+    <td><img src="docs/images/screenshots/02-preview.png" alt="Full-screen preview with styled captions"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/screenshots/03-text-styles.png" alt="Text styles gallery and the Text tab"></td>
+    <td><img src="docs/images/screenshots/04-voice-over.png" alt="Voice-over dialog: text to speech on this computer"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/screenshots/05-auto-subtitles.png" alt="Auto subtitles made from the voice-over"></td>
+    <td><img src="docs/images/screenshots/06-color-presets.png" alt="Colour presets in the inspector"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/screenshots/07-transitions.png" alt="Transition tab with the transition gallery"></td>
+    <td><img src="docs/images/screenshots/08-ai-upscale.png" alt="Clip info after AI upscale: 1664×928 from 832×464"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/screenshots/09-karaoke.png" alt="Karaoke Maker dialog"></td>
+    <td><img src="docs/images/screenshots/10-export.png" alt="Export dialog: format, resolution, frame rate and quality"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/screenshots/11-auto-clips.png" alt="Auto Clips review and the vertical clips it exported"></td>
+    <td><img src="docs/images/screenshots/12-free-open-source.png" alt="The About window"></td>
+  </tr>
+</table>
+
 ## Install
 
 Download the installer for your system from the [releases page](https://github.com/zidniryi/cutvii/releases). FFmpeg
