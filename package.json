@@ -15,7 +15,8 @@
     "format:check": "prettier --check .",
     "ffmpeg:fetch": "node scripts/fetch-ffmpeg.mjs",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "release": "node scripts/release.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
