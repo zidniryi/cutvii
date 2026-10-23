@@ -36,9 +36,21 @@ export function thumbnailUrl(path: string): string {
   return convertFileSrc(path);
 }
 
+/** Linux only: the local media server's base URL (WebKitGTK cannot play video from `asset:`). */
+let mediaServer: string | null = null;
+
+/** Asks Rust once, before the app renders, whether media should come from the local media server. */
+export async function initMediaUrls(): Promise<void> {
+  try {
+    mediaServer = (await invoke<string | null>("media_server_url")) ?? null;
+  } catch {
+    mediaServer = null;
+  }
+}
+
 /** URL the webview can load for an imported file (the file must be in the asset-protocol scope). */
 export function mediaUrl(path: string): string {
-  return convertFileSrc(path);
+  return mediaServer ? `${mediaServer}/${encodeURIComponent(path)}` : convertFileSrc(path);
 }
 
 export function fileName(path: string): string {

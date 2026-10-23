@@ -38,6 +38,7 @@ pub fn run() {
         .manage(commands::recent::RecentProjects::default())
         .setup(|app| {
             commands::clip_tools::load_fonts(app.handle());
+            commands::media_server::start(app.handle());
             if let Ok(dir) = app.path().resource_dir() {
                 media::tools::set_bundled_dir(dir.join("binaries"));
             }
@@ -110,6 +111,7 @@ pub fn run() {
             commands::clip_tools::text_fonts,
             commands::clip_tools::import_text_font,
             commands::media::import_media,
+            commands::media_server::media_server_url,
             commands::media::relink_media,
             commands::media::pick_image,
             commands::project::open_project,

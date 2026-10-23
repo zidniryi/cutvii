@@ -4,6 +4,7 @@ pub mod clipper;
 pub mod drop;
 pub mod export;
 pub mod media;
+pub mod media_server;
 pub mod menu;
 pub mod project;
 pub mod recent;
