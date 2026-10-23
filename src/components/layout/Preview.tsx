@@ -154,7 +154,10 @@ export function Preview() {
           el.play().catch((e: unknown) => {
             // Interrupted by a seek/pause is normal; anything else is a real playback problem.
             if (e instanceof DOMException && e.name === "AbortError") return;
-            setMediaError(layer.asset.id, "Playback was blocked or failed");
+            // a load error already said why: keep that message
+            if (el.error) return setMediaError(layer.asset.id, mediaErrorMessage(el.error.code));
+            const why = e instanceof DOMException ? ` (${e.name})` : "";
+            setMediaError(layer.asset.id, `Playback was blocked or failed${why}`);
           });
         }
       }

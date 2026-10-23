@@ -45,6 +45,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
+          # the AppImage bundles GStreamer from this machine (bundleMediaFramework): without these it has no H.264 / AAC decoder
+          sudo apt-get install -y gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav gstreamer1.0-gl
 
       - run: pnpm install --frozen-lockfile
 
