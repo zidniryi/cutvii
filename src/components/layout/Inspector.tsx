@@ -6,6 +6,9 @@ import { CropPanel } from "@/components/inspector/CropPanel";
 import { MediaInfo } from "@/components/inspector/MediaInfo";
 import { ResetButton } from "@/components/inspector/ResetButton";
 import { Section } from "@/components/inspector/Section";
+import { AudioStylePanel } from "@/components/inspector/AudioStylePanel";
+import { BeatPanel } from "@/components/inspector/BeatPanel";
+import { BeatEffectsPanel } from "@/components/inspector/BeatEffectsPanel";
 import { CleanPanel } from "@/components/inspector/CleanPanel";
 import { DuckPanel } from "@/components/inspector/DuckPanel";
 import { SoundPanel } from "@/components/inspector/SoundPanel";
@@ -807,6 +810,11 @@ function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset;
             <CropPanel key={`${clip.id}-crop`} clip={clip} asset={asset} />
           </Section>
         )}
+        {active === "video" && asset.type === "video" && !clip.reversed && (
+          <Section id="beatfx" title="Beat effects">
+            <BeatEffectsPanel key={`${clip.id}-beatfx`} clip={clip} />
+          </Section>
+        )}
         {active === "transition" && <TransitionPanel key={`${clip.id}-transition`} clip={clip} />}
         {active === "video" &&
           ((asset.type === "image" && !asset.text && !asset.alpha) || asset.type === "video") && (
@@ -829,6 +837,11 @@ function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset;
             />
           </Section>
         )}
+        {active === "audio" && onAudioTrack && (
+          <Section id="soundstyle" title="Style">
+            <AudioStylePanel key={`${clip.id}-style`} clip={clip} />
+          </Section>
+        )}
         {active === "audio" && (
           <Section id="clean" title="Clean up sound">
             <CleanPanel key={`${clip.id}-clean`} clip={clip} asset={asset} />
@@ -837,6 +850,11 @@ function ClipTabs({ clip, asset, fps }: { clip: TimelineClip; asset: MediaAsset;
         {active === "audio" && (
           <Section id="duck" title="Ducking">
             <DuckPanel key={`${clip.id}-duck`} clip={clip} />
+          </Section>
+        )}
+        {active === "audio" && (
+          <Section id="beats" title="Beats">
+            <BeatPanel key={`${clip.id}-beats`} clip={clip} asset={asset} />
           </Section>
         )}
         {active === "speed" && (

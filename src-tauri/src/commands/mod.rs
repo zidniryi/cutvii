@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod beats;
 pub mod clip_tools;
 pub mod clipper;
 pub mod drop;

@@ -1,8 +1,8 @@
 import { z } from "zod";
 import transitionKinds from "../../presets/transitions.json";
 
-/** Bump when the on-disk shape changes, and add a migration in `src-tauri/src/project/migrate.rs`. v2: clip speed. v3: fitMode. v4: fitBackground. v5: text assets. v6: clip crop, text font, rotation and flip, clip mute and fades, clip colour, text styles. v7: clip LUT. */
-export const SCHEMA_VERSION = 8;
+/** Bump when the on-disk shape changes, and add a migration in `src-tauri/src/project/migrate.rs`. v2: clip speed. v3: fitMode. v4: fitBackground. v5: text assets. v6: clip crop, text font, rotation and flip, clip mute and fades, clip colour, text styles. v7: clip LUT. v8: see-through pictures. v9: clip beatFx. v10: clip audioStyle. */
+export const SCHEMA_VERSION = 10;
 
 /** Tolerance (seconds) when comparing a clip's sourceOut with the asset duration. */
 const DURATION_EPSILON = 1e-3;
@@ -251,6 +251,28 @@ export const AudioCleanSchema = z
   })
   .strict();
 
+/** Limits of an audio style. The same numbers are enforced in Rust (`project/model.rs`, `AudioStyle::problem`). */
+export const AUDIO_STYLE_LIMITS = { minPitch: 50, maxPitch: 200, maxBass: 12 } as const;
+
+/**
+ * A style for a clip's sound. The tempo is NOT here: it is the clip's own `speed` (kept in pitch), so length,
+ * beats and the preview rate follow the one speed formula. `baseSpeed` / `baseKeepPitch` are what the clip goes
+ * back to when the style is removed.
+ */
+export const AudioStyleSchema = z
+  .object({
+    preset: z.enum(["sped", "slowed", "bass", "custom"]),
+    /** Pitch as a percent of the original, moved independently of the tempo. */
+    pitch: z.number().min(AUDIO_STYLE_LIMITS.minPitch).max(AUDIO_STYLE_LIMITS.maxPitch),
+    /** Reverb amount, 0 (none) to 1. */
+    reverb: z.number().min(0).max(1),
+    /** Bass boost in dB. */
+    bass: z.number().min(0).max(AUDIO_STYLE_LIMITS.maxBass),
+    baseSpeed: z.number().min(0.1).max(10).optional(),
+    baseKeepPitch: z.boolean().optional(),
+  })
+  .strict();
+
 export const ClipLutSchema = z
   .object({
     id: z.string().regex(/^[0-9a-f]{24}$/, "is not a LUT id"),
@@ -284,6 +306,46 @@ export const TRANSFORM_LIMITS = { offset: 2, minScale: 0.05, maxScale: 4, rotati
 export const TRANSITION_LIMITS = { min: 0.1, max: 3 } as const;
 
 /** How a clip comes in: one of the kinds in `presets/transitions.json`, and for how long. */
+/** Beat Sync limits. The same numbers are enforced in Rust (`project/model.rs`, `BeatFx::problem`). */
+export const BEAT_LIMITS = {
+  maxEffects: 8,
+  minBpm: 30,
+  maxBpm: 300,
+  maxGridOffsetMs: 2000,
+  maxEffectOffsetMs: 1000,
+} as const;
+
+export const BeatEffectSchema = z
+  .object({
+    kind: z.enum(["zoom", "shake", "flash", "glitch"]),
+    intensity: z.number().min(0).max(1),
+    everyNthBeat: z.union([z.literal(1), z.literal(2), z.literal(4), z.literal(8)]),
+    offsetMs: z.number().min(-BEAT_LIMITS.maxEffectOffsetMs).max(BEAT_LIMITS.maxEffectOffsetMs),
+    easing: z.enum(["out", "in-out", "linear"]).optional(),
+  })
+  .strict();
+
+/**
+ * Beat Sync on a clip. The beat grid is not in the project: Rust caches it (`media/beats.rs`) under
+ * `gridId`. Grid times are source times, so trim and speed keep beats on the same sound.
+ */
+export const BeatFxSchema = z
+  .object({
+    /** Effects drawn on the beats (a later step); may be empty. */
+    effects: z.array(BeatEffectSchema).max(BEAT_LIMITS.maxEffects),
+    gridId: z
+      .string()
+      .regex(/^[0-9a-fA-F]{16}$/)
+      .optional(),
+    /** Beats per minute chosen by the user (typed or tapped) instead of the detected tempo. */
+    bpmOverride: z.number().min(BEAT_LIMITS.minBpm).max(BEAT_LIMITS.maxBpm).optional(),
+    /** Every other beat ("half") or one more between each two ("double"). */
+    halfDouble: z.enum(["half", "double"]).optional(),
+    /** The whole grid moved later (positive) or earlier, in milliseconds. */
+    offsetMs: z.number().min(-BEAT_LIMITS.maxGridOffsetMs).max(BEAT_LIMITS.maxGridOffsetMs).optional(),
+  })
+  .strict();
+
 export const ClipTransitionSchema = z
   .object({
     kind: z.string().refine((id) => transitionKinds.some((k) => k.id === id), "is not a transition"),
@@ -375,6 +437,9 @@ export const TimelineClipSchema = z
     transitionIn: ClipTransitionSchema.optional(),
     /** The transition this clip leaves with; absent means a plain cut. */
     transitionOut: ClipTransitionSchema.optional(),
+    /** Beat Sync: the cached beat grid the clip follows, its adjustments and the beat effects. */
+    beatFx: BeatFxSchema.optional(),
+    audioStyle: AudioStyleSchema.optional(),
   })
   .strict()
   .refine((c) => c.sourceOut > c.sourceIn, {
@@ -454,8 +519,11 @@ export const ProjectSchema = z
 export type ColorAdjust = z.infer<typeof ColorAdjustSchema>;
 export type ClipLut = z.infer<typeof ClipLutSchema>;
 export type AudioClean = z.infer<typeof AudioCleanSchema>;
+export type AudioStyle = z.infer<typeof AudioStyleSchema>;
 export type Keyframes = z.infer<typeof KeyframesSchema>;
 export type ClipTransition = z.infer<typeof ClipTransitionSchema>;
+export type BeatFx = z.infer<typeof BeatFxSchema>;
+export type BeatEffect = z.infer<typeof BeatEffectSchema>;
 export type Crop = z.infer<typeof CropSchema>;
 export type TextSpec = z.infer<typeof TextSpecSchema>;
 export type TextStyle = z.infer<typeof TextStyleSchema>;

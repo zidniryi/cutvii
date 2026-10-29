@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
+import { useBeatSafety } from "@/store/beatSafety";
 import { useUiStore } from "@/store/ui";
 import { manualCheck, readUpdatePrefs, writeUpdatePrefs } from "@/updates/updates";
 
@@ -15,6 +16,7 @@ function SettingsBody() {
   const rootRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const [auto, setAuto] = useState(() => readUpdatePrefs().auto);
+  const reduceFlashing = useBeatSafety((s) => s.reduceFlashing);
   useFocusTrap(rootRef, closeRef);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -56,6 +58,21 @@ function SettingsBody() {
             <span className="mt-0.5 block text-xs text-text-muted">
               At most once a day CutVii asks GitHub whether a newer version exists. Nothing is downloaded or
               installed. Off means no request at all.
+            </span>
+          </span>
+        </label>
+        <label className="flex min-h-11 items-start gap-3 text-sm">
+          <input
+            type="checkbox"
+            className="mt-1 size-4 accent-[var(--accent)]"
+            checked={reduceFlashing}
+            onChange={(e) => useBeatSafety.getState().setReduceFlashing(e.target.checked)}
+          />
+          <span>
+            Reduce flashing
+            <span className="mt-0.5 block text-xs text-text-muted">
+              Beat effects: a flash is kept to half strength and at most three a second in the export. Turn
+              off only if you know flashing is safe for your viewers.
             </span>
           </span>
         </label>

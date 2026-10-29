@@ -78,6 +78,29 @@ unless a line says otherwise.
   plays the original sound; "Listen to 6 s" plays a cleaned sample, and the export is cleaned.
 - **Ducking:** a clip (music) is turned down while other clips make sound and comes back afterwards.
   Export only; the preview plays it at full level.
+- **Beats (Beat Sync, first part):** "Detect beats" in the Audio tab finds the tempo and beats of the part
+  of the sound a clip uses, on this computer (no model, no network), with progress, time left and Stop;
+  cached. Half / Normal / Double, a typed or tapped tempo, move the beats by 10 ms or half a beat. It says
+  when there is no clear beat or the tempo changes.
+- **Beat markers and snapping:** the beats show as small ticks on the clip and above the seek bar (selected
+  clip). A "Snap to beats" switch in the timeline toolbar (shown once a clip has beats) lets clip edges
+  snap to the beats of the other clips.
+- **Cut on beats:** split a clip at every 1st / 2nd / 4th / 8th beat, optionally removing the part before
+  the first beat and closing the gap. One undo step.
+- **Match to the beat (Auto-match):** pick videos and pictures in the media library, select a clip whose
+  beats were found, press "Match to beat". They are placed one after another on a new "Beat edit" track from
+  the first beat, each lasting 1, 2, 4 or 8 beats (optionally going round the list again; videos muted unless
+  you keep their sound). One undo step.
+- **Beat effects:** in the Video tab of a video clip whose beats were found, add up to
+  eight effects (Zoom pulse, Shake, Flash, Glitch). Each has a strength, how often it fires (each, 2nd, 4th or
+  8th beat), an easing and a delay. They are drawn in the export after crop and colour, and in the preview
+  ("Preview on canvas" switches that off). "Reduce flashing" (Settings, on by default) keeps a flash to half
+  strength and at most three a second.
+
+- **Sound style (Audio tab, clips on an audio track):** Off, Sped up, Slowed + reverb, Bass boost or Custom
+  (tempo, pitch, reverb, bass). The tempo is the clip's speed, so the clip gets shorter or longer (and offers to
+  move the clips after it). The export draws the pitch, reverb and bass with FFmpeg and keeps loud results from
+  clipping; the preview plays the tempo only. A note about copyright is shown the first time.
 
 ## Colour
 

@@ -507,6 +507,17 @@ mod tests {
             opts: &ExportOptions,
             out: &Path,
         ) -> (AppResult<ExportReport>, Vec<f64>) {
+            self.export_with(project, opts, out, true)
+        }
+
+        /// Like [`Env::export`], choosing whether "Reduce flashing" is on. Beat grids come from `<dir>/beats`.
+        fn export_with(
+            &self,
+            project: &Project,
+            opts: &ExportOptions,
+            out: &Path,
+            reduce_flashing: bool,
+        ) -> (AppResult<ExportReport>, Vec<f64>) {
             let facts = gather_facts(project, &self.backend);
             let mut plan = match build_plan(project, opts, &facts) {
                 Ok(p) => p,
@@ -514,6 +525,9 @@ mod tests {
             };
             // imported LUTs come from the test's own folder, as the app's come from the app data folder
             if let Err(e) = plan.bake_user_luts(&self.dir.join("luts")) {
+                return (Err(e), vec![]);
+            }
+            if let Err(e) = plan.resolve_beat_fx(&self.dir.join("beats"), reduce_flashing) {
                 return (Err(e), vec![]);
             }
             let mut seen = Vec::new();
@@ -674,7 +688,7 @@ mod tests {
     }
     fn project(assets: Vec<Value>, tracks: Vec<Value>) -> Project {
         serde_json::from_value(json!({
-            "id": "p", "name": "t", "schemaVersion": 8,
+            "id": "p", "name": "t", "schemaVersion": 10,
             "createdAt": "2026-01-01T00:00:00.000Z", "modifiedAt": "2026-01-01T00:00:00.000Z",
             "settings": {"width": 640, "height": 360, "fps": 30, "backgroundColor": "#202020"},
             "assets": assets, "tracks": tracks
@@ -2017,7 +2031,7 @@ mod tests {
             )],
         );
         let o = ExportOptions {
-            format: ExportFormat::M4a,
+            format: ExportFormat::Wav,
             ..opts(Quality::Draft)
         };
         let err = e
@@ -2932,5 +2946,346 @@ mod tests {
         assert!(f[&red].exists && f[&red].has_audio);
         assert!(f[&blue].exists && !f[&blue].has_audio);
         assert!(!f["/definitely/not/here.mp4"].exists);
+    }
+
+    /// 4 s, 320x180: a white box on black, so a zoom is seen at the box's edge.
+    fn white_box(e: &Env) -> String {
+        e.make(
+            "box.mp4",
+            &[
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=black:s=320x180:r=30:d=4,drawbox=x=110:y=60:w=100:h=60:c=white:t=fill",
+                "-pix_fmt",
+                "yuv420p",
+            ],
+        )
+    }
+
+    /// Cache a 120 BPM grid (a beat every half second from 0.5 s) the way the app's beat job would.
+    fn store_beats(e: &Env, id: &str) {
+        let beats: Vec<f64> = (0..8).map(|i| 0.5 + i as f64 * 0.5).collect();
+        let grid = crate::media::beats::BeatGrid {
+            version: crate::media::beats::ALGORITHM_VERSION,
+            start: 0.0,
+            end: 4.0,
+            bpm: 120.0,
+            offset: 0.5,
+            clarity: 0.9,
+            clear: true,
+            steady: true,
+            beats,
+        };
+        crate::media::beats::write_grid(&grid, &e.dir.join("beats").join(format!("{id}.json")))
+            .unwrap();
+    }
+
+    fn beat_project(e: &Env, path: &str, effects: Value, extra: Value) -> Project {
+        let mut c = clip("c1", "src", "v1", 0.0, 0.0, 3.0, 1.0);
+        c["fitMode"] = json!("fill");
+        c["beatFx"] = json!({"effects": effects, "gridId": "0123456789abcdef"});
+        if let Some(extra) = extra.as_object() {
+            for (k, v) in extra {
+                c[k] = v.clone();
+            }
+        }
+        let mut a = asset("src", path, "video", Some(4.0));
+        a["width"] = json!(320);
+        a["height"] = json!(180);
+        let _ = e;
+        project(
+            vec![a],
+            vec![track("v1", "video", 0, false, false, vec![c])],
+        )
+    }
+
+    /// Beat effects in a real export: a zoom pulse shows at the beat and is gone between beats, a flash is
+    /// capped by "Reduce flashing", and a clip whose beats are gone stops the export with a clear message.
+    #[test]
+    fn beat_effects_show_at_the_beat_and_not_between() {
+        let Some(e) = env("beatfx") else { return };
+        store_beats(&e, "0123456789abcdef");
+        let boxed = white_box(&e);
+
+        // zoom pulse: 1.15x at each beat (1.0 s = frame 30), back to 1x after 0.35 s
+        let zoom = beat_project(
+            &e,
+            &boxed,
+            json!([{"kind": "zoom", "intensity": 1, "everyNthBeat": 1, "offsetMs": 0}]),
+            json!({}),
+        );
+        let out = e.dir.join("zoom.mp4");
+        let (r, _) = e.export(&zoom, &opts(Quality::Draft), &out);
+        r.unwrap();
+        assert!(e.decodes_cleanly(&out));
+        // the canvas is 640x360 and the box's left edge is at x = 220; zoomed it moves out to x = 205
+        let edge = "8:20:210:170";
+        assert!(
+            near(e.region(&out, 1.0, edge), (255, 255, 255), 60),
+            "at the beat: {:?}",
+            e.region(&out, 1.0, edge)
+        );
+        assert!(
+            near(e.region(&out, 1.4, edge), (0, 0, 0), 40),
+            "between beats: {:?}",
+            e.region(&out, 1.4, edge)
+        );
+        assert!(
+            near(e.region(&out, 0.2, edge), (0, 0, 0), 40),
+            "before the first beat"
+        );
+        let facts = e.backend.probe(Path::new(&out)).unwrap();
+        assert!(
+            (facts.duration.unwrap() - 3.0).abs() < 0.1,
+            "length unchanged"
+        );
+
+        // the same clip with the intensity at 0 is the plain picture
+        let off = beat_project(
+            &e,
+            &boxed,
+            json!([{"kind": "zoom", "intensity": 0, "everyNthBeat": 1, "offsetMs": 0}]),
+            json!({}),
+        );
+        let out0 = e.dir.join("off.mp4");
+        e.export(&off, &opts(Quality::Draft), &out0).0.unwrap();
+        assert!(
+            near(e.region(&out0, 1.0, edge), (0, 0, 0), 40),
+            "intensity 0 draws nothing"
+        );
+
+        // flash on a flat red clip: green rises at the beat. Reduce flashing halves the strongest flash.
+        let red = e.red();
+        let flash = beat_project(
+            &e,
+            &red,
+            json!([{"kind": "flash", "intensity": 1, "everyNthBeat": 1, "offsetMs": 0}]),
+            json!({}),
+        );
+        let (soft, strong) = (e.dir.join("soft.mp4"), e.dir.join("strong.mp4"));
+        e.export_with(&flash, &opts(Quality::Draft), &soft, true)
+            .0
+            .unwrap();
+        e.export_with(&flash, &opts(Quality::Draft), &strong, false)
+            .0
+            .unwrap();
+        let whole = "600:300:20:30";
+        let g = |p: &Path, t: f64| e.region(p, t, whole).1 as i32;
+        assert!(
+            (g(&soft, 1.0) - 64).abs() < 25,
+            "reduced: {}",
+            g(&soft, 1.0)
+        );
+        assert!(
+            (g(&strong, 1.0) - 128).abs() < 25,
+            "full: {}",
+            g(&strong, 1.0)
+        );
+        assert!(g(&soft, 1.4) < 15 && g(&strong, 1.4) < 15, "between beats");
+
+        // every effect at once renders cleanly
+        let all = beat_project(
+            &e,
+            &boxed,
+            json!([
+                {"kind": "zoom", "intensity": 0.8, "everyNthBeat": 1, "offsetMs": 0},
+                {"kind": "shake", "intensity": 1, "everyNthBeat": 2, "offsetMs": 40, "easing": "linear"},
+                {"kind": "flash", "intensity": 0.6, "everyNthBeat": 4, "offsetMs": 0, "easing": "in-out"},
+                {"kind": "glitch", "intensity": 1, "everyNthBeat": 1, "offsetMs": 0}
+            ]),
+            json!({"crop": {"left": 0.1, "top": 0.0, "right": 0.1, "bottom": 0.0}, "speed": 1.5}),
+        );
+        let all_out = e.dir.join("all.mp4");
+        e.export(&all, &opts(Quality::Draft), &all_out).0.unwrap();
+        assert!(e.decodes_cleanly(&all_out));
+
+        // beats gone from the cache: the export stops and says what to do
+        fs::remove_file(e.dir.join("beats").join("0123456789abcdef.json")).unwrap();
+        let (r, _) = e.export(&zoom, &opts(Quality::Draft), &e.dir.join("never.mp4"));
+        let message = r.unwrap_err().to_string();
+        assert!(
+            message.contains("Detect beats again") && message.contains("box.mp4"),
+            "{message}"
+        );
+        assert!(!e.dir.join("never.mp4").exists());
+    }
+
+    #[test]
+    fn beat_effects_are_left_out_with_a_note_where_they_cannot_work() {
+        let Some(e) = env("beatfx-skip") else { return };
+        let boxed = white_box(&e);
+        let effects = json!([{"kind": "zoom", "intensity": 1, "everyNthBeat": 1, "offsetMs": 0}]);
+        let reversed = beat_project(&e, &boxed, effects.clone(), json!({"reversed": true}));
+        let plan = build_plan(
+            &reversed,
+            &opts(Quality::Draft),
+            &gather_facts(&reversed, &e.backend),
+        )
+        .unwrap();
+        assert!(plan.clips[0].beat_fx.is_none());
+        assert!(
+            plan.warnings.iter().any(|w| w.contains("plays backwards")),
+            "{:?}",
+            plan.warnings
+        );
+        let mut ungridded = beat_project(&e, &boxed, effects.clone(), json!({}));
+        ungridded.tracks[0].clips[0]
+            .beat_fx
+            .as_mut()
+            .unwrap()
+            .grid_id = None;
+        let plan = build_plan(
+            &ungridded,
+            &opts(Quality::Draft),
+            &gather_facts(&ungridded, &e.backend),
+        )
+        .unwrap();
+        assert!(plan.clips[0].beat_fx.is_none());
+        assert!(
+            plan.warnings
+                .iter()
+                .any(|w| w.contains("no detected beats")),
+            "{:?}",
+            plan.warnings
+        );
+        let mut sizeless = beat_project(&e, &boxed, effects, json!({}));
+        sizeless.assets[0].width = None;
+        let plan = build_plan(
+            &sizeless,
+            &opts(Quality::Draft),
+            &gather_facts(&sizeless, &e.backend),
+        )
+        .unwrap();
+        assert!(plan.clips[0].beat_fx.is_none());
+        assert!(
+            plan.warnings.iter().any(|w| w.contains("size")),
+            "{:?}",
+            plan.warnings
+        );
+    }
+
+    fn audio_opts() -> ExportOptions {
+        ExportOptions {
+            format: ExportFormat::Wav,
+            ..opts(Quality::Draft)
+        }
+    }
+
+    /// Pitch of a steady tone: the rising zero crossings per second of `len` seconds from `from`.
+    fn frequency(e: &Env, file: &Path, from: f64, len: f64) -> f64 {
+        let out = command(&e.ffmpeg)
+            .args([
+                "-v",
+                "error",
+                "-ss",
+                &format!("{from}"),
+                "-t",
+                &format!("{len}"),
+                "-i",
+            ])
+            .arg(file)
+            .args(["-vn", "-ac", "1", "-ar", "48000", "-f", "s16le", "-"])
+            .output()
+            .unwrap();
+        let samples: Vec<i16> = out
+            .stdout
+            .chunks_exact(2)
+            .map(|b| i16::from_le_bytes([b[0], b[1]]))
+            .collect();
+        let crossings = samples.windows(2).filter(|w| w[0] < 0 && w[1] >= 0).count();
+        crossings as f64 / len
+    }
+
+    /// Highest sample of the file, in dB (volumedetect's max_volume).
+    fn peak_db(e: &Env, file: &Path) -> f64 {
+        let out = command(&e.ffmpeg)
+            .args(["-hide_banner", "-i"])
+            .arg(file)
+            .args(["-vn", "-af", "volumedetect", "-f", "null", "-"])
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&out.stderr).into_owned();
+        text.lines()
+            .find_map(|l| l.split("max_volume:").nth(1))
+            .and_then(|v| v.trim().trim_end_matches("dB").trim().parse::<f64>().ok())
+            .unwrap_or_else(|| panic!("no max_volume in:\n{text}"))
+    }
+
+    /// A styled sound clip in a real export: sped up raises the pitch and shortens the clip by the speed
+    /// formula, slowed + reverb lowers the pitch and lengthens it, and a bass boost cannot clip.
+    #[test]
+    fn audio_styles_change_pitch_and_length_and_never_clip() {
+        let Some(e) = env("audiostyle") else { return };
+        let tone = e.tone(); // 3 s, 440 Hz
+        let loud = e.make(
+            "loud.wav",
+            &["-f", "lavfi", "-i", "sine=frequency=80:duration=3,volume=6"],
+        );
+        let render = |name: &str, path: &str, speed: f64, style: Value| {
+            let mut c = clip("c", "snd", "a1", 0.0, 0.0, 3.0, 1.0);
+            c["speed"] = json!(speed);
+            c["keepPitch"] = json!(true);
+            c["audioStyle"] = style;
+            let p = project(
+                vec![asset("snd", path, "audio", Some(3.0))],
+                vec![track("a1", "audio", 0, false, false, vec![c])],
+            );
+            let out = e.dir.join(name);
+            let r = e
+                .export(&p, &audio_opts(), &out)
+                .0
+                .unwrap_or_else(|err| panic!("{name}: {err}"));
+            (out, r)
+        };
+
+        let (sped, r) = render(
+            "sped.wav",
+            &tone,
+            1.25,
+            json!({"preset": "sped", "pitch": 125, "reverb": 0, "bass": 0, "baseSpeed": 1}),
+        );
+        assert!(
+            (r.duration - 2.4).abs() < 0.15,
+            "3 s at 1.25x is 2.4 s, got {}",
+            r.duration
+        );
+        assert!(r.has_audio);
+        let f = frequency(&e, &sped, 0.3, 1.0);
+        assert!(
+            (f - 550.0).abs() < 8.0,
+            "440 Hz raised by 25 % is 550 Hz, got {f}"
+        );
+
+        let (slowed, r) = render(
+            "slowed.wav",
+            &tone,
+            0.85,
+            json!({"preset": "slowed", "pitch": 85, "reverb": 0.5, "bass": 0}),
+        );
+        assert!(
+            (r.duration - 3.53).abs() < 0.2,
+            "3 s at 0.85x is 3.53 s, got {}",
+            r.duration
+        );
+        let f = frequency(&e, &slowed, 0.3, 1.0);
+        assert!(
+            (f - 374.0).abs() < 8.0,
+            "440 Hz lowered by 15 % is 374 Hz, got {f}"
+        );
+
+        // the same loud bass note boosted by 12 dB: without the limiter this is far above full scale
+        let (boosted, r) = render(
+            "bass.wav",
+            &loud,
+            1.0,
+            json!({"preset": "bass", "pitch": 100, "reverb": 0, "bass": 12}),
+        );
+        assert!((r.duration - 3.0).abs() < 0.15);
+        assert!(
+            peak_db(&e, &boosted) < -0.3,
+            "peak {} dB",
+            peak_db(&e, &boosted)
+        );
     }
 }

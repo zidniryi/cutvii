@@ -82,6 +82,11 @@ export function Timeline() {
   const pps = useTimelineViewStore((s) => s.pps);
   const snapping = useTimelineViewStore((s) => s.snapping);
   const toggleSnapping = useTimelineViewStore((s) => s.toggleSnapping);
+  const snapBeats = useTimelineViewStore((s) => s.snapBeats);
+  const toggleSnapBeats = useTimelineViewStore((s) => s.toggleSnapBeats);
+  const hasBeats = useProjectStore((s) =>
+    s.project.tracks.some((t) => t.clips.some((c) => c.beatFx?.gridId)),
+  );
   const scrollTarget = useTimelineViewStore((s) => s.scrollTarget);
   const dropPreview = useDragDropStore((s) => s.preview);
 
@@ -249,6 +254,16 @@ export function Timeline() {
             className={cn(snapping && "text-accent")}
             onClick={toggleSnapping}
           />
+          {hasBeats && (
+            <IconButton
+              label={snapBeats ? "Snap to beats on" : "Snap to beats off"}
+              icon={<AudioLines />}
+              aria-pressed={snapBeats}
+              className={cn(snapBeats && snapping && "text-accent")}
+              disabled={!snapping}
+              onClick={toggleSnapBeats}
+            />
+          )}
           <IconButton
             label="Zoom out"
             shortcut="Ctrl/⌘ −"

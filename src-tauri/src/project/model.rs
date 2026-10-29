@@ -4,7 +4,7 @@ use crate::media::MediaType;
 use crate::media::color::ColorAdjust;
 use crate::media::text::TextSpec;
 
-pub const SCHEMA_VERSION: u32 = 8;
+pub const SCHEMA_VERSION: u32 = 10;
 
 /// An imported colour table (`.cube`) on a clip. The table itself is not in the project: CutVii keeps its
 /// own checked copy in the app data folder (`media/cube.rs`), found by `id`.
@@ -46,6 +46,61 @@ impl AudioClean {
     /// Nothing is switched on.
     pub fn is_off(&self) -> bool {
         self.noise <= 0.0 && !self.rumble
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AudioStylePreset {
+    Sped,
+    Slowed,
+    Bass,
+    Custom,
+}
+
+/// Limits of an audio style (`export/audiostyle.rs`). Pitch is a share of the original pitch in percent.
+pub const AUDIO_PITCH_RANGE: (f64, f64) = (50.0, 200.0);
+pub const AUDIO_BASS_MAX_DB: f64 = 12.0;
+
+/// A style for a clip's sound (sped up, slowed + reverb, bass boost, custom). The tempo is NOT stored here: it
+/// is the clip's own `speed` (with `keepPitch`), so the clip's length, the beats and the preview rate follow
+/// the one speed formula. `baseSpeed` / `baseKeepPitch` remember what to go back to when the style is removed.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AudioStyle {
+    pub preset: AudioStylePreset,
+    /// Pitch as a percent of the original (100 = unchanged), moved independently of the tempo.
+    pub pitch: f64,
+    /// Reverb amount, 0 (none) to 1.
+    pub reverb: f64,
+    /// Bass boost in dB, 0 to 12.
+    pub bass: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_speed: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_keep_pitch: Option<bool>,
+}
+
+impl AudioStyle {
+    pub fn problem(&self) -> Option<&'static str> {
+        if !(AUDIO_PITCH_RANGE.0..=AUDIO_PITCH_RANGE.1).contains(&self.pitch) {
+            return Some("pitch: must be between 50 and 200 percent");
+        }
+        if !(0.0..=1.0).contains(&self.reverb) {
+            return Some("reverb: must be between 0 and 1");
+        }
+        if !(0.0..=AUDIO_BASS_MAX_DB).contains(&self.bass) {
+            return Some("bass: must be between 0 and 12 dB");
+        }
+        if self.base_speed.is_some_and(|s| !(0.1..=10.0).contains(&s)) {
+            return Some("baseSpeed: must be between 0.1 and 10");
+        }
+        None
+    }
+
+    /// Pitch, reverb and bass all at their neutral value (the tempo is the clip's speed).
+    pub fn is_neutral(&self) -> bool {
+        (self.pitch - 100.0).abs() < 1e-9 && self.reverb <= 0.0 && self.bass <= 0.0
     }
 }
 
@@ -186,6 +241,115 @@ pub struct TimelineClip {
     /// The transition this clip leaves with. Absent means a plain cut.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transition_out: Option<ClipTransition>,
+    /// Beat Sync: which cached beat grid the clip follows, how it is adjusted, and the beat effects.
+    /// Absent means none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub beat_fx: Option<BeatFx>,
+    /// A sound style (pitch, reverb, bass; the tempo is `speed`). Absent means none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_style: Option<AudioStyle>,
+}
+
+/// Most beat effects one clip may have.
+pub const MAX_BEAT_EFFECTS: usize = 8;
+/// Limits of the beat grid adjustments.
+pub const BEAT_BPM_RANGE: (f64, f64) = (30.0, 300.0);
+pub const MAX_BEAT_OFFSET_MS: f64 = 2000.0;
+pub const MAX_EFFECT_OFFSET_MS: f64 = 1000.0;
+
+/// Beat Sync on a clip. The grid itself is not in the project: it is cached by Rust (`media/beats.rs`) and
+/// found by `grid_id`. Times of the grid are source times, so trim and speed keep beats on the same sound.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BeatFx {
+    /// Effects drawn on the beats (built in a later step); may be empty.
+    #[serde(default)]
+    pub effects: Vec<BeatEffect>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grid_id: Option<String>,
+    /// Beats per minute chosen by the user (typed or tapped) instead of the detected tempo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bpm_override: Option<f64>,
+    /// Use every other beat ("half") or add one between each two ("double").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub half_double: Option<HalfDouble>,
+    /// The whole grid moved later (positive) or earlier, in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset_ms: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HalfDouble {
+    Half,
+    Double,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BeatEffectKind {
+    Zoom,
+    Shake,
+    Flash,
+    Glitch,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BeatEasing {
+    Out,
+    InOut,
+    Linear,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BeatEffect {
+    pub kind: BeatEffectKind,
+    /// 0 (no effect) to 1.
+    pub intensity: f64,
+    /// 1, 2, 4 or 8.
+    pub every_nth_beat: u32,
+    pub offset_ms: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub easing: Option<BeatEasing>,
+}
+
+impl BeatFx {
+    /// The first problem with the values, if any.
+    pub fn problem(&self) -> Option<String> {
+        if self.effects.len() > MAX_BEAT_EFFECTS {
+            return Some(format!("at most {MAX_BEAT_EFFECTS} beat effects"));
+        }
+        if let Some(id) = &self.grid_id
+            && (id.len() != 16 || !id.bytes().all(|b| b.is_ascii_hexdigit()))
+        {
+            return Some("gridId: invalid".into());
+        }
+        if let Some(bpm) = self.bpm_override
+            && !(BEAT_BPM_RANGE.0..=BEAT_BPM_RANGE.1).contains(&bpm)
+        {
+            return Some("bpmOverride: must be between 30 and 300".into());
+        }
+        if self
+            .offset_ms
+            .is_some_and(|o| !(-MAX_BEAT_OFFSET_MS..=MAX_BEAT_OFFSET_MS).contains(&o))
+        {
+            return Some("offsetMs: must be between -2000 and 2000".into());
+        }
+        for e in &self.effects {
+            if !(0.0..=1.0).contains(&e.intensity) {
+                return Some("effects.intensity: must be between 0 and 1".into());
+            }
+            if ![1, 2, 4, 8].contains(&e.every_nth_beat) {
+                return Some("effects.everyNthBeat: must be 1, 2, 4 or 8".into());
+            }
+            if !(-MAX_EFFECT_OFFSET_MS..=MAX_EFFECT_OFFSET_MS).contains(&e.offset_ms) {
+                return Some("effects.offsetMs: must be between -1000 and 1000".into());
+            }
+        }
+        None
+    }
 }
 
 /// The longest fade that can be stored. A fade longer than its clip is shortened when it is applied.

@@ -9,6 +9,7 @@ import type { MediaAsset, Project, TimelineClip } from "@/project/model";
 import type { ExportOptions, Quality } from "@/export/options";
 import type { ExportReport } from "@/lib/exportApi";
 import { useAutoClipsStore } from "@/store/autoClips";
+import { useBeatSafety } from "@/store/beatSafety";
 import { usePlaybackStore } from "@/store/playback";
 import { useProjectStore } from "@/store/project";
 import { useSelectionStore } from "@/store/selection";
@@ -409,7 +410,11 @@ export async function exportSelectedClips(
   };
   onStage("Starting…");
   try {
-    const report = await invoke<BatchReport | null>("export_clips", { items, options });
+    const report = await invoke<BatchReport | null>("export_clips", {
+      items,
+      options,
+      reduceFlashing: useBeatSafety.getState().reduceFlashing,
+    });
     return { ok: true, report: report ?? null, expected: chosen.map((c) => c.sourceOut - c.sourceIn) };
   } catch (e) {
     return { ok: false, reason: message(e) };

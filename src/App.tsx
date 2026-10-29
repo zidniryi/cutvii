@@ -7,6 +7,7 @@ import { startUpdateWatcher } from "@/updates/updates";
 import { AppDialog } from "@/components/AppDialog";
 import { AutoClipsWizard } from "@/components/autoclips/AutoClipsWizard";
 import { KaraokeDialog } from "@/components/karaoke/KaraokeDialog";
+import { AutoMatchDialog } from "@/components/AutoMatchDialog";
 import { SrtImportDialog } from "@/components/SrtImportDialog";
 import { VoiceoverDialog } from "@/components/voiceover/VoiceoverDialog";
 import { StylePacksDialog } from "@/components/packs/StylePacksDialog";
@@ -99,6 +100,7 @@ export default function App() {
       <AutoClipsWizard />
       <KaraokeDialog />
       <SrtImportDialog />
+      <AutoMatchDialog />
       <VoiceoverDialog />
       <StylePacksDialog />
       <NewProjectDialog />

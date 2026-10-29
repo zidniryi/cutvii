@@ -1,0 +1,8 @@
+{
+  "zoom": { "duration": 0.35, "amount": 0.15 },
+  "shake": { "duration": 0.25, "amount": 0.02, "amountY": 0.015, "hz": 9 },
+  "flash": { "duration": 0.15, "amount": 0.5 },
+  "glitch": { "duration": 0.2, "amount": 0.02 },
+  "reduceFlashing": { "maxFlashIntensity": 0.5, "minGapSeconds": 0.34 },
+  "maxClipSeconds": 600
+}

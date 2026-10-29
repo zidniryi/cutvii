@@ -74,6 +74,9 @@ interface UiState {
   setColorDraft: (draft: { clipId: string; adjust: ColorAdjust; lut?: ClipLut } | null) => void;
   /** The clip shown without its colour changes while "Before" is held. */
   colorBefore: string | null;
+  /** "Preview on canvas": the preview draws the beat effects (the export always does). */
+  beatPreview: boolean;
+  setBeatPreview: (on: boolean) => void;
   /** Colour settings copied from a clip, to paste on another. Kept while the app is open. */
   colorClipboard: ColorAdjust | null;
   setColorClipboard: (color: ColorAdjust | null) => void;
@@ -129,6 +132,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   colorDraft: null,
   setColorDraft: (colorDraft) => set({ colorDraft }),
   colorBefore: null,
+  beatPreview: true,
+  setBeatPreview: (beatPreview) => set({ beatPreview }),
   colorClipboard: null,
   setColorClipboard: (colorClipboard) => set({ colorClipboard }),
   transformClipboard: null,

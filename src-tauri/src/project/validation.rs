@@ -200,6 +200,12 @@ pub fn validate(project: &Project) -> Result<(), Vec<String>> {
                     }
                 }
             }
+            if let Some(problem) = clip.beat_fx.as_ref().and_then(|b| b.problem()) {
+                err(format!("{at}.beatFx.{problem}"));
+            }
+            if let Some(problem) = clip.audio_style.as_ref().and_then(|s| s.problem()) {
+                err(format!("{at}.audioStyle.{problem}"));
+            }
             if clip.duck.is_some_and(|d| !(0.0..=1.0).contains(&d)) {
                 err(format!("{at}.duck: must be between 0 and 1"));
             }
@@ -299,7 +305,7 @@ mod tests {
     use super::*;
 
     fn fixture() -> Project {
-        serde_json::from_str(include_str!("../../../fixtures/project-v8.json"))
+        serde_json::from_str(include_str!("../../../fixtures/project-v10.json"))
             .expect("fixture parses")
     }
 
@@ -314,7 +320,7 @@ mod tests {
     #[test]
     fn unknown_fields_are_rejected() {
         let mut v: serde_json::Value =
-            serde_json::from_str(include_str!("../../../fixtures/project-v8.json")).unwrap();
+            serde_json::from_str(include_str!("../../../fixtures/project-v10.json")).unwrap();
         v["extra"] = 1.into();
         assert!(serde_json::from_value::<Project>(v).is_err());
     }

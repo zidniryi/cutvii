@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { ExportOptions } from "@/export/options";
+import { useBeatSafety } from "@/store/beatSafety";
 import type { Project } from "@/project/model";
 
 export interface ExportReport {
@@ -23,7 +24,11 @@ const message = (e: unknown) =>
 /** Plan, ask where to save (native dialog), render. Resolves null if the save dialog was dismissed. */
 export async function exportProject(project: Project, options: ExportOptions): Promise<ExportReport | null> {
   try {
-    return await invoke<ExportReport | null>("export_project", { project, options });
+    return await invoke<ExportReport | null>("export_project", {
+      project,
+      options,
+      reduceFlashing: useBeatSafety.getState().reduceFlashing,
+    });
   } catch (e) {
     throw new Error(message(e), { cause: e });
   }

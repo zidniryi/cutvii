@@ -1,14 +1,70 @@
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { formatTimecode } from "@/lib/timecode";
 import { scrub, seekTo, stepFrames } from "@/playback/controller";
+import { useBeatStore } from "@/store/beats";
 import { usePlaybackStore } from "@/store/playback";
 import { useProjectStore } from "@/store/project";
-import { projectDuration } from "@/timeline/clips";
+import { useSelectionStore } from "@/store/selection";
+import { beatsOnTimeline } from "@/timeline/beats";
+import { findClip, projectDuration } from "@/timeline/clips";
 
 /** Time under a pointer at `clientX` on a bar spanning [left, left + width]. */
 export function timeAtPointer(clientX: number, left: number, width: number, duration: number): number {
   if (!(width > 0) || !(duration > 0)) return 0;
   return Math.min(1, Math.max(0, (clientX - left) / width)) * duration;
+}
+
+/** Ticks on the bar are at least this far apart (out of 1000 units across the bar). */
+const MIN_TICK_GAP = 3;
+
+/**
+ * The beats of the selected clip as ticks above the bar, so cuts can be lined up while scrubbing. One path
+ * in one SVG stretched over the bar; nothing is shown for a clip without loaded beats or a reversed one.
+ */
+function BeatTicks({ duration }: { duration: number }) {
+  const selectedId = useSelectionStore((s) =>
+    s.selectedClipIds.length === 1 ? s.selectedClipIds[0] : undefined,
+  );
+  const clip = useProjectStore((s) => (selectedId ? findClip(s.project, selectedId)?.clip : undefined));
+  const path = useProjectStore((s) =>
+    clip ? s.project.assets.find((a) => a.id === clip.assetId)?.path : undefined,
+  );
+  const gridId = clip?.beatFx?.gridId;
+  const grid = useBeatStore((s) => (gridId ? s.grids[gridId] : undefined));
+  useEffect(() => {
+    if (gridId && path) useBeatStore.getState().ensureGrid(path, gridId);
+  }, [gridId, path]);
+  const d = useMemo(() => {
+    const beats = clip && grid && duration > 0 ? beatsOnTimeline(clip, grid) : null;
+    if (!beats?.length) return "";
+    let last = -Infinity;
+    let out = "";
+    for (const t of beats) {
+      const x = (t / duration) * 1000;
+      if (x < 0 || x > 1000 || x - last < MIN_TICK_GAP) continue;
+      last = x;
+      out += `M${x.toFixed(1)} 0V10`;
+    }
+    return out;
+  }, [clip, grid, duration]);
+  if (!d) return null;
+  return (
+    <svg
+      aria-hidden
+      data-testid="seek-beats"
+      className="pointer-events-none absolute -top-2 left-0 h-2.5 w-full"
+      viewBox="0 0 1000 10"
+      preserveAspectRatio="none"
+    >
+      <path
+        d={d}
+        stroke="rgba(255,255,255,0.55)"
+        strokeWidth={1}
+        fill="none"
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
+  );
 }
 
 /**
@@ -82,6 +138,7 @@ export function SeekBar() {
       className="group relative flex h-11 w-full cursor-pointer touch-none items-center select-none aria-disabled:cursor-default aria-disabled:opacity-50"
     >
       <div className="relative h-1 w-full rounded-full bg-surface-2 group-hover:h-1.5">
+        <BeatTicks duration={duration} />
         <div
           className="h-full rounded-full bg-accent"
           style={{ width: `${fraction * 100}%` }}

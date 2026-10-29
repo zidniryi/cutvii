@@ -85,6 +85,7 @@ describe("Export dialog", () => {
     expect(invokeMock).toHaveBeenCalledWith("export_project", {
       project: useProjectStore.getState().project,
       options: { width: 1280, height: 720, fps: 24, quality: "high", format: "mp4" },
+      reduceFlashing: true,
     });
 
     expect(await screen.findByRole("progressbar")).toHaveAttribute("aria-valuenow", "0");

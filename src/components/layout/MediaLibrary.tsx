@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  AudioLines,
   CircleAlert,
   FileWarning,
   Film,
@@ -22,6 +23,7 @@ import { formatDuration } from "@/lib/timecode";
 import { cn } from "@/lib/utils";
 import { relinkFlow } from "@/project/fileActions";
 import type { MediaAsset } from "@/project/model";
+import { useAutoMatch } from "@/store/autoMatch";
 import { useImportsStore, type ImportJob } from "@/store/imports";
 import { useProjectStore } from "@/store/project";
 import { beginAssetDrag } from "@/hooks/useAssetDrag";
@@ -273,6 +275,15 @@ export function MediaLibrary() {
           className="mx-2 mb-2 flex items-center gap-2 rounded-md border border-accent/40 bg-accent-soft px-2 py-1 text-xs"
         >
           <span className="min-w-0 flex-1 truncate">{selectedIds.length} selected</span>
+          <button
+            type="button"
+            title="Put the selected media one after another, each as long as a few beats of the selected clip"
+            onClick={() => useAutoMatch.getState().open(selectedIds)}
+            className="flex h-7 items-center gap-1 rounded-md px-2 text-text-muted hover:text-text pointer-coarse:h-11 [&_svg]:size-3.5"
+          >
+            <AudioLines />
+            Match to beat
+          </button>
           <button
             type="button"
             onClick={removeSelectedMedia}

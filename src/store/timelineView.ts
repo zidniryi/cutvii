@@ -6,6 +6,8 @@ interface TimelineViewState {
   /** Pixels per second. UI state only: never saved in the project. */
   pps: number;
   snapping: boolean;
+  /** Clip edges also snap to the beats of clips that have a beat grid. Only matters when a grid exists. */
+  snapBeats: boolean;
   /** Scroll position the timeline should take after a zoom (so the anchor stays put). `n` makes each request unique. */
   scrollTarget: { left: number; n: number } | null;
   setPps: (pps: number) => void;
@@ -14,11 +16,13 @@ interface TimelineViewState {
   zoomIn: () => void;
   zoomOut: () => void;
   toggleSnapping: () => void;
+  toggleSnapBeats: () => void;
 }
 
 export const useTimelineViewStore = create<TimelineViewState>((set) => ({
   pps: DEFAULT_PPS,
   snapping: true,
+  snapBeats: true,
   scrollTarget: null,
   setPps: (pps) => set({ pps: clampPps(pps) }),
   applyZoom: (pps, scrollLeft) =>
@@ -29,4 +33,5 @@ export const useTimelineViewStore = create<TimelineViewState>((set) => ({
   zoomIn: () => set((s) => ({ pps: clampPps(s.pps * ZOOM_STEP) })),
   zoomOut: () => set((s) => ({ pps: clampPps(s.pps / ZOOM_STEP) })),
   toggleSnapping: () => set((s) => ({ snapping: !s.snapping })),
+  toggleSnapBeats: () => set((s) => ({ snapBeats: !s.snapBeats })),
 }));

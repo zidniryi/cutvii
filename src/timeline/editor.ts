@@ -3,6 +3,7 @@ import { useSelectionStore } from "@/store/selection";
 import { useUiStore } from "@/store/ui";
 import { usePlaybackStore } from "@/store/playback";
 import { useProjectStore } from "@/store/project";
+import { setAudioStyle, type StyleChoice } from "./audioStyle";
 import { clipEnd, EPS, minClipDuration } from "./clips";
 import type { AudioClean, ClipTransition, Crop, FitBackground, FitMode } from "@/project/model";
 import {
@@ -31,6 +32,15 @@ import { detachAudio, setClipClean, setClipDuck, setClipSound, type ClipSound } 
 import { setClipColor, setClipLut, type ClipLut, type ColorAdjust } from "./color";
 import { setColorOnAll } from "./looks";
 import { planPlacement, type DropPlacement } from "./placement";
+import {
+  autoMatch,
+  cutOnBeats,
+  setClipBeatFx,
+  type AutoMatchOptions,
+  type BeatFxPatch,
+  type BeatGrid,
+  type CutEvery,
+} from "./beats";
 import { setTextFade } from "./text";
 import { setClipTransform, type Transform } from "./transform";
 import { setTransformAt } from "./transformBox";
@@ -158,6 +168,53 @@ export function changeClipSound(clipId: string, patch: Partial<ClipSound>): Edit
 /** Noise / rumble clean-up of a clip's sound. One undo step. */
 export function changeClean(clipId: string, patch: Partial<AudioClean>): EditResult {
   return run("Change sound clean-up", (p) => setClipClean(p, clipId, patch));
+}
+
+/** Beat Sync settings of a clip (grid id, half / double, tempo, nudge). One undo step. */
+export function changeBeatFx(clipId: string, patch: BeatFxPatch, label = "Change beats"): EditResult {
+  return run(label, (p) => setClipBeatFx(p, clipId, patch));
+}
+
+/** Give a sound clip a style (or remove it with null). One undo step; `needs-ripple` when it would grow into the next clip. */
+export function changeAudioStyle(
+  clipId: string,
+  choice: StyleChoice | null,
+  ripple = false,
+  label = "Change sound style",
+): EditResult {
+  return run(ripple ? `${label} (move following clips)` : label, (p) =>
+    setAudioStyle(p, clipId, choice, { ripple }),
+  );
+}
+
+/** Split a clip at every `every`-th beat of its grid, optionally dropping the part before the first. One undo step. */
+export function cutClipOnBeats(
+  clipId: string,
+  grid: BeatGrid,
+  options: { every: CutEvery; removeLeadIn?: boolean },
+): EditResult {
+  return run("Cut on beats", (p) => cutOnBeats(p, clipId, grid, options));
+}
+
+/**
+ * Place library media one after another on a new "Beat edit" track, each as long as its beats (Auto-match).
+ * One undo step; the new clips are selected. Returns the result and how many clips were placed.
+ */
+export function autoMatchClips(
+  musicClipId: string,
+  grid: BeatGrid,
+  assetIds: readonly string[],
+  options: AutoMatchOptions,
+): EditResult {
+  const trackId = crypto.randomUUID();
+  const result = run("Auto-match to beats", (p) =>
+    autoMatch(p, musicClipId, grid, assetIds, options, trackId),
+  );
+  if (result.ok) {
+    const track = project().tracks.find((t) => t.id === trackId);
+    if (track) useSelectionStore.getState().setSelection(track.clips.map((c) => c.id));
+  }
+  return result;
 }
 
 /** Ducking amount of a clip, 0 (off) to 1. One undo step. */

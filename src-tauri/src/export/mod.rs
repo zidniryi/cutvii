@@ -6,6 +6,8 @@
 //! - Hidden tracks contribute no picture; muted tracks contribute no sound.
 //! - Clips are placed at `timelineStart`, play `sourceOut - sourceIn` seconds at speed 1.
 
+pub mod audiostyle;
+pub mod beatfx;
 pub mod encoder;
 pub mod plan;
 pub mod render;

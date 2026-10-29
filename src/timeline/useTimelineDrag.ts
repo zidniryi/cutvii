@@ -1,5 +1,6 @@
 import { useCallback, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import type { Project } from "@/project/model";
+import { useBeatStore } from "@/store/beats";
 import { usePlaybackStore } from "@/store/playback";
 import { useProjectStore } from "@/store/project";
 import { useTimelineViewStore } from "@/store/timelineView";
@@ -7,6 +8,7 @@ import { findClip, clipDuration } from "./clips";
 import { placeClip, trimClip } from "./edit";
 import { dropClipAt, report, trimClipEdge } from "./editor";
 import { SNAP_PX, trackIndexAt } from "./geometry";
+import { projectBeatTimes } from "./beats";
 import { quantizeToFrame, snapClipMove, snapTime } from "./snap";
 
 const DRAG_THRESHOLD_PX = 3;
@@ -61,7 +63,10 @@ export function useTimelineDrag(lanesRef: RefObject<HTMLElement | null>) {
       const compute = (ev: PointerEvent): DragState | null => {
         const project = useProjectStore.getState().project;
         if (!findClip(project, clipId)) return null;
-        const { pps, snapping } = useTimelineViewStore.getState();
+        const { pps, snapping, snapBeats } = useTimelineViewStore.getState();
+        const beats = snapBeats
+          ? projectBeatTimes(project, useBeatStore.getState().grids, clipId)
+          : undefined;
         const playhead = usePlaybackStore.getState().playhead;
         const threshold = snapping ? SNAP_PX / pps : 0;
         const dt = (ev.clientX - startX) / pps;
@@ -70,7 +75,7 @@ export function useTimelineDrag(lanesRef: RefObject<HTMLElement | null>) {
           const clip = findClip(project, clipId)!.clip;
           const desired = originStart + dt;
           const snap = snapping
-            ? snapClipMove(project, clip, desired, { playhead, threshold })
+            ? snapClipMove(project, clip, desired, { playhead, threshold, beats })
             : { time: Math.max(0, quantizeToFrame(desired, project.settings.fps)), snappedTo: null };
           const top = lanesRef.current?.getBoundingClientRect().top ?? 0;
           const sorted = project.tracks;
@@ -97,7 +102,7 @@ export function useTimelineDrag(lanesRef: RefObject<HTMLElement | null>) {
 
         const origEdge = mode.trim === "start" ? originStart : originStart + duration;
         const snap = snapping
-          ? snapTime(project, origEdge + dt, { playhead, threshold, excludeClipId: clipId })
+          ? snapTime(project, origEdge + dt, { playhead, threshold, excludeClipId: clipId, beats })
           : { time: Math.max(0, quantizeToFrame(origEdge + dt, project.settings.fps)), snappedTo: null };
         const r = trimClip(project, clipId, mode.trim, snap.time);
         return {

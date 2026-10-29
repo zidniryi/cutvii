@@ -413,6 +413,20 @@ impl MediaBackend for FfmpegBackend {
             plan: graded,
             output: request.output.clone(),
         };
+        if request.plan.clips.iter().any(|c| c.style.is_some()) {
+            let filters = command(&self.ffmpeg)
+                .args(["-hide_banner", "-v", "error", "-filters"])
+                .output()?
+                .stdout;
+            let missing =
+                crate::export::audiostyle::missing_filters(&String::from_utf8_lossy(&filters));
+            if !missing.is_empty() {
+                return Err(AppError::ToolMissing(format!(
+                    "this FFmpeg lacks the audio filters {} that sound styles need; remove the style or install a full FFmpeg build",
+                    missing.join(", ")
+                )));
+            }
+        }
         let listing = if request.plan.format == ExportFormat::Mp3 || !request.plan.format.is_audio()
         {
             command(&self.ffmpeg)

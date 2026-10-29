@@ -43,7 +43,9 @@ import {
   type Rect,
 } from "@/timeline/fit";
 import { useImagePreviewStore } from "@/store/imagePreviews";
+import { BeatFrame } from "@/components/preview/BeatFrame";
 import { ColorCanvas } from "@/components/preview/ColorCanvas";
+import { useBeatLook } from "@/components/preview/useBeatLook";
 import { TransformOverlay } from "@/components/preview/TransformOverlay";
 import { boxCorners, inside, layerBox, ownTransformAt, withDraft } from "@/timeline/transformBox";
 import { useLutStore } from "@/store/luts";
@@ -468,6 +470,8 @@ function TextPicture({
 /** A held clip rests this far (seconds) before its end: on its last frame, as the export holds it. */
 const HELD_FRAME = 1 / 30;
 
+const FILL: React.CSSProperties = { left: 0, top: 0, width: "100%", height: "100%" };
+
 function LayerView({
   layer,
   register,
@@ -504,6 +508,7 @@ function LayerView({
       ),
     ),
   );
+  const beat = useBeatLook(layer.clip, asset);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const setMediaError = usePlaybackStore.getState().setMediaError;
@@ -650,6 +655,21 @@ function LayerView({
       </div>
     );
   }
+  const videoElement = (style: React.CSSProperties) => (
+    <video
+      ref={(el) => {
+        videoRef.current = el;
+        register(el);
+      }}
+      {...common}
+      crossOrigin={crossOrigin}
+      aria-hidden
+      playsInline
+      data-role="picture"
+      className="absolute max-w-none object-fill"
+      style={style}
+    />
+  );
   // Non-visible video layers stay mounted (opacity 0) so their audio keeps playing underneath.
   return (
     <div
@@ -667,32 +687,36 @@ function LayerView({
       {layout.backdrop && visible && (
         <VideoBackdrop source={videoRef} rect={layout.backdrop} style={blur} crop={crop} />
       )}
-      {framed(layout.picture, {}, (style) => (
-        <video
-          ref={(el) => {
-            videoRef.current = el;
-            register(el);
-          }}
-          {...common}
-          crossOrigin={crossOrigin}
-          aria-hidden
-          playsInline
-          data-role="picture"
-          className="absolute max-w-none object-fill"
-          style={style}
-        />
-      ))}
-      {lut &&
-        visible &&
-        framed(layout.picture, {}, (style) => (
-          <ColorCanvas
-            source={() => videoRef.current}
-            lut={lut}
-            live
-            className="absolute max-w-none"
-            style={style}
-          />
-        ))}
+      {beat && visible ? (
+        // beat effects: the fitted picture is a clipping frame; the picture inside it is moved by the effects
+        <BeatFrame look={beat} style={rectStyle(layout.picture)}>
+          {videoElement(isCropped(crop) ? cropInnerStyle(crop) : FILL)}
+          {lut && (
+            <ColorCanvas
+              source={() => videoRef.current}
+              lut={lut}
+              live
+              className="absolute max-w-none"
+              style={isCropped(crop) ? cropInnerStyle(crop) : FILL}
+            />
+          )}
+        </BeatFrame>
+      ) : (
+        <>
+          {framed(layout.picture, {}, videoElement)}
+          {lut &&
+            visible &&
+            framed(layout.picture, {}, (style) => (
+              <ColorCanvas
+                source={() => videoRef.current}
+                lut={lut}
+                live
+                className="absolute max-w-none"
+                style={style}
+              />
+            ))}
+        </>
+      )}
     </div>
   );
 }

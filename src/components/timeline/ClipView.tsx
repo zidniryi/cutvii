@@ -1,5 +1,6 @@
 import { memo, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Film, Image as ImageIcon, Music } from "lucide-react";
+import { BeatMarks } from "@/components/timeline/BeatMarks";
 import { ClipWaveform } from "@/components/timeline/ClipWaveform";
 import type { MediaType, TimelineClip } from "@/project/model";
 import { formatDuration } from "@/lib/timecode";
@@ -353,6 +354,7 @@ export const ClipView = memo(function ClipView({
           fadeOut={fades.fadeOut}
         />
       )}
+      {wavePath && clip.beatFx?.gridId && <BeatMarks clip={clip} path={wavePath} pps={pps} />}
       {fadeInHandle && (
         <FadeHandle
           clip={clip}

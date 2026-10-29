@@ -3,6 +3,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use super::audiostyle;
+use super::beatfx::{self, Params, Pulses};
 use super::transitions::{From, find as find_transition, leaving, remaining};
 use super::{ExportFormat, ExportOptions, Quality};
 use crate::errors::{AppError, AppResult};
@@ -10,7 +12,7 @@ use crate::media::MediaType;
 use crate::media::clean::{duck_filter, filters as clean_filters};
 use crate::media::color::{ColorAdjust, Overlay, ensure_graded_lut, filter_path};
 use crate::media::cube::load_cube;
-use crate::project::{AudioClean, ClipLut};
+use crate::project::{AudioClean, AudioStyle, BeatFx, ClipLut};
 use crate::project::{
     BackgroundKind, Crop, DEFAULT_BLUR_AMOUNT, FitMode, Motion, Project, TrackType, Transform,
     validate,
@@ -77,12 +79,30 @@ pub struct PlannedClip {
     /// An imported LUT to lay over `color`. Its table is loaded and baked into `lut` by
     /// [`ExportPlan::bake_user_luts`] before rendering.
     pub user_lut: Option<ClipLut>,
+    /// Pitch, bass and reverb of the clip's sound (the tempo is `speed`). `None` when it changes nothing.
+    pub style: Option<AudioStyle>,
+    /// Beat effects of the clip (with at least one effect above 0) and the size, in pixels, of the picture
+    /// they work on: the source after the crop, made even. `None` for stills, text, reversed clips and
+    /// clips whose size is unknown.
+    pub beat_fx: Option<(BeatFx, u32, u32)>,
+    /// The effects ready to render: filled by [`ExportPlan::resolve_beat_fx`] just before rendering.
+    pub beat: Option<BeatRender>,
     /// A text picture: drawn over the tracks below with its transparency kept, never on a background.
     pub transparent: bool,
     /// Contributes picture (on a visible video track, not an audio asset).
     pub video: bool,
     /// Contributes sound (track not muted, asset has audio).
     pub audio: bool,
+}
+
+/// Beat effects resolved against the clip's cached beats: what to do, and the command file that does it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BeatRender {
+    pub pulses: Vec<Pulses>,
+    pub first: Params,
+    pub width: u32,
+    pub height: u32,
+    pub commands: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -105,6 +125,70 @@ impl ExportPlan {
     /// Bake the table of every clip that uses an imported LUT: Adjust first, then the LUT (see
     /// `media/color.rs`). `cubes` is the folder of CutVii's own LUT copies. A LUT that is not there stops
     /// the export with a message that names it: the video is never silently exported without it.
+    /// Work out the beat effects of every clip that has them: read the clip's cached beats from `beats`,
+    /// find when each effect fires, and write the `sendcmd` file that drives it (see `beatfx.rs`). A clip
+    /// whose beats are gone stops the export with a message: it is never silently exported without them.
+    pub fn resolve_beat_fx(&mut self, beats: &Path, reduce_flashing: bool) -> AppResult<()> {
+        let out = std::env::temp_dir().join("cutvii-beatfx");
+        let (fps, mut notes) = (self.fps, Vec::new());
+        for (i, clip) in self.clips.iter_mut().enumerate() {
+            let Some((fx, w, h)) = clip.beat_fx.clone() else {
+                continue;
+            };
+            let name = clip
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let grid = fx
+                .grid_id
+                .as_deref()
+                .and_then(|id| crate::media::beats::read_grid(&beats.join(format!("{id}.json"))))
+                .ok_or_else(|| {
+                    AppError::InvalidInput(format!(
+                        "the beats of \"{name}\" are no longer stored, so its beat effects cannot be drawn. Open the clip's Audio tab and press Detect beats again."
+                    ))
+                })?;
+            if clip.duration > beatfx::max_clip_seconds() {
+                return Err(AppError::InvalidInput(format!(
+                    "beat effects can cover at most {} minutes of one clip; \"{name}\" is longer. Split it first.",
+                    (beatfx::max_clip_seconds() / 60.0).round()
+                )));
+            }
+            let beats = beatfx::clip_beats(
+                &grid,
+                &fx,
+                clip.source_in,
+                clip.source_in + clip.source_duration,
+                clip.speed,
+            );
+            let pulses = beatfx::pulses(&fx.effects, &beats, reduce_flashing);
+            if beats.is_empty() || pulses.iter().all(|p| p.triggers.is_empty()) {
+                notes.push(format!(
+                    "\"{name}\" has no beat inside it, so its beat effects do nothing."
+                ));
+                continue;
+            }
+            let (text, first) =
+                beatfx::command_file(&pulses, clip.duration, fps, w, h, &i.to_string());
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            text.hash(&mut hasher);
+            let commands = out.join(format!("beats-{:016x}.txt", hasher.finish()));
+            std::fs::create_dir_all(&out)?;
+            std::fs::write(&commands, text)?;
+            clip.beat = Some(BeatRender {
+                pulses,
+                first,
+                width: w,
+                height: h,
+                commands,
+            });
+        }
+        self.warnings.extend(notes);
+        Ok(())
+    }
+
     pub fn bake_user_luts(&mut self, cubes: &Path) -> AppResult<()> {
         let out = std::env::temp_dir().join("cutvii-luts");
         for clip in self.clips.iter_mut() {
@@ -296,6 +380,7 @@ pub fn build_plan(
                 fade_out,
                 clean: c.clean.filter(|k| audio && !k.is_off()),
                 duck: c.duck.filter(|_| audio).unwrap_or(0.0).clamp(0.0, 1.0),
+                style: c.audio_style.filter(|s| audio && !s.is_neutral()),
                 fit: c.fit_mode.unwrap_or_default(),
                 bg_color,
                 bg_image,
@@ -324,6 +409,8 @@ pub fn build_plan(
                     .lut
                     .clone()
                     .filter(|l| video && l.intensity > 0.0 && asset.text.is_none()),
+                beat_fx: beat_fx_of(c, asset, video, &mut warnings),
+                beat: None,
                 transparent: asset.text.is_some() || asset.alpha == Some(true),
                 video,
                 audio,
@@ -418,6 +505,51 @@ pub fn piecewise(keys: &[(f64, f64)], t: &str) -> String {
 
 fn secs(v: f64) -> String {
     format!("{v:.6}")
+}
+
+/// The beat effects a clip takes into the export, with the size of the picture they work on.
+fn beat_fx_of(
+    c: &crate::project::TimelineClip,
+    asset: &crate::project::MediaAsset,
+    video: bool,
+    warnings: &mut Vec<String>,
+) -> Option<(BeatFx, u32, u32)> {
+    let fx = c.beat_fx.as_ref()?;
+    if !video || asset.text.is_some() || asset.media_type == MediaType::Image {
+        return None;
+    }
+    if !fx.effects.iter().any(|e| e.intensity > 0.0) {
+        return None;
+    }
+    let name = std::path::Path::new(&asset.path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if fx.grid_id.is_none() {
+        warnings.push(format!(
+            "\"{name}\" has beat effects but no detected beats, so they are left out. Detect beats in its Audio tab."
+        ));
+        return None;
+    }
+    if c.reversed.unwrap_or(false) {
+        warnings.push(format!(
+            "\"{name}\" plays backwards, so its beat effects are left out."
+        ));
+        return None;
+    }
+    let (Some(w), Some(h)) = (asset.width, asset.height) else {
+        warnings.push(format!(
+            "The size of \"{name}\" is unknown, so its beat effects are left out."
+        ));
+        return None;
+    };
+    let crop = c.crop.unwrap_or_default();
+    let even = |v: f64| ((v / 2.0).round() as u32).max(1) * 2;
+    Some((
+        fx.clone(),
+        even(w as f64 * (1.0 - crop.left - crop.right)),
+        even(h as f64 * (1.0 - crop.top - crop.bottom)),
+    ))
 }
 
 fn color(hex: &str) -> String {
@@ -527,6 +659,21 @@ pub fn build_filter_graph(plan: &ExportPlan) -> FilterGraph {
             // colour: the one baked table, on the picture itself (so a blurred copy of it is graded too)
             let source = match &clip.lut {
                 Some(lut) => format!("{source},lut3d=file={}", filter_path(lut)),
+                None => source,
+            };
+            // beat effects: after crop and colour, before fit, scale and position (see `beatfx.rs`)
+            let source = match &clip.beat {
+                Some(b) => format!(
+                    "{source}{}",
+                    beatfx::filter(
+                        &b.pulses,
+                        &b.first,
+                        b.width,
+                        b.height,
+                        &i.to_string(),
+                        &filter_path(&b.commands)
+                    )
+                ),
                 None => source,
             };
             let cover = format!("scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}");
@@ -796,8 +943,14 @@ pub fn build_filter_graph(plan: &ExportPlan) -> FilterGraph {
         }
         // clean-up works on the sound as recorded, before speed changes its pitch
         let clean = clip.clean.as_ref().map(clean_filters).unwrap_or_default();
+        // a style (pitch, bass, reverb) comes after the speed change and before volume and fades
+        let style = clip
+            .style
+            .as_ref()
+            .map(audiostyle::filters)
+            .unwrap_or_default();
         parts.push(format!(
-            "[{i}:a]aresample={AUDIO_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,{clean}{tempo}\
+            "[{i}:a]aresample={AUDIO_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,{clean}{tempo}{style}\
              volume={vol:.4},asetpts=PTS-STARTPTS,{fades}adelay={ms}|{ms}{end}",
             vol = clip.volume,
             end = match (ducking, clip.duck > 0.0) {
@@ -862,7 +1015,7 @@ mod tests {
 
     pub fn project(assets: serde_json::Value, tracks: serde_json::Value) -> Project {
         serde_json::from_value(json!({
-            "id": "p", "name": "t", "schemaVersion": 8,
+            "id": "p", "name": "t", "schemaVersion": 10,
             "createdAt": "2026-01-01T00:00:00.000Z", "modifiedAt": "2026-01-01T00:00:00.000Z",
             "settings": {"width": 1280, "height": 720, "fps": 30, "backgroundColor": "#102030"},
             "assets": assets, "tracks": tracks
@@ -1670,6 +1823,37 @@ mod tests {
                 "{speed}: {chain:?}"
             );
         }
+    }
+
+    #[test]
+    fn an_audio_style_goes_after_the_speed_and_before_volume_and_neutral_ones_are_left_out() {
+        use crate::project::{AudioStyle, AudioStylePreset};
+        let mut p = sample();
+        let style = |pitch, reverb, bass| AudioStyle {
+            preset: AudioStylePreset::Custom,
+            pitch,
+            reverb,
+            bass,
+            base_speed: None,
+            base_keep_pitch: None,
+        };
+        p.tracks[0].clips[0].speed = Some(2.0);
+        p.tracks[0].clips[0].audio_style = Some(style(125.0, 0.0, 6.0));
+        let plan = build_plan(&p, &opts(), &sample_facts()).unwrap();
+        assert!(plan.clips[0].style.is_some());
+        let g = build_filter_graph(&plan).graph;
+        assert!(
+            g.contains("atempo=2.000000,asetrate=60000,aresample=48000,atempo=0.800000,bass=g=6.00:f=110:w=0.6,alimiter=limit=0.95:level=disabled,volume="),
+            "{g}"
+        );
+        // a style that changes nothing leaves the graph as it was
+        p.tracks[0].clips[0].audio_style = Some(style(100.0, 0.0, 0.0));
+        let plan = build_plan(&p, &opts(), &sample_facts()).unwrap();
+        assert!(plan.clips[0].style.is_none());
+        assert!(!build_filter_graph(&plan).graph.contains("alimiter"));
+        // out-of-range values are refused by the project check
+        p.tracks[0].clips[0].audio_style = Some(style(300.0, 0.0, 0.0));
+        assert!(build_plan(&p, &opts(), &sample_facts()).is_err());
     }
 
     #[test]

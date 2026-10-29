@@ -34,6 +34,7 @@ pub fn run() {
         .manage(commands::export::BatchFolder::default())
         .manage(commands::drop::DropState::default())
         .manage(commands::ai::AiJob::default())
+        .manage(commands::beats::BeatJob::default())
         .manage(commands::transcript::TranscriptGrants::default())
         .manage(commands::recent::RecentProjects::default())
         .setup(|app| {
@@ -91,6 +92,9 @@ pub fn run() {
             commands::ai::whisper_models,
             commands::ai::download_whisper_model,
             commands::ai::cancel_ai_job,
+            commands::beats::detect_beats,
+            commands::beats::cancel_beat_job,
+            commands::beats::beat_grid,
             commands::ai::delete_whisper_model,
             commands::ai::transcribe_media,
             commands::clipper::find_clips_in_media,

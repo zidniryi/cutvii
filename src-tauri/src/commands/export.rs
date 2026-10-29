@@ -41,6 +41,7 @@ pub async fn export_project(
     job: State<'_, ExportJob>,
     project: Project,
     options: ExportOptions,
+    reduce_flashing: Option<bool>,
 ) -> AppResult<Option<ExportReport>> {
     let cancel = Arc::new(AtomicBool::new(false));
     {
@@ -52,7 +53,14 @@ pub async fn export_project(
         }
         *slot = Some(Arc::clone(&cancel));
     }
-    let result = run(&app, project, options, cancel).await;
+    let result = run(
+        &app,
+        project,
+        options,
+        reduce_flashing.unwrap_or(true),
+        cancel,
+    )
+    .await;
     if let Ok(Some(report)) = &result {
         *app.state::<LastExport>().0.lock().unwrap() = Some(PathBuf::from(&report.path));
     }
@@ -64,6 +72,7 @@ async fn run(
     app: &AppHandle,
     project: Project,
     options: ExportOptions,
+    reduce_flashing: bool,
     cancel: Arc<AtomicBool>,
 ) -> AppResult<Option<ExportReport>> {
     let backend = Arc::new(FfmpegBackend::locate()?);
@@ -85,6 +94,7 @@ async fn run(
     };
     let (mut plan, name, format) = plan;
     plan.bake_user_luts(&crate::commands::clip_tools::cubes_dir(app)?)?;
+    plan.resolve_beat_fx(&crate::commands::beats::beats_dir(app)?, reduce_flashing)?;
 
     let output: Option<PathBuf> = {
         let app = app.clone();
@@ -231,6 +241,7 @@ pub async fn export_clips(
     chosen: State<'_, BatchFolder>,
     items: Vec<BatchItem>,
     options: ExportOptions,
+    reduce_flashing: Option<bool>,
 ) -> AppResult<Option<BatchReport>> {
     if items.is_empty() || items.len() > MAX_BATCH {
         return Err(AppError::InvalidInput(format!(
@@ -253,7 +264,15 @@ pub async fn export_clips(
         }
         *slot = Some(Arc::clone(&cancel));
     }
-    let result = run_batch(&app, items, options, folder, cancel).await;
+    let result = run_batch(
+        &app,
+        items,
+        options,
+        reduce_flashing.unwrap_or(true),
+        folder,
+        cancel,
+    )
+    .await;
     if let Ok(Some(report)) = &result
         && let Some(last) = report.files.iter().rev().find_map(|f| f.report.as_ref())
     {
@@ -267,6 +286,7 @@ async fn run_batch(
     app: &AppHandle,
     items: Vec<BatchItem>,
     options: ExportOptions,
+    reduce_flashing: bool,
     folder: PathBuf,
     cancel: Arc<AtomicBool>,
 ) -> AppResult<Option<BatchReport>> {
@@ -293,6 +313,7 @@ async fn run_batch(
     let cubes = crate::commands::clip_tools::cubes_dir(app)?;
     for (_, plan) in planned.iter_mut() {
         plan.bake_user_luts(&cubes)?;
+        plan.resolve_beat_fx(&crate::commands::beats::beats_dir(app)?, reduce_flashing)?;
     }
 
     if !folder.is_dir() {

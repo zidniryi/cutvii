@@ -1,7 +1,7 @@
 import type { Project, TimelineClip } from "@/project/model";
 import { clipDuration, clipEnd } from "./clips";
 
-export type SnapKind = "zero" | "playhead" | "clip-start" | "clip-end";
+export type SnapKind = "zero" | "playhead" | "clip-start" | "clip-end" | "beat";
 
 export interface SnapTarget {
   time: number;
@@ -14,6 +14,8 @@ export interface SnapOptions {
   threshold: number;
   /** Clip being dragged; its own edges are not targets. */
   excludeClipId?: string;
+  /** Beats on the timeline (see `projectBeatTimes`) that also attract; absent means "Snap to beats" is off. */
+  beats?: readonly number[];
 }
 
 export interface SnapResult {
@@ -26,7 +28,7 @@ export const quantizeToFrame = (time: number, fps: number) => Math.round(time * 
 
 export function snapTargets(
   project: Project,
-  opts: Pick<SnapOptions, "playhead" | "excludeClipId">,
+  opts: Pick<SnapOptions, "playhead" | "excludeClipId" | "beats">,
 ): SnapTarget[] {
   const targets: SnapTarget[] = [
     { time: 0, kind: "zero" },
@@ -38,6 +40,7 @@ export function snapTargets(
       targets.push({ time: c.timelineStart, kind: "clip-start" }, { time: clipEnd(c), kind: "clip-end" });
     }
   }
+  for (const time of opts.beats ?? []) targets.push({ time, kind: "beat" });
   return targets;
 }
 

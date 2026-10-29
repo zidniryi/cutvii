@@ -64,7 +64,7 @@ const draws = () => vi.mocked(invoke).mock.calls.filter((c) => c[0] === "render_
 
 describe("text in the project file", () => {
   it("is schema version 8: an image asset may carry text, nothing else may", () => {
-    expect(SCHEMA_VERSION).toBe(8);
+    expect(SCHEMA_VERSION).toBe(10);
     const p = withText(2);
     expectValid(p);
     expect(p.assets.at(-1)).toMatchObject({
