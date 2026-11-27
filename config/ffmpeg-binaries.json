@@ -1,6 +1,6 @@
 {
   "version": "9.0.2",
-  "note": "GPL builds of FFmpeg 9.0.2, pinned by SHA-256. The installers ship ffmpeg and ffprobe from these archives (see docs/licensing.md). To update: change the URLs and hashes, then run `pnpm ffmpeg:fetch`.",
+  "note": "GPL builds of FFmpeg 9.0.2, pinned by SHA-256. The installers ship ffmpeg and ffprobe from these archives (see docs/licensing.md). To update: change the URLs and hashes, then run `pnpm ffmpeg:fetch`. BtbN deletes daily autobuilds after about two weeks but keeps the last build of each month: pin Linux / Windows to a month-end tag (autobuild-YYYY-MM-(30|31)-…).",
   "targets": {
     "macos-arm64": [
       {
@@ -24,14 +24,14 @@
     ],
     "linux-x64": [
       {
-        "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-22-13-06/ffmpeg-n9.0.2-33-g4cf298e66a-linux64-gpl-9.0.tar.xz",
-        "sha256": "1cb0a72cf393a1fdb661cbbbd0cfe89dc8b197bb21e21473bbde505bb4f2a2a7"
+        "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-31-12-59/ffmpeg-n9.0.2-39-g7adfbe40dc-linux64-gpl-9.0.tar.xz",
+        "sha256": "73e29a56974ae5a651133a04584c7483b21afe941e17dc91d79814a758b608d3"
       }
     ],
     "windows-x64": [
       {
-        "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-22-13-06/ffmpeg-n9.0.2-33-g4cf298e66a-win64-gpl-9.0.zip",
-        "sha256": "5a8898e31f2c452062d1f1be475befd8ffba04db11e9f8251da3d10d9a1ae2e5"
+        "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-31-12-59/ffmpeg-n9.0.2-39-g7adfbe40dc-win64-gpl-9.0.zip",
+        "sha256": "693f3e224bc184b40524a62ca47526cfebaf2504414021b92fe75f677ad868b9"
       }
     ]
   }
