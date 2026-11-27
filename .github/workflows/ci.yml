@@ -13,6 +13,12 @@ jobs:
   check:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    env:
+      # whisper.cpp (ggml) defaults to GGML_NATIVE=ON, i.e. -march=native / /arch:AVX512 for the CI machine's CPU.
+      # A Windows build made on an AVX-512 runner crashed on a Ryzen 5600H (0xc000001d, illegal instruction).
+      # Build for a portable x86-64 baseline instead (SSE4.2 + AVX + AVX2 + FMA + F16C + BMI2).
+      # macOS stays native: Apple Silicon runners match every Apple Silicon Mac closely enough, and it was never reported.
+      GGML_NATIVE: ${{ startsWith(matrix.os, 'macos') && 'ON' || 'OFF' }}
     strategy:
       fail-fast: false
       matrix:
@@ -38,6 +44,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          # new key: drop caches whose whisper.cpp was compiled with GGML_NATIVE=ON
+          key: ggml-portable-cpu
 
       # Tauri's Linux system dependencies
       - name: Install system packages (Linux)
